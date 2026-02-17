@@ -65,6 +65,7 @@ type GeneratedVersionResult = {
   script: string;
   plans: SlidePlan[];
   images: string[];
+  caption?: string | null;
 };
 
 type RecreationStep = "prepare" | "script" | "complete";
@@ -83,6 +84,7 @@ type RecreatedHistoryItem = {
   id: string;
   script: string | null;
   generated_media_urls: string[];
+  caption?: string | null;
   status: "draft" | "generating" | "completed" | "failed";
   created_at: string;
   updated_at: string;
@@ -160,6 +162,8 @@ export function PostDetailView({ postId }: PostDetailViewProps) {
   const [isHistoryLoading, setIsHistoryLoading] = useState(false);
   const [downloadingSetIds, setDownloadingSetIds] = useState<Record<string, boolean>>({});
   const [downloadingImageIds, setDownloadingImageIds] = useState<Record<string, boolean>>({});
+  const [captionLoadingBySetId, setCaptionLoadingBySetId] = useState<Record<string, boolean>>({});
+  const [captionsBySetId, setCaptionsBySetId] = useState<Record<string, string>>({});
 
   const referenceImages = useMemo(() => {
     if (selectedPost?.media_urls?.length) return selectedPost.media_urls;
@@ -246,6 +250,66 @@ export function PostDetailView({ postId }: PostDetailViewProps) {
     }
   };
 
+  const handleGenerateCaption = async ({
+    setId,
+    script,
+    slidePlans,
+    recreatedPostId: captionRecreatedPostId,
+  }: {
+    setId: string;
+    script: string;
+    slidePlans?: SlidePlan[];
+    recreatedPostId?: string | null;
+  }) => {
+    if (!activeCollection) return;
+
+    setCaptionLoadingBySetId((prev) => ({ ...prev, [setId]: true }));
+    setError("");
+
+    try {
+      const response = await fetch("/api/recreate/caption", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          collectionId: activeCollection.id,
+          postId,
+          script,
+          slidePlans,
+          recreatedPostId: captionRecreatedPostId,
+        }),
+      });
+
+      const data = await response.json();
+      if (!response.ok) {
+        throw new Error(data.error || "Failed to generate caption");
+      }
+
+      const caption = typeof data.caption === "string" ? data.caption.trim() : "";
+      if (!caption) {
+        throw new Error("Caption generation failed");
+      }
+
+      setCaptionsBySetId((prev) => ({ ...prev, [setId]: caption }));
+
+      if (captionRecreatedPostId) {
+        setHistory((prev) =>
+          prev.map((item) =>
+            item.id === captionRecreatedPostId
+              ? {
+                  ...item,
+                  caption,
+                }
+              : item
+          )
+        );
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to generate caption");
+    } finally {
+      setCaptionLoadingBySetId((prev) => ({ ...prev, [setId]: false }));
+    }
+  };
+
   const loadHistory = useCallback(async () => {
     if (!activeCollection) return;
 
@@ -275,6 +339,8 @@ export function PostDetailView({ postId }: PostDetailViewProps) {
     setNicheState(null);
     setError("");
     setRecreatedPostId(null);
+    setCaptionsBySetId({});
+    setCaptionLoadingBySetId({});
 
     if (selectedPost.media_urls?.length) {
       setSelectedReferenceImages(selectedPost.media_urls);
@@ -444,6 +510,8 @@ export function PostDetailView({ postId }: PostDetailViewProps) {
     setError("");
     setRecreatedPostId(null);
     setSelectedReferenceImages(referenceImages);
+    setCaptionsBySetId({});
+    setCaptionLoadingBySetId({});
   };
 
   const isRecreationBlocked = Boolean(nicheState && !nicheState.canRecreate);
@@ -740,57 +808,98 @@ export function PostDetailView({ postId }: PostDetailViewProps) {
                   <CardDescription>Generated image sets from this active draft session</CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-6">
-                  {generatedVersions.map((result) => (
-                    <div key={result.id} className="space-y-3 rounded-xl border border-slate-200 bg-slate-50 p-4">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <Badge variant={result.usesAppContext ? "success" : "default"}>{result.label}</Badge>
-                        <Badge variant="default">{result.images.length} images</Badge>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          className="ml-auto"
-                          disabled={result.images.length === 0}
-                          isLoading={Boolean(downloadingSetIds[`current-${result.id}`])}
-                          onClick={() => downloadImageSet(`current-${result.id}`, `${result.id}-current`, result.images)}
-                        >
-                          <Download className="mr-2 h-4 w-4" />
-                          Download All
-                        </Button>
-                      </div>
-                      <div className="grid grid-cols-2 gap-3 md:grid-cols-3">
-                        {result.images.map((url, index) => {
-                          const imageId = `current-${result.id}-${index}`;
+                  {generatedVersions.map((result) => {
+                    const captionKey = `current-${result.id}`;
+                    const caption = captionsBySetId[captionKey] || result.caption || "";
+                    const hasCaption = Boolean(caption.trim());
 
-                          return (
-                            <div
-                              key={`${result.id}-${index}`}
-                              className="overflow-hidden rounded-lg border border-slate-200 bg-white"
+                    return (
+                      <div key={result.id} className="space-y-3 rounded-xl border border-slate-200 bg-slate-50 p-4">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <Badge variant={result.usesAppContext ? "success" : "default"}>{result.label}</Badge>
+                          <Badge variant="default">{result.images.length} images</Badge>
+                          <div className="ml-auto flex flex-wrap items-center gap-2">
+                            {hasCaption ? (
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => navigator.clipboard.writeText(caption)}
+                              >
+                                <Copy className="mr-2 h-4 w-4" />
+                                Copy Caption
+                              </Button>
+                            ) : (
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                isLoading={Boolean(captionLoadingBySetId[captionKey])}
+                                onClick={() =>
+                                  handleGenerateCaption({
+                                    setId: captionKey,
+                                    script: result.script,
+                                    slidePlans: result.plans,
+                                  })
+                                }
+                              >
+                                <Sparkles className="mr-2 h-4 w-4" />
+                                Generate Caption
+                              </Button>
+                            )}
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              disabled={result.images.length === 0}
+                              isLoading={Boolean(downloadingSetIds[`current-${result.id}`])}
+                              onClick={() =>
+                                downloadImageSet(`current-${result.id}`, `${result.id}-current`, result.images)
+                              }
                             >
-                              <img
-                                src={url}
-                                alt={`${result.label} slide ${index + 1}`}
-                                className="aspect-square w-full object-cover"
-                              />
-                              <div className="border-t border-slate-200 bg-white p-2">
-                                <Button
-                                  variant="ghost"
-                                  size="sm"
-                                  className="w-full justify-center"
-                                  isLoading={Boolean(downloadingImageIds[imageId])}
-                                  onClick={() =>
-                                    downloadSingleImage(imageId, `${result.id}-current`, url, index)
-                                  }
-                                >
-                                  <Download className="mr-2 h-4 w-4" />
-                                  Download
-                                </Button>
+                              <Download className="mr-2 h-4 w-4" />
+                              Download All
+                            </Button>
+                          </div>
+                        </div>
+                        <div className="grid grid-cols-2 gap-3 md:grid-cols-3">
+                          {result.images.map((url, index) => {
+                            const imageId = `current-${result.id}-${index}`;
+
+                            return (
+                              <div
+                                key={`${result.id}-${index}`}
+                                className="overflow-hidden rounded-lg border border-slate-200 bg-white"
+                              >
+                                <img
+                                  src={url}
+                                  alt={`${result.label} slide ${index + 1}`}
+                                  className="aspect-square w-full object-cover"
+                                />
+                                <div className="border-t border-slate-200 bg-white p-2">
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    className="w-full justify-center"
+                                    isLoading={Boolean(downloadingImageIds[imageId])}
+                                    onClick={() =>
+                                      downloadSingleImage(imageId, `${result.id}-current`, url, index)
+                                    }
+                                  >
+                                    <Download className="mr-2 h-4 w-4" />
+                                    Download
+                                  </Button>
+                                </div>
                               </div>
-                            </div>
-                          );
-                        })}
+                            );
+                          })}
+                        </div>
+                        {hasCaption ? (
+                          <div className="rounded-lg border border-slate-200 bg-white p-3">
+                            <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Caption</p>
+                            <p className="mt-1 whitespace-pre-wrap text-sm text-slate-700">{caption}</p>
+                          </div>
+                        ) : null}
                       </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </CardContent>
               </Card>
             </motion.div>
@@ -808,64 +917,107 @@ export function PostDetailView({ postId }: PostDetailViewProps) {
                 <p className="text-sm text-slate-500">No recreated posts yet. Generate scripts and images to create one.</p>
               ) : (
                 <div className="space-y-4">
-                  {history.map((item) => (
-                    <div key={item.id} className="rounded-xl border border-slate-200 bg-slate-50 p-4">
-                      <div className="mb-3 flex flex-wrap items-center gap-2">
-                        <Badge variant={statusBadgeVariant(item.status)}>{item.status}</Badge>
-                        <Badge variant="default">{item.generated_media_urls?.length || 0} images</Badge>
-                        <span className="text-xs text-slate-500">Created {formatDate(item.created_at)}</span>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          className="ml-auto"
-                          disabled={!item.generated_media_urls?.length}
-                          isLoading={Boolean(downloadingSetIds[`history-${item.id}`])}
-                          onClick={() =>
-                            downloadImageSet(`history-${item.id}`, `recreated-${item.id}`, item.generated_media_urls || [])
-                          }
-                        >
-                          <Download className="mr-2 h-4 w-4" />
-                          Download All
-                        </Button>
-                      </div>
-                      {Array.isArray(item.generated_media_urls) && item.generated_media_urls.length > 0 ? (
-                        <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
-                          {item.generated_media_urls.map((url, index) => {
-                            const imageId = `history-${item.id}-${index}`;
+                  {history.map((item) => {
+                    const captionKey = `history-${item.id}`;
+                    const caption = item.caption || captionsBySetId[captionKey] || "";
+                    const hasCaption = Boolean(caption.trim());
 
-                            return (
-                              <div
-                                key={`${item.id}-${index}`}
-                                className="overflow-hidden rounded-lg border border-slate-200 bg-white"
+                    return (
+                      <div key={item.id} className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+                        <div className="mb-3 flex flex-wrap items-center gap-2">
+                          <Badge variant={statusBadgeVariant(item.status)}>{item.status}</Badge>
+                          <Badge variant="default">{item.generated_media_urls?.length || 0} images</Badge>
+                          <span className="text-xs text-slate-500">Created {formatDate(item.created_at)}</span>
+                          <div className="ml-auto flex flex-wrap items-center gap-2">
+                            {hasCaption ? (
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => navigator.clipboard.writeText(caption)}
                               >
-                                <img
-                                  src={url}
-                                  alt={`Recreated slide ${index + 1}`}
-                                  className="aspect-square w-full object-cover"
-                                />
-                                <div className="border-t border-slate-200 bg-white p-2">
-                                  <Button
-                                    variant="ghost"
-                                    size="sm"
-                                    className="w-full justify-center"
-                                    isLoading={Boolean(downloadingImageIds[imageId])}
-                                    onClick={() =>
-                                      downloadSingleImage(imageId, `recreated-${item.id}`, url, index)
-                                    }
-                                  >
-                                    <Download className="mr-2 h-4 w-4" />
-                                    Download
-                                  </Button>
-                                </div>
-                              </div>
-                            );
-                          })}
+                                <Copy className="mr-2 h-4 w-4" />
+                                Copy Caption
+                              </Button>
+                            ) : (
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                isLoading={Boolean(captionLoadingBySetId[captionKey])}
+                                onClick={() =>
+                                  handleGenerateCaption({
+                                    setId: captionKey,
+                                    script: item.script || "",
+                                    recreatedPostId: item.id,
+                                  })
+                                }
+                              >
+                                <Sparkles className="mr-2 h-4 w-4" />
+                                Generate Caption
+                              </Button>
+                            )}
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              disabled={!item.generated_media_urls?.length}
+                              isLoading={Boolean(downloadingSetIds[`history-${item.id}`])}
+                              onClick={() =>
+                                downloadImageSet(
+                                  `history-${item.id}`,
+                                  `recreated-${item.id}`,
+                                  item.generated_media_urls || []
+                                )
+                              }
+                            >
+                              <Download className="mr-2 h-4 w-4" />
+                              Download All
+                            </Button>
+                          </div>
                         </div>
-                      ) : (
-                        <p className="text-xs text-slate-500">No images generated for this recreation yet.</p>
-                      )}
-                    </div>
-                  ))}
+                        {Array.isArray(item.generated_media_urls) && item.generated_media_urls.length > 0 ? (
+                          <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
+                            {item.generated_media_urls.map((url, index) => {
+                              const imageId = `history-${item.id}-${index}`;
+
+                              return (
+                                <div
+                                  key={`${item.id}-${index}`}
+                                  className="overflow-hidden rounded-lg border border-slate-200 bg-white"
+                                >
+                                  <img
+                                    src={url}
+                                    alt={`Recreated slide ${index + 1}`}
+                                    className="aspect-square w-full object-cover"
+                                  />
+                                  <div className="border-t border-slate-200 bg-white p-2">
+                                    <Button
+                                      variant="ghost"
+                                      size="sm"
+                                      className="w-full justify-center"
+                                      isLoading={Boolean(downloadingImageIds[imageId])}
+                                      onClick={() =>
+                                        downloadSingleImage(imageId, `recreated-${item.id}`, url, index)
+                                      }
+                                    >
+                                      <Download className="mr-2 h-4 w-4" />
+                                      Download
+                                    </Button>
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        ) : (
+                          <p className="text-xs text-slate-500">No images generated for this recreation yet.</p>
+                        )}
+                        {hasCaption ? (
+                          <div className="mt-3 rounded-lg border border-slate-200 bg-white p-3">
+                            <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Caption</p>
+                            <p className="mt-1 whitespace-pre-wrap text-sm text-slate-700">{caption}</p>
+                          </div>
+                        ) : null}
+                      </div>
+                    );
+                  })}
                 </div>
               )}
             </CardContent>

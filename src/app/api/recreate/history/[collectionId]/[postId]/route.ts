@@ -10,7 +10,7 @@ export async function GET(
 
     const { data, error } = await supabase
       .from("recreated_posts")
-      .select("id, script, generated_media_urls, status, created_at, updated_at")
+      .select("id, script, generated_media_urls, caption, status, created_at, updated_at")
       .eq("collection_id", collectionId)
       .eq("original_post_id", postId)
       .eq("status", "completed")

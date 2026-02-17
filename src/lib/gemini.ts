@@ -475,3 +475,72 @@ No markdown. JSON only.`;
 
   return parseSlidePlans(result.response.text(), slideCount);
 }
+
+function cleanCaption(text: string): string {
+  let output = text.trim();
+  if (!output) return output;
+
+  if (output.startsWith("```") && output.endsWith("```")) {
+    output = output.replace(/^```\w*\s*/i, "").replace(/```$/, "").trim();
+  }
+
+  if (
+    (output.startsWith("\"") && output.endsWith("\"")) ||
+    (output.startsWith("'") && output.endsWith("'"))
+  ) {
+    output = output.slice(1, -1).trim();
+  }
+
+  return output;
+}
+
+export async function generatePostCaption({
+  script,
+  appName,
+  appContext,
+  platform,
+  slideSummaries = [],
+  originalTitle,
+  originalDescription,
+}: {
+  script: string;
+  appName: string;
+  appContext: string;
+  platform: string;
+  slideSummaries?: string[];
+  originalTitle?: string | null;
+  originalDescription?: string | null;
+}): Promise<string> {
+  const model = genAI.getGenerativeModel({ model: "gemini-3-pro-preview" });
+
+  const slidesBlock = slideSummaries.length > 0 ? `SLIDES:\n- ${slideSummaries.join("\n- ")}` : "";
+  const originalBlock = originalTitle || originalDescription
+    ? `ORIGINAL POST:\n- Title: ${originalTitle || "N/A"}\n- Description: ${originalDescription || "N/A"}`
+    : "";
+
+  const prompt = `You are a social media copywriter.
+
+APP:
+- App Name: ${appName}
+- App Context: ${appContext || "N/A"}
+
+PLATFORM: ${platform}
+
+${originalBlock}
+
+SCRIPT:
+${script}
+
+${slidesBlock}
+
+TASK:
+- Write a caption for a carousel post based on the script.
+- Keep it concise and specific to the content.
+- 2-4 sentences total.
+- If the script implies app context, mention ${appName} once and include a soft call-to-action.
+- End with 3-6 relevant hashtags on a new line.
+- Output plain text only. No quotes. No markdown.`;
+
+  const result = await model.generateContent(prompt);
+  return cleanCaption(result.response.text());
+}

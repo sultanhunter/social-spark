@@ -58,6 +58,7 @@ export interface RecreatedPost {
   collection_id: string;
   script: string;
   generated_media_urls: string[];
+  caption?: string | null;
   status: "draft" | "generating" | "completed" | "failed";
   created_at: string;
   updated_at: string;
@@ -99,6 +100,7 @@ CREATE TABLE IF NOT EXISTS recreated_posts (
   collection_id UUID REFERENCES collections(id) ON DELETE CASCADE,
   script TEXT,
   generated_media_urls TEXT[] DEFAULT '{}',
+  caption TEXT,
   status VARCHAR(50) DEFAULT 'draft',
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
   updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
