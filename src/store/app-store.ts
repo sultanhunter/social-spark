@@ -22,6 +22,10 @@ interface AppState {
   // UI State
   currentStep: "storage" | "recreation";
   setCurrentStep: (step: "storage" | "recreation") => void;
+  isCollectionsLoading: boolean;
+  setCollectionsLoading: (loading: boolean) => void;
+  isPostsLoading: boolean;
+  setPostsLoading: (loading: boolean) => void;
   isSidebarOpen: boolean;
   toggleSidebar: () => void;
   
@@ -30,8 +34,6 @@ interface AppState {
   setAddCollectionOpen: (open: boolean) => void;
   isAddPostOpen: boolean;
   setAddPostOpen: (open: boolean) => void;
-  isConnectRepoOpen: boolean;
-  setConnectRepoOpen: (open: boolean) => void;
 }
 
 export const useAppStore = create<AppState>((set) => ({
@@ -65,6 +67,10 @@ export const useAppStore = create<AppState>((set) => ({
   // UI State
   currentStep: "storage",
   setCurrentStep: (step) => set({ currentStep: step }),
+  isCollectionsLoading: false,
+  setCollectionsLoading: (loading) => set({ isCollectionsLoading: loading }),
+  isPostsLoading: false,
+  setPostsLoading: (loading) => set({ isPostsLoading: loading }),
   isSidebarOpen: true,
   toggleSidebar: () => set((state) => ({ isSidebarOpen: !state.isSidebarOpen })),
 
@@ -73,6 +79,4 @@ export const useAppStore = create<AppState>((set) => ({
   setAddCollectionOpen: (open) => set({ isAddCollectionOpen: open }),
   isAddPostOpen: false,
   setAddPostOpen: (open) => set({ isAddPostOpen: open }),
-  isConnectRepoOpen: false,
-  setConnectRepoOpen: (open) => set({ isConnectRepoOpen: open }),
 }));

@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Link, Instagram, Youtube, Twitter, Plus, X, Image } from "lucide-react";
+import { Link, Instagram, Youtube, Twitter, Plus, X, Image as ImageIcon } from "lucide-react";
 import { useAppStore } from "@/store/app-store";
 import {
   Dialog,
@@ -107,7 +107,7 @@ export function AddPostModal() {
         <div className="p-6 space-y-5">
           {/* URL Input */}
           <div className="space-y-2">
-            <label className="text-sm font-medium text-zinc-300">
+            <label className="text-sm font-medium text-slate-700">
               Post URL
             </label>
             <Input
@@ -120,7 +120,7 @@ export function AddPostModal() {
               }}
             />
             {platform && platform !== "unknown" && (
-              <div className="flex items-center gap-2 text-xs text-zinc-400">
+              <div className="flex items-center gap-2 text-xs text-slate-500">
                 <PlatformIcon platform={platform} />
                 <span>Detected: {platform.charAt(0).toUpperCase() + platform.slice(1)}</span>
               </div>
@@ -129,8 +129,8 @@ export function AddPostModal() {
 
           {/* Title */}
           <div className="space-y-2">
-            <label className="text-sm font-medium text-zinc-300">
-              Title <span className="text-zinc-500">(optional)</span>
+            <label className="text-sm font-medium text-slate-700">
+              Title <span className="text-slate-400">(optional)</span>
             </label>
             <Input
               placeholder="Give this post a name..."
@@ -141,8 +141,8 @@ export function AddPostModal() {
 
           {/* Description */}
           <div className="space-y-2">
-            <label className="text-sm font-medium text-zinc-300">
-              Description <span className="text-zinc-500">(optional)</span>
+            <label className="text-sm font-medium text-slate-700">
+              Description <span className="text-slate-400">(optional)</span>
             </label>
             <Input
               placeholder="Describe what makes this post interesting..."
@@ -153,11 +153,11 @@ export function AddPostModal() {
 
           {/* Manual Image URLs */}
           <div className="space-y-2">
-            <label className="text-sm font-medium text-zinc-300 flex items-center gap-2">
-              <Image className="w-4 h-4" />
-              Image URLs <span className="text-zinc-500">(for Instagram/TikTok slides)</span>
+            <label className="flex items-center gap-2 text-sm font-medium text-slate-700">
+              <ImageIcon className="w-4 h-4" />
+              Image URLs <span className="text-slate-400">(for Instagram/TikTok slides)</span>
             </label>
-            <p className="text-xs text-zinc-500">
+            <p className="text-xs text-slate-500">
               Instagram blocks auto-download. Right-click images → Copy image address and paste here.
             </p>
             <div className="flex gap-2">
@@ -174,13 +174,13 @@ export function AddPostModal() {
             {imageUrls.length > 0 && (
               <div className="space-y-2 mt-2">
                 {imageUrls.map((imgUrl, index) => (
-                  <div key={index} className="flex items-center gap-2 bg-zinc-800/50 rounded-lg px-3 py-2">
-                    <span className="text-xs text-zinc-400 truncate flex-1">
+                  <div key={index} className="flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
+                    <span className="flex-1 truncate text-xs text-slate-600">
                       {index + 1}. {imgUrl.substring(0, 50)}...
                     </span>
                     <button
                       onClick={() => removeImageUrl(index)}
-                      className="text-zinc-500 hover:text-red-400"
+                      className="text-slate-400 hover:text-rose-600"
                     >
                       <X className="w-4 h-4" />
                     </button>
@@ -192,7 +192,7 @@ export function AddPostModal() {
 
           {/* Post Type */}
           <div className="space-y-2">
-            <label className="text-sm font-medium text-zinc-300">
+            <label className="text-sm font-medium text-slate-700">
               Post Type
             </label>
             <div className="grid grid-cols-2 gap-3">
@@ -213,7 +213,7 @@ export function AddPostModal() {
 
           {/* Error */}
           {error && (
-            <p className="text-sm text-red-400 bg-red-500/10 border border-red-500/20 rounded-xl px-4 py-2.5">
+            <p className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-2.5 text-sm text-rose-700">
               {error}
             </p>
           )}
@@ -249,14 +249,14 @@ function TypeOption({
       onClick={onClick}
       className={`p-4 rounded-xl border text-left transition-all ${
         isActive
-          ? "border-blue-500/50 bg-blue-500/10 shadow-lg shadow-blue-500/5"
-          : "border-zinc-800 bg-zinc-900/50 hover:border-zinc-700"
+          ? "border-rose-300 bg-rose-50"
+          : "border-slate-200 bg-white hover:border-slate-300"
       }`}
     >
-      <p className={`text-sm font-medium ${isActive ? "text-blue-400" : "text-zinc-300"}`}>
+      <p className={`text-sm font-medium ${isActive ? "text-rose-700" : "text-slate-700"}`}>
         {label}
       </p>
-      <p className="text-xs text-zinc-500 mt-0.5">{description}</p>
+      <p className="mt-0.5 text-xs text-slate-500">{description}</p>
     </button>
   );
 }

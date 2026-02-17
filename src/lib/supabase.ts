@@ -31,8 +31,8 @@ export interface Collection {
   name: string;
   description: string | null;
   app_name: string;
-  github_repo: string | null;
-  app_context: string | null;
+  app_description: string | null;
+  app_context?: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -41,7 +41,7 @@ export interface SavedPost {
   id: string;
   collection_id: string;
   original_url: string;
-  platform: "instagram" | "tiktok" | "youtube" | "twitter" | "unknown";
+  platform: "instagram" | "tiktok" | "threads" | "youtube" | "twitter" | "unknown";
   post_type: "image_slides" | "short_video";
   title: string | null;
   description: string | null;
@@ -70,8 +70,7 @@ CREATE TABLE IF NOT EXISTS collections (
   name VARCHAR(255) NOT NULL,
   description TEXT,
   app_name VARCHAR(255) NOT NULL,
-  github_repo VARCHAR(500),
-  app_context TEXT,
+  app_description TEXT,
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
   updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );

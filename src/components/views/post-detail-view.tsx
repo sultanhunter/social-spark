@@ -1,22 +1,24 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { motion } from "framer-motion";
 import {
   AlertCircle,
   ArrowLeft,
   CheckCircle2,
   Copy,
-  FileText,
+  Download,
+  ExternalLink,
   Image as ImageIcon,
-  Layers,
   Sparkles,
   Wand2,
 } from "lucide-react";
+import { useRouter } from "next/navigation";
 import { useAppStore } from "@/store/app-store";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { formatDate } from "@/lib/utils";
 
 type SlidePlan = {
   imagePrompt: string;
@@ -68,10 +70,23 @@ type GeneratedVersionResult = {
 type RecreationStep = "prepare" | "script" | "complete";
 
 type NicheState = {
-  isRelevant: boolean;
+  isIslamic: boolean;
+  isPregnancyOrPeriodRelated: boolean;
+  canIncorporateAppContext: boolean;
+  canReframeToIslamicAppContext: boolean;
+  canRecreate: boolean;
   confidence: number;
   reason: string;
 } | null;
+
+type RecreatedHistoryItem = {
+  id: string;
+  script: string | null;
+  generated_media_urls: string[];
+  status: "draft" | "generating" | "completed" | "failed";
+  created_at: string;
+  updated_at: string;
+};
 
 function isAdaptationMode(value: unknown): value is "app_context" | "variant_only" {
   return value === "app_context" || value === "variant_only";
@@ -90,7 +105,7 @@ function sanitizeScriptVersions(payload: unknown): ScriptVersion[] {
 
       const adaptationMode = isAdaptationMode(row.adaptationMode)
         ? row.adaptationMode
-        : (typeof row.usesAppContext === "boolean" && row.usesAppContext)
+        : typeof row.usesAppContext === "boolean" && row.usesAppContext
           ? "app_context"
           : "variant_only";
 
@@ -115,8 +130,21 @@ function toPercent(value: number): string {
   return `${Math.round(value * 100)}%`;
 }
 
-export function RecreationView() {
-  const { selectedPost, activeCollection, setSelectedPost } = useAppStore();
+function statusBadgeVariant(status: RecreatedHistoryItem["status"]): "default" | "warning" | "success" {
+  if (status === "completed") return "success";
+  if (status === "failed") return "warning";
+  return "default";
+}
+
+interface PostDetailViewProps {
+  postId: string;
+}
+
+export function PostDetailView({ postId }: PostDetailViewProps) {
+  const router = useRouter();
+  const { activeCollection, posts, isPostsLoading } = useAppStore();
+
+  const selectedPost = useMemo(() => posts.find((post) => post.id === postId) || null, [posts, postId]);
 
   const [step, setStep] = useState<RecreationStep>("prepare");
   const [scriptVersions, setScriptVersions] = useState<ScriptVersion[]>([]);
@@ -127,6 +155,10 @@ export function RecreationView() {
   const [isGeneratingScript, setIsGeneratingScript] = useState(false);
   const [isGeneratingImages, setIsGeneratingImages] = useState(false);
   const [error, setError] = useState("");
+  const [recreatedPostId, setRecreatedPostId] = useState<string | null>(null);
+  const [history, setHistory] = useState<RecreatedHistoryItem[]>([]);
+  const [isHistoryLoading, setIsHistoryLoading] = useState(false);
+  const [downloadingSetIds, setDownloadingSetIds] = useState<Record<string, boolean>>({});
 
   const referenceImages = useMemo(() => {
     if (selectedPost?.media_urls?.length) return selectedPost.media_urls;
@@ -136,17 +168,83 @@ export function RecreationView() {
 
   const activeVersion = scriptVersions.find((version) => version.id === activeVersionId) || null;
 
-  useEffect(() => {
-    if (!selectedPost) {
-      setStep("prepare");
-      setScriptVersions([]);
-      setActiveVersionId("");
-      setGeneratedVersions([]);
-      setSelectedReferenceImages([]);
-      setNicheState(null);
-      setError("");
-      return;
+  const parseFileExtension = (url: string): string => {
+    try {
+      const parsed = new URL(url);
+      const filename = parsed.pathname.split("/").pop() || "";
+      const ext = filename.includes(".") ? filename.split(".").pop() || "" : "";
+      if (/^[a-zA-Z0-9]{2,5}$/.test(ext)) return ext.toLowerCase();
+    } catch {
+      // Ignore URL parse failures
     }
+
+    return "png";
+  };
+
+  const downloadImageSet = async (setId: string, filePrefix: string, imageUrls: string[]) => {
+    if (imageUrls.length === 0) return;
+
+    setDownloadingSetIds((prev) => ({ ...prev, [setId]: true }));
+
+    try {
+      for (let index = 0; index < imageUrls.length; index += 1) {
+        const url = imageUrls[index];
+        const ext = parseFileExtension(url);
+        const filename = `${filePrefix}-slide-${index + 1}.${ext}`;
+        const proxyUrl = `/api/media/download?url=${encodeURIComponent(url)}&filename=${encodeURIComponent(filename)}`;
+
+        const response = await fetch(proxyUrl);
+        if (!response.ok) {
+          throw new Error(`Failed to download image ${index + 1}`);
+        }
+
+        const blob = await response.blob();
+        const objectUrl = URL.createObjectURL(blob);
+        const link = document.createElement("a");
+        link.href = objectUrl;
+        link.download = filename;
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        URL.revokeObjectURL(objectUrl);
+        await new Promise((resolve) => setTimeout(resolve, 120));
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to download all images");
+    } finally {
+      setDownloadingSetIds((prev) => ({ ...prev, [setId]: false }));
+    }
+  };
+
+  const loadHistory = useCallback(async () => {
+    if (!activeCollection) return;
+
+    setIsHistoryLoading(true);
+
+    try {
+      const response = await fetch(`/api/recreate/history/${activeCollection.id}/${postId}`);
+      if (!response.ok) throw new Error("Failed to fetch recreation history");
+
+      const data = await response.json();
+      setHistory(Array.isArray(data) ? (data as RecreatedHistoryItem[]) : []);
+    } catch (err) {
+      console.error("Failed to fetch recreation history:", err);
+      setHistory([]);
+    } finally {
+      setIsHistoryLoading(false);
+    }
+  }, [activeCollection, postId]);
+
+  useEffect(() => {
+    if (!selectedPost) return;
+
+    setStep("prepare");
+    setScriptVersions([]);
+    setActiveVersionId("");
+    setGeneratedVersions([]);
+    setNicheState(null);
+    setError("");
+    setRecreatedPostId(null);
 
     if (selectedPost.media_urls?.length) {
       setSelectedReferenceImages(selectedPost.media_urls);
@@ -155,12 +253,17 @@ export function RecreationView() {
     }
   }, [selectedPost]);
 
-  if (!selectedPost) {
-    return <PostSelectionView />;
-  }
+  useEffect(() => {
+    if (!activeCollection) {
+      setHistory([]);
+      return;
+    }
+
+    loadHistory();
+  }, [activeCollection, loadHistory]);
 
   const handleGenerateScript = async () => {
-    if (!activeCollection) return;
+    if (!activeCollection || !selectedPost) return;
     if (referenceImages.length > 0 && selectedReferenceImages.length === 0) {
       setError("Select at least one reference image before generating scripts.");
       return;
@@ -183,6 +286,26 @@ export function RecreationView() {
       const data = await response.json();
       if (!response.ok) {
         throw new Error(data.error || "Failed to generate script");
+      }
+
+      const canRecreate = typeof data.canRecreate === "boolean" ? data.canRecreate : Boolean(data.isIslamic);
+      setNicheState({
+        isIslamic: Boolean(data.isIslamic),
+        isPregnancyOrPeriodRelated: Boolean(data.isPregnancyOrPeriodRelated),
+        canIncorporateAppContext: Boolean(data.canIncorporateAppContext),
+        canReframeToIslamicAppContext: Boolean(data.canReframeToIslamicAppContext),
+        canRecreate,
+        confidence: typeof data.relevanceConfidence === "number" ? data.relevanceConfidence : 0,
+        reason: typeof data.relevanceReason === "string" ? data.relevanceReason : "",
+      });
+
+      if (!canRecreate) {
+        setScriptVersions([]);
+        setActiveVersionId("");
+        setGeneratedVersions([]);
+        setRecreatedPostId(null);
+        setStep("prepare");
+        return;
       }
 
       const versions = Array.isArray(data.versions)
@@ -212,12 +335,9 @@ export function RecreationView() {
       setScriptVersions(versions);
       setActiveVersionId(data.primaryVersionId || versions[0].id);
       setGeneratedVersions([]);
-      setNicheState({
-        isRelevant: Boolean(data.isAppNicheRelevant),
-        confidence: typeof data.relevanceConfidence === "number" ? data.relevanceConfidence : 0,
-        reason: typeof data.relevanceReason === "string" ? data.relevanceReason : "",
-      });
+      setRecreatedPostId(typeof data.recreatedPostId === "string" ? data.recreatedPostId : null);
       setStep("script");
+      await loadHistory();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Script generation failed");
     } finally {
@@ -226,7 +346,7 @@ export function RecreationView() {
   };
 
   const handleGenerateImages = async () => {
-    if (!activeCollection) return;
+    if (!activeCollection || !selectedPost) return;
     if (scriptVersions.length === 0) {
       setError("Generate scripts first.");
       return;
@@ -249,6 +369,7 @@ export function RecreationView() {
           collectionId: activeCollection.id,
           postId: selectedPost.id,
           appName: activeCollection.app_name,
+          recreatedPostId,
         }),
       });
 
@@ -257,9 +378,7 @@ export function RecreationView() {
         throw new Error(data.error || "Failed to generate images");
       }
 
-      const results = Array.isArray(data.versionResults)
-        ? (data.versionResults as GeneratedVersionResult[])
-        : [];
+      const results = Array.isArray(data.versionResults) ? (data.versionResults as GeneratedVersionResult[]) : [];
 
       if (results.length === 0 && Array.isArray(data.images)) {
         setGeneratedVersions([
@@ -278,6 +397,7 @@ export function RecreationView() {
       }
 
       setStep("complete");
+      await loadHistory();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Image generation failed");
     } finally {
@@ -286,29 +406,97 @@ export function RecreationView() {
   };
 
   const resetSession = () => {
-    setSelectedPost(null);
     setStep("prepare");
     setScriptVersions([]);
     setActiveVersionId("");
     setGeneratedVersions([]);
-    setSelectedReferenceImages([]);
     setNicheState(null);
     setError("");
+    setRecreatedPostId(null);
+    setSelectedReferenceImages(referenceImages);
   };
+
+  const isRecreationBlocked = Boolean(nicheState && !nicheState.canRecreate);
+
+  const generationButtonConfig =
+    step === "prepare"
+      ? {
+          label: isGeneratingScript ? "Classifying and generating scripts..." : "Step 1: Classify & Generate Scripts",
+          onClick: handleGenerateScript,
+          isLoading: isGeneratingScript,
+          icon: Wand2,
+          disabled: false,
+        }
+      : step === "script"
+        ? {
+            label: isGeneratingImages ? "Generating images..." : "Step 2: Generate All Versions",
+            onClick: handleGenerateImages,
+            isLoading: isGeneratingImages,
+            icon: Sparkles,
+            disabled: scriptVersions.length === 0,
+          }
+        : {
+            label: "Start New Draft Session",
+            onClick: resetSession,
+            isLoading: false,
+            icon: Wand2,
+            disabled: false,
+          };
+
+  const GenerationIcon = generationButtonConfig.icon;
+
+  if (!activeCollection) {
+    return (
+      <div className="flex flex-1 items-center justify-center px-6 py-10">
+        <div className="max-w-lg rounded-2xl border border-slate-200 bg-white p-8 text-center shadow-sm">
+          <h2 className="text-lg font-semibold text-slate-900">Collection not found</h2>
+          <p className="mt-2 text-sm text-slate-600">Select a collection from the sidebar to continue.</p>
+          <Button variant="outline" className="mt-5" onClick={() => router.push("/")}>Go Home</Button>
+        </div>
+      </div>
+    );
+  }
+
+  if (isPostsLoading && !selectedPost) {
+    return (
+      <div className="flex flex-1 items-center justify-center px-6 py-10">
+        <div className="rounded-xl border border-slate-200 bg-white px-5 py-3 text-sm text-slate-600 shadow-sm">
+          Loading post details...
+        </div>
+      </div>
+    );
+  }
+
+  if (!selectedPost) {
+    return (
+      <div className="flex flex-1 items-center justify-center px-6 py-10">
+        <div className="max-w-lg rounded-2xl border border-slate-200 bg-white p-8 text-center shadow-sm">
+          <h2 className="text-lg font-semibold text-slate-900">Post not found in this collection</h2>
+          <p className="mt-2 text-sm text-slate-600">
+            The post may have been removed, or the URL is no longer valid.
+          </p>
+          <Button variant="outline" className="mt-5" onClick={() => router.push(`/collections/${activeCollection.id}`)}>
+            <ArrowLeft className="mr-2 h-4 w-4" />
+            Back to Collection
+          </Button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="flex-1 overflow-y-auto px-6 py-6 md:px-8">
       <div className="mx-auto grid w-full max-w-7xl gap-6 lg:grid-cols-[320px_1fr]">
         <div className="space-y-4 lg:sticky lg:top-22 lg:h-fit">
-          <Button variant="ghost" size="sm" onClick={resetSession}>
+          <Button variant="ghost" size="sm" onClick={() => router.push(`/collections/${activeCollection.id}`)}>
             <ArrowLeft className="mr-2 h-4 w-4" />
-            Back to post list
+            Back to imported posts
           </Button>
 
           <Card>
             <CardHeader>
               <CardTitle className="text-base">Source Post</CardTitle>
-              <CardDescription>Reference used for recreation</CardDescription>
+              <CardDescription>Imported post used as recreation input</CardDescription>
             </CardHeader>
             <CardContent className="space-y-3">
               <div className="aspect-square overflow-hidden rounded-xl border border-slate-200 bg-slate-100">
@@ -329,13 +517,22 @@ export function RecreationView() {
                   </Badge>
                 </div>
               </div>
+              <a
+                href={selectedPost.original_url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-2 text-xs font-medium text-rose-700 hover:text-rose-600"
+              >
+                View original post
+                <ExternalLink className="h-3.5 w-3.5" />
+              </a>
             </CardContent>
           </Card>
 
           <Card>
             <CardHeader>
               <CardTitle className="text-base">Workflow</CardTitle>
-              <CardDescription>Designed for reliable AI-agent operation</CardDescription>
+              <CardDescription>Single-post deterministic pipeline for AI agents</CardDescription>
             </CardHeader>
             <CardContent className="space-y-2 text-sm text-slate-600">
               <StatusRow label="1. Select references" done={selectedReferenceImages.length > 0 || referenceImages.length === 0} />
@@ -349,10 +546,28 @@ export function RecreationView() {
               <CardHeader>
                 <CardTitle className="text-base">Niche Match</CardTitle>
               </CardHeader>
-              <CardContent className="space-y-2 text-sm text-slate-600">
-                <div className="flex items-center gap-2">
-                  <Badge variant={nicheState.isRelevant ? "success" : "warning"}>
-                    {nicheState.isRelevant ? "Relevant" : "Not Relevant"}
+              <CardContent className="space-y-3 text-sm text-slate-600">
+                <div className="flex flex-wrap items-center gap-2">
+                  <Badge variant={nicheState.isIslamic ? "success" : "warning"}>
+                    Step 1 Islam: {nicheState.isIslamic ? "Pass" : "Fail"}
+                  </Badge>
+                  <Badge variant={nicheState.isPregnancyOrPeriodRelated ? "success" : "default"}>
+                    Step 2 Pregnancy/Period: {nicheState.isPregnancyOrPeriodRelated ? "Pass" : "Fail"}
+                  </Badge>
+                  {!nicheState.isPregnancyOrPeriodRelated && nicheState.isIslamic ? (
+                    <Badge variant={nicheState.canIncorporateAppContext ? "success" : "warning"}>
+                      App Context Fit: {nicheState.canIncorporateAppContext ? "Yes" : "No"}
+                    </Badge>
+                  ) : null}
+                  {!nicheState.isIslamic && nicheState.isPregnancyOrPeriodRelated ? (
+                    <Badge variant={nicheState.canReframeToIslamicAppContext ? "success" : "warning"}>
+                      Reframe to Islamic + App: {nicheState.canReframeToIslamicAppContext ? "Yes" : "No"}
+                    </Badge>
+                  ) : null}
+                </div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <Badge variant={nicheState.canRecreate ? "success" : "warning"}>
+                    {nicheState.canRecreate ? "Recreation Enabled" : "Recreation Disabled"}
                   </Badge>
                   <span>Confidence: {toPercent(nicheState.confidence)}</span>
                 </div>
@@ -365,9 +580,9 @@ export function RecreationView() {
         <div className="space-y-4">
           <Card>
             <CardHeader>
-              <CardTitle className="text-lg">Recreation Studio</CardTitle>
+              <CardTitle className="text-lg">Recreate This Post</CardTitle>
               <CardDescription>
-                If the post is outside your niche, the system creates two versions: one app-context rewrite and one neutral variant.
+                The flow first checks Islamic + pregnancy/period match before deciding which recreation sets to generate.
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-5">
@@ -405,22 +620,23 @@ export function RecreationView() {
                 )}
               </div>
 
-              <div className="flex flex-wrap gap-3">
-                <Button variant="primary" onClick={handleGenerateScript} isLoading={isGeneratingScript}>
-                  <Wand2 className="mr-2 h-4 w-4" />
-                  {isGeneratingScript ? "Generating scripts..." : "Generate Scripts"}
-                </Button>
-
-                <Button
-                  variant="outline"
-                  onClick={handleGenerateImages}
-                  isLoading={isGeneratingImages}
-                  disabled={scriptVersions.length === 0}
-                >
-                  <Sparkles className="mr-2 h-4 w-4" />
-                  {isGeneratingImages ? "Generating images..." : "Generate All Versions"}
-                </Button>
-              </div>
+              {isRecreationBlocked ? (
+                <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+                  Recreation is disabled for this post because it cannot be converted into a valid Islamic + app-context flow.
+                </div>
+              ) : (
+                <div className="flex flex-wrap gap-3">
+                  <Button
+                    variant="primary"
+                    onClick={generationButtonConfig.onClick}
+                    isLoading={generationButtonConfig.isLoading}
+                    disabled={generationButtonConfig.disabled}
+                  >
+                    <GenerationIcon className="mr-2 h-4 w-4" />
+                    {generationButtonConfig.label}
+                  </Button>
+                </div>
+              )}
 
               {error ? (
                 <div className="flex items-start gap-2 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">
@@ -461,11 +677,7 @@ export function RecreationView() {
                         {activeVersion.adaptationMode}
                       </Badge>
                       <Badge variant="default">{activeVersion.slidePlans.length} slides planned</Badge>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => navigator.clipboard.writeText(activeVersion.script)}
-                      >
+                      <Button variant="ghost" size="sm" onClick={() => navigator.clipboard.writeText(activeVersion.script)}>
                         <Copy className="mr-2 h-4 w-4" />
                         Copy Script
                       </Button>
@@ -494,8 +706,8 @@ export function RecreationView() {
             <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}>
               <Card>
                 <CardHeader>
-                  <CardTitle className="text-base">Generated Outputs</CardTitle>
-                  <CardDescription>All generated image sets by version</CardDescription>
+                  <CardTitle className="text-base">Current Session Outputs</CardTitle>
+                  <CardDescription>Generated image sets from this active draft session</CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-6">
                   {generatedVersions.map((result) => (
@@ -503,6 +715,17 @@ export function RecreationView() {
                       <div className="flex flex-wrap items-center gap-2">
                         <Badge variant={result.usesAppContext ? "success" : "default"}>{result.label}</Badge>
                         <Badge variant="default">{result.images.length} images</Badge>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="ml-auto"
+                          disabled={result.images.length === 0}
+                          isLoading={Boolean(downloadingSetIds[`current-${result.id}`])}
+                          onClick={() => downloadImageSet(`current-${result.id}`, `${result.id}-current`, result.images)}
+                        >
+                          <Download className="mr-2 h-4 w-4" />
+                          Download All
+                        </Button>
                       </div>
                       <div className="grid grid-cols-2 gap-3 md:grid-cols-3">
                         {result.images.map((url, index) => (
@@ -517,6 +740,56 @@ export function RecreationView() {
               </Card>
             </motion.div>
           )}
+
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">Previously Recreated Posts</CardTitle>
+              <CardDescription>All recreations already generated from this imported post</CardDescription>
+            </CardHeader>
+            <CardContent>
+              {isHistoryLoading ? (
+                <p className="text-sm text-slate-500">Loading recreation history...</p>
+              ) : history.length === 0 ? (
+                <p className="text-sm text-slate-500">No recreated posts yet. Generate scripts and images to create one.</p>
+              ) : (
+                <div className="space-y-4">
+                  {history.map((item) => (
+                    <div key={item.id} className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+                      <div className="mb-3 flex flex-wrap items-center gap-2">
+                        <Badge variant={statusBadgeVariant(item.status)}>{item.status}</Badge>
+                        <Badge variant="default">{item.generated_media_urls?.length || 0} images</Badge>
+                        <span className="text-xs text-slate-500">Created {formatDate(item.created_at)}</span>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="ml-auto"
+                          disabled={!item.generated_media_urls?.length}
+                          isLoading={Boolean(downloadingSetIds[`history-${item.id}`])}
+                          onClick={() =>
+                            downloadImageSet(`history-${item.id}`, `recreated-${item.id}`, item.generated_media_urls || [])
+                          }
+                        >
+                          <Download className="mr-2 h-4 w-4" />
+                          Download All
+                        </Button>
+                      </div>
+                      {Array.isArray(item.generated_media_urls) && item.generated_media_urls.length > 0 ? (
+                        <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
+                          {item.generated_media_urls.map((url, index) => (
+                            <div key={`${item.id}-${index}`} className="overflow-hidden rounded-lg border border-slate-200 bg-white">
+                              <img src={url} alt={`Recreated slide ${index + 1}`} className="aspect-square w-full object-cover" />
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <p className="text-xs text-slate-500">No images generated for this recreation yet.</p>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </CardContent>
+          </Card>
         </div>
       </div>
     </div>
@@ -532,64 +805,6 @@ function StatusRow({ label, done }: { label: string; done: boolean }) {
         <div className="h-4 w-4 rounded-full border border-slate-300" />
       )}
       <span className={done ? "text-slate-700" : "text-slate-500"}>{label}</span>
-    </div>
-  );
-}
-
-function PostSelectionView() {
-  const { posts, setSelectedPost, activeCollection, setCurrentStep } = useAppStore();
-  const slidePosts = posts.filter((post) => post.post_type === "image_slides");
-
-  return (
-    <div className="flex-1 overflow-y-auto px-6 py-8 md:px-8">
-      <div className="mx-auto w-full max-w-7xl space-y-6">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div>
-            <h2 className="text-2xl font-semibold tracking-tight text-slate-900">Recreate Posts</h2>
-            <p className="text-sm text-slate-600">
-              Select a saved slide post to generate high-quality recreation variants for {activeCollection?.app_name || "your app"}.
-            </p>
-          </div>
-          <Button variant="ghost" onClick={() => setCurrentStep("storage")}>
-            <ArrowLeft className="mr-2 h-4 w-4" />
-            Back to Storage
-          </Button>
-        </div>
-
-        {slidePosts.length === 0 ? (
-          <Card>
-            <CardContent className="py-14 text-center">
-              <Layers className="mx-auto mb-3 h-8 w-8 text-slate-400" />
-              <p className="text-base font-medium text-slate-800">No slide posts available</p>
-              <p className="mt-1 text-sm text-slate-500">Save carousel posts in Storage first, then recreate them here.</p>
-            </CardContent>
-          </Card>
-        ) : (
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-            {slidePosts.map((post) => (
-              <button
-                key={post.id}
-                onClick={() => setSelectedPost(post)}
-                className="overflow-hidden rounded-2xl border border-slate-200 bg-white text-left shadow-sm transition hover:-translate-y-0.5 hover:shadow-md"
-              >
-                <div className="aspect-square overflow-hidden bg-slate-100">
-                  {post.thumbnail_url ? (
-                    <img src={post.thumbnail_url} alt={post.title || "Saved post preview"} className="h-full w-full object-cover" />
-                  ) : (
-                    <div className="flex h-full items-center justify-center text-slate-400">
-                      <FileText className="h-8 w-8" />
-                    </div>
-                  )}
-                </div>
-                <div className="p-3">
-                  <p className="truncate text-sm font-semibold text-slate-900">{post.title || "Untitled Post"}</p>
-                  <p className="mt-1 text-xs text-slate-500">Click to open recreation studio</p>
-                </div>
-              </button>
-            ))}
-          </div>
-        )}
-      </div>
     </div>
   );
 }

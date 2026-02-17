@@ -13,12 +13,38 @@ export function formatDate(date: Date | string): string {
   }).format(new Date(date));
 }
 
-export function extractPlatform(url: string): "instagram" | "tiktok" | "youtube" | "twitter" | "unknown" {
+export type SocialPlatform = "instagram" | "tiktok" | "threads" | "youtube" | "twitter" | "unknown";
+
+export interface SlideImageSpec {
+  width: number;
+  height: number;
+  aspectRatio: string;
+}
+
+export function extractPlatform(url: string): SocialPlatform {
   if (url.includes("instagram.com")) return "instagram";
   if (url.includes("tiktok.com") || url.includes("vm.tiktok.com")) return "tiktok";
+  if (url.includes("threads.net")) return "threads";
   if (url.includes("youtube.com") || url.includes("youtu.be")) return "youtube";
   if (url.includes("twitter.com") || url.includes("x.com")) return "twitter";
   return "unknown";
+}
+
+export function getSlideImageSpec(platform: string): SlideImageSpec {
+  switch (platform) {
+    case "instagram":
+      return { width: 1080, height: 1350, aspectRatio: "4:5" };
+    case "tiktok":
+      return { width: 1080, height: 1920, aspectRatio: "9:16" };
+    case "threads":
+      return { width: 1080, height: 1350, aspectRatio: "4:5" };
+    case "twitter":
+      return { width: 1080, height: 1080, aspectRatio: "1:1" };
+    case "youtube":
+      return { width: 1080, height: 1920, aspectRatio: "9:16" };
+    default:
+      return { width: 1080, height: 1350, aspectRatio: "4:5" };
+  }
 }
 
 export function generateId(): string {

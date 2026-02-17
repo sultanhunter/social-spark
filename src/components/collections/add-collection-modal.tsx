@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { FolderPlus } from "lucide-react";
 import { useAppStore } from "@/store/app-store";
+import { useRouter } from "next/navigation";
 import {
   Dialog,
   DialogContent,
@@ -14,6 +15,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 
 export function AddCollectionModal() {
+  const router = useRouter();
   const { isAddCollectionOpen, setAddCollectionOpen, addCollection, setActiveCollection } =
     useAppStore();
   const [name, setName] = useState("");
@@ -52,6 +54,7 @@ export function AddCollectionModal() {
       const collection = await response.json();
       addCollection(collection);
       setActiveCollection(collection);
+      router.push(`/collections/${collection.id}`);
       resetForm();
       setAddCollectionOpen(false);
     } catch (err) {
@@ -81,14 +84,13 @@ export function AddCollectionModal() {
         <DialogHeader>
           <DialogTitle>New Collection</DialogTitle>
           <DialogDescription>
-            Create a collection for one of your apps. All saved posts and
-            recreated content will be organized here.
+            Create a collection for one app. Saved posts and recreated outputs stay grouped in this workspace.
           </DialogDescription>
         </DialogHeader>
 
         <div className="p-6 space-y-5">
           <div className="space-y-2">
-            <label className="text-sm font-medium text-zinc-300">
+            <label className="text-sm font-medium text-slate-700">
               Collection Name
             </label>
             <Input
@@ -99,7 +101,7 @@ export function AddCollectionModal() {
           </div>
 
           <div className="space-y-2">
-            <label className="text-sm font-medium text-zinc-300">
+            <label className="text-sm font-medium text-slate-700">
               App Name
             </label>
             <Input
@@ -107,13 +109,11 @@ export function AddCollectionModal() {
               value={appName}
               onChange={(e) => setAppName(e.target.value)}
             />
-            <p className="text-xs text-zinc-500">
-              The app you want to create content for
-            </p>
+            <p className="text-xs text-slate-500">The app you are recreating content for</p>
           </div>
 
           <div className="space-y-2">
-            <label className="text-sm font-medium text-zinc-300">
+            <label className="text-sm font-medium text-slate-700">
               App Description
             </label>
             <Input
@@ -121,14 +121,12 @@ export function AddCollectionModal() {
               value={appDescription}
               onChange={(e) => setAppDescription(e.target.value)}
             />
-            <p className="text-xs text-zinc-500">
-              Help AI understand your app context for better content recreation
-            </p>
+            <p className="text-xs text-slate-500">Used by AI to determine niche relevance and adaptation strategy</p>
           </div>
 
           <div className="space-y-2">
-            <label className="text-sm font-medium text-zinc-300">
-              Description <span className="text-zinc-500">(optional)</span>
+            <label className="text-sm font-medium text-slate-700">
+              Description <span className="text-slate-400">(optional)</span>
             </label>
             <Input
               placeholder="What is this collection for?"
@@ -138,7 +136,7 @@ export function AddCollectionModal() {
           </div>
 
           {error && (
-            <p className="text-sm text-red-400 bg-red-500/10 border border-red-500/20 rounded-xl px-4 py-2.5">
+            <p className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-2.5 text-sm text-rose-700">
               {error}
             </p>
           )}

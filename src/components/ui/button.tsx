@@ -5,22 +5,22 @@ import { cva, type VariantProps } from "class-variance-authority";
 import { cn } from "@/lib/utils";
 
 const buttonVariants = cva(
-  "inline-flex items-center justify-center whitespace-nowrap rounded-xl text-sm font-medium transition-all duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 active:scale-[0.98]",
+  "inline-flex items-center justify-center whitespace-nowrap rounded-xl text-sm font-semibold transition-all duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-300 disabled:pointer-events-none disabled:opacity-50 active:scale-[0.99]",
   {
     variants: {
       variant: {
         default:
-          "bg-gradient-to-b from-zinc-800 to-zinc-900 text-white shadow-lg shadow-zinc-900/25 hover:from-zinc-700 hover:to-zinc-800 border border-zinc-700/50",
+          "border border-slate-300 bg-white text-slate-700 shadow-sm hover:bg-slate-50",
         primary:
-          "bg-gradient-to-b from-blue-500 to-blue-600 text-white shadow-lg shadow-blue-500/25 hover:from-blue-400 hover:to-blue-500 border border-blue-400/50",
+          "border border-rose-400 bg-rose-500 text-white shadow-sm shadow-rose-200 hover:bg-rose-600",
         secondary:
-          "bg-white/10 text-white backdrop-blur-xl hover:bg-white/20 border border-white/10",
+          "border border-slate-200 bg-slate-100 text-slate-700 hover:bg-slate-200",
         ghost:
-          "text-zinc-400 hover:text-white hover:bg-white/5",
+          "text-slate-600 hover:bg-slate-100 hover:text-slate-900",
         outline:
-          "border border-zinc-700 bg-transparent text-zinc-300 hover:bg-zinc-800 hover:text-white",
+          "border border-slate-300 bg-transparent text-slate-700 hover:bg-slate-50",
         destructive:
-          "bg-gradient-to-b from-red-500 to-red-600 text-white shadow-lg shadow-red-500/25 hover:from-red-400 hover:to-red-500",
+          "border border-rose-300 bg-white text-rose-600 hover:bg-rose-50",
       },
       size: {
         default: "h-10 px-5 py-2",
