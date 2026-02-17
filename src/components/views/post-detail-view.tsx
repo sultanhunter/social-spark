@@ -159,6 +159,7 @@ export function PostDetailView({ postId }: PostDetailViewProps) {
   const [history, setHistory] = useState<RecreatedHistoryItem[]>([]);
   const [isHistoryLoading, setIsHistoryLoading] = useState(false);
   const [downloadingSetIds, setDownloadingSetIds] = useState<Record<string, boolean>>({});
+  const [downloadingImageIds, setDownloadingImageIds] = useState<Record<string, boolean>>({});
 
   const referenceImages = useMemo(() => {
     if (selectedPost?.media_urls?.length) return selectedPost.media_urls;
@@ -213,6 +214,35 @@ export function PostDetailView({ postId }: PostDetailViewProps) {
       setError(err instanceof Error ? err.message : "Failed to download all images");
     } finally {
       setDownloadingSetIds((prev) => ({ ...prev, [setId]: false }));
+    }
+  };
+
+  const downloadSingleImage = async (imageId: string, filePrefix: string, url: string, index: number) => {
+    setDownloadingImageIds((prev) => ({ ...prev, [imageId]: true }));
+
+    try {
+      const ext = parseFileExtension(url);
+      const filename = `${filePrefix}-slide-${index + 1}.${ext}`;
+      const proxyUrl = `/api/media/download?url=${encodeURIComponent(url)}&filename=${encodeURIComponent(filename)}`;
+
+      const response = await fetch(proxyUrl);
+      if (!response.ok) {
+        throw new Error(`Failed to download image ${index + 1}`);
+      }
+
+      const blob = await response.blob();
+      const objectUrl = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = objectUrl;
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(objectUrl);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to download image");
+    } finally {
+      setDownloadingImageIds((prev) => ({ ...prev, [imageId]: false }));
     }
   };
 
@@ -728,11 +758,36 @@ export function PostDetailView({ postId }: PostDetailViewProps) {
                         </Button>
                       </div>
                       <div className="grid grid-cols-2 gap-3 md:grid-cols-3">
-                        {result.images.map((url, index) => (
-                          <div key={`${result.id}-${index}`} className="overflow-hidden rounded-lg border border-slate-200 bg-white">
-                            <img src={url} alt={`${result.label} slide ${index + 1}`} className="aspect-square w-full object-cover" />
-                          </div>
-                        ))}
+                        {result.images.map((url, index) => {
+                          const imageId = `current-${result.id}-${index}`;
+
+                          return (
+                            <div
+                              key={`${result.id}-${index}`}
+                              className="overflow-hidden rounded-lg border border-slate-200 bg-white"
+                            >
+                              <img
+                                src={url}
+                                alt={`${result.label} slide ${index + 1}`}
+                                className="aspect-square w-full object-cover"
+                              />
+                              <div className="border-t border-slate-200 bg-white p-2">
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  className="w-full justify-center"
+                                  isLoading={Boolean(downloadingImageIds[imageId])}
+                                  onClick={() =>
+                                    downloadSingleImage(imageId, `${result.id}-current`, url, index)
+                                  }
+                                >
+                                  <Download className="mr-2 h-4 w-4" />
+                                  Download
+                                </Button>
+                              </div>
+                            </div>
+                          );
+                        })}
                       </div>
                     </div>
                   ))}
@@ -775,11 +830,36 @@ export function PostDetailView({ postId }: PostDetailViewProps) {
                       </div>
                       {Array.isArray(item.generated_media_urls) && item.generated_media_urls.length > 0 ? (
                         <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
-                          {item.generated_media_urls.map((url, index) => (
-                            <div key={`${item.id}-${index}`} className="overflow-hidden rounded-lg border border-slate-200 bg-white">
-                              <img src={url} alt={`Recreated slide ${index + 1}`} className="aspect-square w-full object-cover" />
-                            </div>
-                          ))}
+                          {item.generated_media_urls.map((url, index) => {
+                            const imageId = `history-${item.id}-${index}`;
+
+                            return (
+                              <div
+                                key={`${item.id}-${index}`}
+                                className="overflow-hidden rounded-lg border border-slate-200 bg-white"
+                              >
+                                <img
+                                  src={url}
+                                  alt={`Recreated slide ${index + 1}`}
+                                  className="aspect-square w-full object-cover"
+                                />
+                                <div className="border-t border-slate-200 bg-white p-2">
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    className="w-full justify-center"
+                                    isLoading={Boolean(downloadingImageIds[imageId])}
+                                    onClick={() =>
+                                      downloadSingleImage(imageId, `recreated-${item.id}`, url, index)
+                                    }
+                                  >
+                                    <Download className="mr-2 h-4 w-4" />
+                                    Download
+                                  </Button>
+                                </div>
+                              </div>
+                            );
+                          })}
                         </div>
                       ) : (
                         <p className="text-xs text-slate-500">No images generated for this recreation yet.</p>

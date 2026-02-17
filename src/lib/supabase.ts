@@ -33,6 +33,7 @@ export interface Collection {
   app_name: string;
   app_description: string | null;
   app_context?: string | null;
+  logo?: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -71,6 +72,7 @@ CREATE TABLE IF NOT EXISTS collections (
   description TEXT,
   app_name VARCHAR(255) NOT NULL,
   app_description TEXT,
+  logo TEXT,
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
   updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );

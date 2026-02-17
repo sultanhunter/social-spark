@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import { motion } from "framer-motion";
 import { ArrowRight, FolderOpen, Image as ImageIcon, LayoutGrid, Plus, Sparkles, Video } from "lucide-react";
 import { useAppStore } from "@/store/app-store";
@@ -8,10 +9,63 @@ import { PostCard } from "@/components/posts/post-card";
 
 export function StorageView() {
   const { activeCollection, posts, postFilter, setPostFilter, setAddPostOpen } = useAppStore();
+  const [isLogoDownloading, setIsLogoDownloading] = useState(false);
 
   if (!activeCollection) {
     return <EmptyState />;
   }
+
+  const parseFileExtension = (url: string): string => {
+    try {
+      const parsed = new URL(url);
+      const filename = parsed.pathname.split("/").pop() || "";
+      const ext = filename.includes(".") ? filename.split(".").pop() || "" : "";
+      if (/^[a-zA-Z0-9]{2,5}$/.test(ext)) return ext.toLowerCase();
+    } catch {
+      // Ignore URL parse failures
+    }
+
+    return "png";
+  };
+
+  const toFileSlug = (value: string): string =>
+    value
+      .toLowerCase()
+      .trim()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/(^-|-$)/g, "");
+
+  const handleDownloadLogo = async () => {
+    if (!activeCollection.logo || isLogoDownloading) return;
+
+    setIsLogoDownloading(true);
+
+    try {
+      const ext = parseFileExtension(activeCollection.logo);
+      const baseName = toFileSlug(activeCollection.name || "collection") || "collection";
+      const filename = `${baseName}-logo.${ext}`;
+      const proxyUrl = `/api/media/download?url=${encodeURIComponent(activeCollection.logo)}&filename=${encodeURIComponent(filename)}`;
+
+      const response = await fetch(proxyUrl);
+      if (!response.ok) {
+        throw new Error("Failed to download logo");
+      }
+
+      const blob = await response.blob();
+      const objectUrl = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = objectUrl;
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(objectUrl);
+    } catch (err) {
+      console.error("Failed to download logo:", err);
+    } finally {
+      setIsLogoDownloading(false);
+    }
+  };
 
   const filteredPosts = postFilter === "all" ? posts : posts.filter((post) => post.post_type === postFilter);
   const slidesCount = posts.filter((post) => post.post_type === "image_slides").length;
@@ -22,11 +76,38 @@ export function StorageView() {
       <div className="mx-auto w-full max-w-7xl space-y-6">
         <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
           <div className="flex flex-wrap items-start justify-between gap-4">
-            <div>
-              <h2 className="text-2xl font-semibold tracking-tight text-slate-900">{activeCollection.name}</h2>
-              <p className="mt-1 text-sm text-slate-600">
-                {activeCollection.app_name} · {posts.length} saved posts
-              </p>
+            <div className="flex flex-wrap items-center gap-4">
+              {activeCollection.logo ? (
+                <button
+                  type="button"
+                  onClick={handleDownloadLogo}
+                  disabled={isLogoDownloading}
+                  aria-label="Download collection logo"
+                  title="Download logo"
+                  className={`group relative h-14 w-14 overflow-hidden rounded-xl border border-slate-200 bg-slate-100 ${
+                    isLogoDownloading ? "opacity-70" : "hover:border-rose-300"
+                  }`}
+                >
+                  <img
+                    src={activeCollection.logo}
+                    alt={`${activeCollection.name} logo`}
+                    className="h-full w-full object-cover"
+                  />
+                  <span
+                    className={`pointer-events-none absolute inset-0 flex items-center justify-center bg-slate-900/40 text-[10px] font-semibold uppercase tracking-wide text-white transition-opacity ${
+                      isLogoDownloading ? "opacity-100" : "opacity-0 group-hover:opacity-100"
+                    }`}
+                  >
+                    {isLogoDownloading ? "Downloading..." : "Download"}
+                  </span>
+                </button>
+              ) : null}
+              <div>
+                <h2 className="text-2xl font-semibold tracking-tight text-slate-900">{activeCollection.name}</h2>
+                <p className="mt-1 text-sm text-slate-600">
+                  {activeCollection.app_name} · {posts.length} saved posts
+                </p>
+              </div>
             </div>
             <Button variant="primary" onClick={() => setAddPostOpen(true)}>
               <Plus className="mr-2 h-4 w-4" />
