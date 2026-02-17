@@ -1,4 +1,6 @@
 import { execFile } from "node:child_process";
+import { existsSync } from "node:fs";
+import { resolve } from "node:path";
 import { promisify } from "node:util";
 import { fetchInstagramPost } from "@/lib/instagram";
 import { getProxyUrl } from "@/lib/proxy-fetch";
@@ -22,6 +24,11 @@ function isHttpUrl(value: unknown): value is string {
 
 function dedupe(urls: string[]): string[] {
   return Array.from(new Set(urls.filter(Boolean)));
+}
+
+function resolveInstagramCookiesFile(): string | null {
+  const cookiesInProjectRoot = resolve(process.cwd(), "instagram_cookies.txt");
+  return existsSync(cookiesInProjectRoot) ? cookiesInProjectRoot : null;
 }
 
 function getLargestThumbnail(entry: Record<string, unknown>): string | null {
@@ -123,7 +130,7 @@ async function runGalleryDl(
     args.unshift("--proxy");
   }
 
-  const cookiesFile = process.env.INSTAGRAM_COOKIES_FILE;
+  const cookiesFile = resolveInstagramCookiesFile();
   if (cookiesFile && platform === "instagram") {
     args.unshift(cookiesFile);
     args.unshift("--cookies");
@@ -188,7 +195,7 @@ async function extractWithYtDlp(
   const proxyUrl = getProxyUrl(sessionId);
   if (proxyUrl) args.push("--proxy", proxyUrl);
 
-  const cookiesFile = process.env.INSTAGRAM_COOKIES_FILE;
+  const cookiesFile = resolveInstagramCookiesFile();
   if (cookiesFile && platform === "instagram") {
     args.push("--cookies", cookiesFile);
   }
