@@ -66,7 +66,15 @@ export function AddPostModal() {
 
       if (!response.ok) {
         const data = await response.json();
-        throw new Error(data.error || "Failed to save post");
+        const detailText = Array.isArray(data.details)
+          ? data.details.join(" | ")
+          : typeof data.details === "string"
+            ? data.details
+            : "";
+
+        throw new Error(
+          `${data.error || "Failed to save post"}${detailText ? ` Details: ${detailText}` : ""}`
+        );
       }
 
       const savedPost = await response.json();
@@ -213,7 +221,7 @@ export function AddPostModal() {
 
           {/* Error */}
           {error && (
-            <p className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-2.5 text-sm text-rose-700">
+            <p className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-2.5 text-sm text-rose-700 break-words">
               {error}
             </p>
           )}

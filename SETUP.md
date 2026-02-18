@@ -69,6 +69,13 @@ gallery-dl --version
 - Optional override in `.env`:
   - `GALLERY_DL_PATH=gallery-dl`
 
+#### Remote Extractor Service (recommended for Vercel)
+- If your app is hosted on Vercel, run extraction on a separate Node/Docker service.
+- Configure:
+  - `SOCIAL_EXTRACTOR_API_URL` - Base URL of your extractor server (for example: `https://api.yourdomain.com`)
+  - `SOCIAL_EXTRACTOR_API_TOKEN` - Shared Bearer token if your extractor endpoint is protected
+- The app will call `POST /api/extract-social-post` on that service before local extraction.
+
 ## 2. Database Setup
 
 1. Go to your Supabase project

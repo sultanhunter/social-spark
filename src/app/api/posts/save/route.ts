@@ -86,7 +86,7 @@ export async function POST(request: NextRequest) {
         return NextResponse.json(
           {
             error:
-              "Failed to extract media from this post after multiple attempts. Ensure gallery-dl/yt-dlp are installed, Decodo proxy is configured, and Instagram cookies are set. You can still paste image URLs manually.",
+              "Failed to extract media from this post after multiple attempts. Ensure the remote extractor service is configured (SOCIAL_EXTRACTOR_API_URL), or gallery-dl/yt-dlp are installed, Decodo proxy is configured, and Instagram cookies are set. You can still paste image URLs manually.",
             details: extractionErrors,
           },
           { status: 422 }

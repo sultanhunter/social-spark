@@ -26,6 +26,88 @@ function dedupe(urls: string[]): string[] {
   return Array.from(new Set(urls.filter(Boolean)));
 }
 
+function getRemoteExtractorUrl(): string | null {
+  const configured = process.env.SOCIAL_EXTRACTOR_API_URL || process.env.EXTRACTOR_API_URL;
+  if (!configured) return null;
+  return configured.replace(/\/+$/, "");
+}
+
+async function extractWithRemoteService(
+  url: string,
+  platform: SupportedPlatform,
+  sessionId?: string
+): Promise<ExtractedPostData | null> {
+  const baseUrl = getRemoteExtractorUrl();
+  if (!baseUrl) return null;
+
+  const token = process.env.SOCIAL_EXTRACTOR_API_TOKEN || process.env.EXTRACTOR_API_TOKEN;
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 120_000);
+
+  try {
+    const response = await fetch(`${baseUrl}/api/extract-social-post`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+      body: JSON.stringify({ url, platform, sessionId }),
+      signal: controller.signal,
+    });
+
+    if (!response.ok) {
+      const rawBody = await response.text();
+      let message = rawBody;
+
+      try {
+        const parsed = JSON.parse(rawBody) as { error?: unknown; details?: unknown };
+        const details = Array.isArray(parsed.details)
+          ? parsed.details.join(" | ")
+          : typeof parsed.details === "string"
+            ? parsed.details
+            : "";
+        message =
+          (typeof parsed.error === "string" ? parsed.error : "") ||
+          details ||
+          rawBody;
+      } catch {
+        // keep raw response body as message
+      }
+
+      throw new Error(`remote extractor request failed (${response.status}): ${message || "unknown error"}`);
+    }
+
+    const data = (await response.json()) as {
+      title?: unknown;
+      description?: unknown;
+      mediaUrls?: unknown;
+      extractor?: unknown;
+      attempts?: unknown;
+    };
+
+    const mediaUrls = Array.isArray(data.mediaUrls)
+      ? dedupe(data.mediaUrls.filter((item): item is string => isHttpUrl(item)))
+      : [];
+
+    if (mediaUrls.length === 0) {
+      return null;
+    }
+
+    return {
+      title: typeof data.title === "string" ? data.title : null,
+      description: typeof data.description === "string" ? data.description : null,
+      mediaUrls,
+      extractor:
+        typeof data.extractor === "string"
+          ? `remote:${data.extractor}`
+          : "remote:extractor-service",
+      attempts: typeof data.attempts === "number" ? data.attempts : 1,
+    };
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
 function resolveInstagramCookiesFile(): string | null {
   const cookiesInProjectRoot = resolve(process.cwd(), "instagram_cookies.txt");
   return existsSync(cookiesInProjectRoot) ? cookiesInProjectRoot : null;
@@ -222,8 +304,22 @@ export async function extractSocialPost(
   platform: SupportedPlatform,
   sessionId?: string
 ): Promise<ExtractedPostData> {
+  let remoteExtractorError: string | null = null;
   let galleryDlError: string | null = null;
   let ytDlpError: string | null = null;
+
+  if (platform === "instagram" || platform === "tiktok") {
+    try {
+      const remoteExtraction = await extractWithRemoteService(url, platform, sessionId);
+      if (remoteExtraction) {
+        return remoteExtraction;
+      }
+      remoteExtractorError = "remote extractor returned no media";
+    } catch (error) {
+      remoteExtractorError =
+        error instanceof Error ? error.message : "remote extractor failed";
+    }
+  }
 
   if (platform === "instagram" || platform === "tiktok") {
     try {
@@ -268,18 +364,14 @@ export async function extractSocialPost(
       };
     } catch (error) {
       const fallbackError = error instanceof Error ? error.message : "instagram fallback failed";
-      if (galleryDlError && ytDlpError) {
-        throw new Error(
-          `gallery-dl: ${galleryDlError}; yt-dlp: ${ytDlpError}; fallback: ${fallbackError}`
-        );
-      }
-      if (ytDlpError) {
-        throw new Error(`yt-dlp: ${ytDlpError}; fallback: ${fallbackError}`);
-      }
-      if (galleryDlError) {
-        throw new Error(`gallery-dl: ${galleryDlError}; fallback: ${fallbackError}`);
-      }
-      throw error;
+      const sources = [
+        remoteExtractorError ? `remote: ${remoteExtractorError}` : null,
+        galleryDlError ? `gallery-dl: ${galleryDlError}` : null,
+        ytDlpError ? `yt-dlp: ${ytDlpError}` : null,
+        `fallback: ${fallbackError}`,
+      ].filter((value): value is string => Boolean(value));
+
+      throw new Error(sources.join("; "));
     }
   }
 
@@ -295,18 +387,14 @@ export async function extractSocialPost(
       };
     } catch (error) {
       const fallbackError = error instanceof Error ? error.message : "tiktok fallback failed";
-      if (galleryDlError && ytDlpError) {
-        throw new Error(
-          `gallery-dl: ${galleryDlError}; yt-dlp: ${ytDlpError}; fallback: ${fallbackError}`
-        );
-      }
-      if (ytDlpError) {
-        throw new Error(`yt-dlp: ${ytDlpError}; fallback: ${fallbackError}`);
-      }
-      if (galleryDlError) {
-        throw new Error(`gallery-dl: ${galleryDlError}; fallback: ${fallbackError}`);
-      }
-      throw error;
+      const sources = [
+        remoteExtractorError ? `remote: ${remoteExtractorError}` : null,
+        galleryDlError ? `gallery-dl: ${galleryDlError}` : null,
+        ytDlpError ? `yt-dlp: ${ytDlpError}` : null,
+        `fallback: ${fallbackError}`,
+      ].filter((value): value is string => Boolean(value));
+
+      throw new Error(sources.join("; "));
     }
   }
 

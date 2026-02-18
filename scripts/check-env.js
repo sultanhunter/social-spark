@@ -84,6 +84,14 @@ const optionalProxyEnvVars = {
     description: 'gallery-dl binary path override',
     example: 'gallery-dl',
   },
+  'SOCIAL_EXTRACTOR_API_URL': {
+    description: 'Remote extractor service base URL',
+    example: 'https://api.yourdomain.com',
+  },
+  'SOCIAL_EXTRACTOR_API_TOKEN': {
+    description: 'Bearer token for remote extractor service',
+    example: 'your_shared_secret_token',
+  },
 };
 
 console.log('🔍 Checking environment variables from .env file...\n');
