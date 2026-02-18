@@ -33,48 +33,12 @@ cp .env.example .env
 - `DECODO_PROXY_PASSWORD` - Your Decodo proxy password
 - `DECODO_PROXY_USE_SESSION` - Set `true` to rotate proxy sessions per retry
 
-#### Instagram Reliability (recommended)
-- `INSTAGRAM_COOKIES_FILE` - Path to cookies file exported from a logged-in Instagram account
-- `INSTAGRAM_SESSIONID` - Optional fallback if you only have `sessionid`
-
-#### yt-dlp (required for robust Instagram/TikTok extraction)
-- Install with Homebrew:
-
-```bash
-brew install yt-dlp
-```
-
-- Verify installation:
-
-```bash
-yt-dlp --version
-```
-
-- Optional override in `.env`:
-  - `YT_DLP_PATH=yt-dlp`
-
-#### gallery-dl (recommended for Instagram image carousels)
-- Install with Homebrew:
-
-```bash
-brew install gallery-dl
-```
-
-- Verify installation:
-
-```bash
-gallery-dl --version
-```
-
-- Optional override in `.env`:
-  - `GALLERY_DL_PATH=gallery-dl`
-
 #### Remote Extractor Service (recommended for Vercel)
-- If your app is hosted on Vercel, run extraction on a separate Node/Docker service.
+- If your app is hosted on Vercel, Instagram/TikTok extraction is expected to run on a separate Node/Docker service (for example your DigitalOcean server).
 - Configure:
   - `SOCIAL_EXTRACTOR_API_URL` - Base URL of your extractor server (for example: `https://api.yourdomain.com`)
   - `SOCIAL_EXTRACTOR_API_TOKEN` - Shared Bearer token if your extractor endpoint is protected
-- The app will call `POST /api/extract-social-post` on that service before local extraction.
+- The app calls `POST /api/extract-social-post` on that service for Instagram/TikTok extraction.
 
 ## 2. Database Setup
 

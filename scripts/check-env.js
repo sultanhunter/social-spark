@@ -68,22 +68,6 @@ const optionalProxyEnvVars = {
     description: 'Use rotating Decodo sessions per retry',
     example: 'true',
   },
-  'INSTAGRAM_COOKIES_FILE': {
-    description: 'Path to exported Instagram cookies file',
-    example: '/absolute/path/to/instagram_cookies.txt',
-  },
-  'INSTAGRAM_SESSIONID': {
-    description: 'Fallback Instagram sessionid cookie value',
-    example: '1234567890%3Aabcdef',
-  },
-  'YT_DLP_PATH': {
-    description: 'yt-dlp binary path override',
-    example: 'yt-dlp',
-  },
-  'GALLERY_DL_PATH': {
-    description: 'gallery-dl binary path override',
-    example: 'gallery-dl',
-  },
   'SOCIAL_EXTRACTOR_API_URL': {
     description: 'Remote extractor service base URL',
     example: 'https://api.yourdomain.com',

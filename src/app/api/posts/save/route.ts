@@ -9,13 +9,20 @@ import { randomUUID } from "crypto";
 export const runtime = "nodejs";
 
 export async function POST(request: NextRequest) {
+  const requestId = randomUUID().slice(0, 8);
+
   try {
     const body = await request.json();
     const { url, collectionId, postType, title, description, imageUrls: manualImageUrls } = body;
 
+    console.log(
+      `[posts-save] req=${requestId} start collection=${collectionId ?? "missing"} postType=${postType ?? "missing"} url=${typeof url === "string" ? url : "invalid"}`
+    );
+
     if (!url || !collectionId || !postType) {
+      console.warn(`[posts-save] req=${requestId} validation_failed missing required fields`);
       return NextResponse.json(
-        { error: "URL, collection ID, and post type are required" },
+        { error: "URL, collection ID, and post type are required", requestId },
         { status: 400 }
       );
     }
@@ -37,7 +44,7 @@ export async function POST(request: NextRequest) {
 
     // Use manually provided image URLs if available
     if (manualImageUrls && Array.isArray(manualImageUrls) && manualImageUrls.length > 0) {
-      console.log(`Using ${manualImageUrls.length} manually provided image URLs`);
+      console.log(`[posts-save] req=${requestId} using_manual_images count=${manualImageUrls.length}`);
       originalImageUrls = manualImageUrls;
       metadata = {
         source: "manual",
@@ -47,12 +54,21 @@ export async function POST(request: NextRequest) {
     // Otherwise try platform-specific fetching
     else if (platform === "instagram" || platform === "tiktok") {
       const maxAttempts = 3;
+      const remoteExtractorConfigured = Boolean(
+        process.env.SOCIAL_EXTRACTOR_API_URL || process.env.EXTRACTOR_API_URL
+      );
+
+      console.log(
+        `[posts-save] req=${requestId} extraction_start platform=${platform} attempts=${maxAttempts} remoteConfigured=${remoteExtractorConfigured}`
+      );
 
       for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
         const sessionId = randomUUID().slice(0, 8);
 
         try {
-          console.log(`[extract] platform=${platform} attempt=${attempt} session=${sessionId}`);
+          console.log(
+            `[posts-save] req=${requestId} extraction_attempt platform=${platform} attempt=${attempt} session=${sessionId}`
+          );
 
           const extracted = await extractSocialPost(url, platform, sessionId);
 
@@ -70,7 +86,9 @@ export async function POST(request: NextRequest) {
           };
 
           if (originalImageUrls.length > 0) {
-            console.log(`[extract] success platform=${platform} attempt=${attempt} media=${originalImageUrls.length}`);
+            console.log(
+              `[posts-save] req=${requestId} extraction_success platform=${platform} attempt=${attempt} media=${originalImageUrls.length} extractor=${extracted.extractor}`
+            );
             break;
           }
 
@@ -78,16 +96,23 @@ export async function POST(request: NextRequest) {
         } catch (error) {
           const message = error instanceof Error ? error.message : "Unknown extraction error";
           extractionErrors.push(`Attempt ${attempt}: ${message}`);
-          console.error(`[extract] failed platform=${platform} attempt=${attempt}`, error);
+          console.error(
+            `[posts-save] req=${requestId} extraction_failed platform=${platform} attempt=${attempt} session=${sessionId} message=${message}`,
+            error
+          );
         }
       }
 
       if (originalImageUrls.length === 0) {
+        console.error(
+          `[posts-save] req=${requestId} extraction_exhausted platform=${platform} errors=${extractionErrors.length}`
+        );
         return NextResponse.json(
           {
             error:
-              "Failed to extract media from this post after multiple attempts. Ensure the remote extractor service is configured (SOCIAL_EXTRACTOR_API_URL), or gallery-dl/yt-dlp are installed, Decodo proxy is configured, and Instagram cookies are set. You can still paste image URLs manually.",
+              "Failed to extract media from this post after multiple attempts. Ensure the DigitalOcean extractor is healthy (SOCIAL_EXTRACTOR_API_URL/TOKEN), Decodo proxy is valid on the extractor server, and instagram_cookies.txt exists on the extractor server root. You can still paste image URLs manually.",
             details: extractionErrors,
+            requestId,
           },
           { status: 422 }
         );
@@ -130,27 +155,30 @@ export async function POST(request: NextRequest) {
           };
         }
       } catch (error) {
-        console.log("Could not fetch metadata for URL:", url, error);
+        console.log(`[posts-save] req=${requestId} og_metadata_failed url=${url}`, error);
       }
     }
 
     // Download images and upload to R2
     if (originalImageUrls.length > 0) {
       try {
-        console.log(`Uploading ${originalImageUrls.length} images to R2...`);
+        console.log(
+          `[posts-save] req=${requestId} r2_upload_start count=${originalImageUrls.length}`
+        );
         mediaUrls = await downloadAndUploadMultipleToR2(
           originalImageUrls,
           collectionId,
           tempPostId
         );
         thumbnailUrl = mediaUrls[0] || null;
-        console.log(`Successfully uploaded ${mediaUrls.length} images to R2`);
+        console.log(`[posts-save] req=${requestId} r2_upload_success count=${mediaUrls.length}`);
       } catch (error) {
-        console.error("Failed to download and upload images to R2:", error);
+        console.error(`[posts-save] req=${requestId} r2_upload_failed`, error);
         return NextResponse.json(
           {
             error: "Media extraction worked, but upload to R2 failed.",
             details: error instanceof Error ? error.message : "Unknown R2 upload error",
+            requestId,
           },
           { status: 502 }
         );
@@ -175,10 +203,12 @@ export async function POST(request: NextRequest) {
       .single();
 
     if (error) throw error;
+    console.log(`[posts-save] req=${requestId} success postId=${data.id}`);
     return NextResponse.json(data, { status: 201 });
   } catch (err) {
+    console.error(`[posts-save] req=${requestId} unexpected_error`, err);
     return NextResponse.json(
-      { error: err instanceof Error ? err.message : "Failed to save post" },
+      { error: err instanceof Error ? err.message : "Failed to save post", requestId },
       { status: 500 }
     );
   }
