@@ -8,16 +8,30 @@ export async function GET(
   try {
     const { collectionId, postId } = await params;
 
-    const { data, error } = await supabase
+    const primaryQuery = await supabase
+      .from("recreated_posts")
+      .select("id, script, generated_media_urls, caption, status, generation_state, created_at, updated_at")
+      .eq("collection_id", collectionId)
+      .eq("original_post_id", postId)
+      .order("created_at", { ascending: false });
+
+    if (!primaryQuery.error) {
+      return NextResponse.json(primaryQuery.data);
+    }
+
+    if (!/generation_state/i.test(primaryQuery.error.message || "")) {
+      throw primaryQuery.error;
+    }
+
+    const fallbackQuery = await supabase
       .from("recreated_posts")
       .select("id, script, generated_media_urls, caption, status, created_at, updated_at")
       .eq("collection_id", collectionId)
       .eq("original_post_id", postId)
-      .eq("status", "completed")
       .order("created_at", { ascending: false });
 
-    if (error) throw error;
-    return NextResponse.json(data);
+    if (fallbackQuery.error) throw fallbackQuery.error;
+    return NextResponse.json(fallbackQuery.data);
   } catch (err) {
     return NextResponse.json(
       { error: err instanceof Error ? err.message : "Failed to fetch recreation history" },

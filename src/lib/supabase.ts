@@ -60,6 +60,7 @@ export interface RecreatedPost {
   generated_media_urls: string[];
   caption?: string | null;
   status: "draft" | "generating" | "completed" | "failed";
+  generation_state?: Record<string, unknown> | null;
   created_at: string;
   updated_at: string;
 }
@@ -102,6 +103,7 @@ CREATE TABLE IF NOT EXISTS recreated_posts (
   generated_media_urls TEXT[] DEFAULT '{}',
   caption TEXT,
   status VARCHAR(50) DEFAULT 'draft',
+  generation_state JSONB DEFAULT '{}'::jsonb,
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
   updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );

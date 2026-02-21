@@ -2,19 +2,31 @@ import { NextRequest, NextResponse } from "next/server";
 import { supabase } from "@/lib/supabase";
 import {
   detectNicheRelevance,
-  generateImagePrompts,
+  extractSlideTexts,
   generatePostScript,
+  generateSlideDesignPlans,
   type AdaptationMode,
   type SlideGenerationPlan,
+  type UIGenerationMode,
 } from "@/lib/gemini";
+import {
+  DEFAULT_REASONING_MODEL,
+  isReasoningModel,
+} from "@/lib/reasoning-model";
+
+const APP_BRAND_PRIMARY_COLOR = "#F36F97";
+const APP_BRAND_GRADIENT = ["#F36F97", "#EEB4C3", "#F7DFD6"];
 
 interface ScriptVersion {
-  id: "app_context" | "variant_only";
+  id: string;
   label: string;
   adaptationMode: AdaptationMode;
   usesAppContext: boolean;
+  uiGenerationMode: UIGenerationMode;
+  followsReferenceLayout: boolean;
   script: string;
   slidePlans: SlideGenerationPlan[];
+  recreatedPostId?: string;
 }
 
 function asNonEmptyString(value: unknown): string | null {
@@ -32,12 +44,19 @@ function normalizeUrls(value: unknown): string[] {
   return value.filter((url): url is string => typeof url === "string" && url.length > 0);
 }
 
+function buildVersionLabel(adaptationMode: AdaptationMode): string {
+  return adaptationMode === "app_context" ? "App Context" : "Original Topic";
+}
+
 export async function POST(request: NextRequest) {
   try {
     const body = (await request.json()) as Record<string, unknown>;
     const postId = asNonEmptyString(body.postId);
     const collectionId = asNonEmptyString(body.collectionId);
     const referenceImageUrls = body.referenceImageUrls;
+    const reasoningModel = isReasoningModel(body.reasoningModel)
+      ? body.reasoningModel
+      : DEFAULT_REASONING_MODEL;
 
     if (!postId || !collectionId) {
       return NextResponse.json(
@@ -84,13 +103,25 @@ export async function POST(request: NextRequest) {
 
     const selectedReferenceImageUrls = Array.isArray(referenceImageUrls)
       ? Array.from(
-          new Set(
-            normalizeUrls(referenceImageUrls)
-              .filter((url) => availableImageUrls.includes(url))
-          )
-        ).slice(0, 8)
+        new Set(
+          normalizeUrls(referenceImageUrls)
+            .filter((url) => availableImageUrls.includes(url))
+        )
+      ).slice(0, 8)
       : availableImageUrls.slice(0, 8);
 
+    // ---------- Step 1: Extract text from each original slide ----------
+    console.log("[script] Step 1: Extracting slide texts from original images...");
+    const extractedTexts = await extractSlideTexts(selectedReferenceImageUrls, reasoningModel);
+
+    // Build an "original script" from extracted texts for the rewrite step
+    const originalExtractedScript = extractedTexts
+      .map((slide, i) => `Slide ${i + 1}\nHeadline: ${slide.headline || "(no text)"}\nSupporting: ${slide.supportingText || "(no text)"}`)
+      .join("\n\n");
+
+    console.log("[script] Extracted original script from slides:", originalExtractedScript.slice(0, 300));
+
+    // ---------- Niche classification ----------
     const nicheRelevance = await detectNicheRelevance(
       {
         title: post.title,
@@ -99,7 +130,8 @@ export async function POST(request: NextRequest) {
       },
       appContext,
       appName,
-      selectedReferenceImageUrls
+      selectedReferenceImageUrls,
+      reasoningModel
     );
 
     const isIslamic = nicheRelevance.isIslamic;
@@ -126,54 +158,15 @@ export async function POST(request: NextRequest) {
       });
     }
 
-    const inferredSlideCount = Array.isArray(post.media_urls)
-      ? Math.min(Math.max(post.media_urls.length || 6, 4), 8)
-      : 6;
-
     const originalPost = {
       title: post.title,
-      description: post.description,
+      description: `${post.description || ""}\n\nEXTRACTED SLIDE TEXTS FROM ORIGINAL POST:\n${originalExtractedScript}`,
       platform: post.platform,
       postType: post.post_type,
     };
 
-    const buildVersion = async (mode: AdaptationMode): Promise<ScriptVersion> => {
-      const script = await generatePostScript(
-        originalPost,
-        appContext,
-        appName,
-        selectedReferenceImageUrls,
-        nicheRelevance,
-        mode
-      );
-
-      const slidePlans = await generateImagePrompts(
-        script,
-        appName,
-        inferredSlideCount,
-        post.platform,
-        selectedReferenceImageUrls,
-        appContext,
-        nicheRelevance,
-        mode
-      );
-
-      return {
-        id: mode,
-        label: mode === "app_context" ? "App Context Rewrite" : "Original Topic Variant",
-        adaptationMode: mode,
-        usesAppContext: mode === "app_context",
-        script,
-        slidePlans,
-      };
-    };
-
     const adaptationModes: AdaptationMode[] = isIslamic
-      ? isPregnancyOrPeriodRelated
-        ? ["app_context"]
-        : canIncorporateAppContext
-          ? ["variant_only", "app_context"]
-          : ["variant_only"]
+      ? ["variant_only", "app_context"]
       : isPregnancyOrPeriodRelated && canReframeToIslamicAppContext
         ? ["app_context"]
         : [];
@@ -196,32 +189,94 @@ export async function POST(request: NextRequest) {
       });
     }
 
-    const versions = await Promise.all(adaptationModes.map((mode) => buildVersion(mode)));
+    // ---------- Step 2: Generate rewritten scripts (all slides at once) ----------
+    console.log("[script] Step 2: Generating rewritten scripts...");
+    const scriptsByMode = await Promise.all(
+      adaptationModes.map(async (mode) => {
+        const script = await generatePostScript(
+          originalPost,
+          appContext,
+          appName,
+          selectedReferenceImageUrls,
+          nicheRelevance,
+          mode,
+          reasoningModel
+        );
+
+        return { mode, script };
+      })
+    );
+
+    const scriptMap = new Map<AdaptationMode, string>(
+      scriptsByMode.map((entry) => [entry.mode, entry.script])
+    );
+
+    // ---------- Step 3: Per-slide Figma instructions + asset prompts ----------
+    console.log("[script] Step 3: Generating per-slide design plans...");
+    const versions = await Promise.all(
+      adaptationModes.map(async (mode): Promise<ScriptVersion> => {
+        const modeScript = scriptMap.get(mode);
+        if (!modeScript) {
+          throw new Error(`Missing generated script for adaptation mode: ${mode}`);
+        }
+
+        const slidePlans = await generateSlideDesignPlans(
+          selectedReferenceImageUrls,
+          modeScript,
+          post.platform,
+          APP_BRAND_PRIMARY_COLOR,
+          APP_BRAND_GRADIENT,
+          appName,
+          reasoningModel
+        );
+
+        return {
+          id: mode,
+          label: buildVersionLabel(mode),
+          adaptationMode: mode,
+          usesAppContext: mode === "app_context",
+          uiGenerationMode: "ai_creative" as UIGenerationMode,
+          followsReferenceLayout: false,
+          script: modeScript,
+          slidePlans,
+        };
+      })
+    );
 
     const primaryVersion = versions[0];
 
     const script = primaryVersion.script;
     const slidePlans = primaryVersion.slidePlans;
 
-    // Save recreated post record
-    const { data: recreated, error: insertError } = await supabase
-      .from("recreated_posts")
-      .insert({
-        original_post_id: postId,
-        collection_id: collectionId,
-        script,
-        status: "draft",
-      })
-      .select()
-      .single();
+    const versionsWithRecreatedIds = await Promise.all(
+      versions.map(async (version) => {
+        const { data: recreated, error: insertError } = await supabase
+          .from("recreated_posts")
+          .insert({
+            original_post_id: postId,
+            collection_id: collectionId,
+            script: version.script,
+            status: "draft",
+          })
+          .select("id")
+          .single();
 
-    if (insertError) throw insertError;
+        if (insertError) throw insertError;
+
+        return {
+          ...version,
+          recreatedPostId: recreated.id,
+        };
+      })
+    );
+
+    const primaryVersionWithId = versionsWithRecreatedIds[0];
 
     return NextResponse.json({
       script,
       slidePlans,
-      versions,
-      primaryVersionId: primaryVersion.id,
+      versions: versionsWithRecreatedIds,
+      primaryVersionId: primaryVersionWithId.id,
       canRecreate,
       isIslamic,
       isPregnancyOrPeriodRelated,
@@ -230,7 +285,8 @@ export async function POST(request: NextRequest) {
       isAppNicheRelevant: nicheRelevance.isAppNicheRelevant,
       relevanceReason: nicheRelevance.reason,
       relevanceConfidence: nicheRelevance.confidence,
-      recreatedPostId: recreated.id,
+      reasoningModel,
+      recreatedPostId: primaryVersionWithId.recreatedPostId,
     });
   } catch (err) {
     return NextResponse.json(

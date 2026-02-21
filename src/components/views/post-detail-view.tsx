@@ -10,6 +10,7 @@ import {
   Download,
   ExternalLink,
   Image as ImageIcon,
+  Send,
   Sparkles,
   Wand2,
 } from "lucide-react";
@@ -18,43 +19,35 @@ import { useAppStore } from "@/store/app-store";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import {
+  DEFAULT_IMAGE_GENERATION_MODEL,
+  IMAGE_GENERATION_MODELS,
+  isImageGenerationModel,
+} from "@/lib/image-generation-model";
+import {
+  DEFAULT_REASONING_MODEL,
+  REASONING_MODELS,
+  isReasoningModel,
+} from "@/lib/reasoning-model";
 import { formatDate } from "@/lib/utils";
 
 type SlidePlan = {
-  imagePrompt: string;
   headline: string;
   supportingText: string;
-  textPlacement: "top" | "center" | "bottom";
-  uiInstructions: {
-    layoutConcept: string;
-    artDirection: string;
-    typography: {
-      headlineFontFamily: string;
-      headlineFontWeight: string;
-      supportingFontFamily: string;
-      supportingFontWeight: string;
-      alignment: "left" | "center" | "right";
-    };
-    composition: {
-      textArea: string;
-      safeMargins: string;
-      elementNotes: string[];
-    };
-    styling: {
-      panelStyle: string;
-      accentStyle: string;
-      iconStyle: string;
-    };
-  };
+  figmaInstructions: string[];
+  assetPrompts: { prompt: string; description: string }[];
 };
 
 type ScriptVersion = {
-  id: "app_context" | "variant_only" | string;
+  id: string;
   label: string;
   adaptationMode: "app_context" | "variant_only";
   usesAppContext: boolean;
+  uiGenerationMode: "reference_exact" | "ai_creative";
+  followsReferenceLayout: boolean;
   script: string;
   slidePlans: SlidePlan[];
+  recreatedPostId?: string | null;
 };
 
 type GeneratedVersionResult = {
@@ -62,9 +55,12 @@ type GeneratedVersionResult = {
   label: string;
   adaptationMode: "app_context" | "variant_only";
   usesAppContext: boolean;
+  uiGenerationMode: "reference_exact" | "ai_creative";
+  followsReferenceLayout: boolean;
   script: string;
   plans: SlidePlan[];
   images: string[];
+  recreatedPostId?: string | null;
   caption?: string | null;
 };
 
@@ -86,12 +82,33 @@ type RecreatedHistoryItem = {
   generated_media_urls: string[];
   caption?: string | null;
   status: "draft" | "generating" | "completed" | "failed";
+  generation_state?: {
+    stage?: string;
+    totalSlides?: number;
+    completedSlides?: number;
+    failedSlides?: number;
+    currentSlide?: number | null;
+    error?: string | null;
+    slides?: Array<{
+      slideIndex?: number;
+      status?: string;
+      attempt?: number;
+      maxAttempts?: number;
+      verificationScore?: number | null;
+      message?: string | null;
+      issues?: string[];
+    }>;
+  } | null;
   created_at: string;
   updated_at: string;
 };
 
 function isAdaptationMode(value: unknown): value is "app_context" | "variant_only" {
   return value === "app_context" || value === "variant_only";
+}
+
+function isUIGenerationMode(value: unknown): value is "reference_exact" | "ai_creative" {
+  return value === "reference_exact" || value === "ai_creative";
 }
 
 function sanitizeScriptVersions(payload: unknown): ScriptVersion[] {
@@ -121,8 +138,13 @@ function sanitizeScriptVersions(payload: unknown): ScriptVersion[] {
               : "Original Topic Variant",
         adaptationMode,
         usesAppContext: adaptationMode === "app_context",
+        uiGenerationMode: isUIGenerationMode(row.uiGenerationMode) ? row.uiGenerationMode : "ai_creative",
+        followsReferenceLayout: isUIGenerationMode(row.uiGenerationMode)
+          ? row.uiGenerationMode === "reference_exact"
+          : false,
         script,
         slidePlans: Array.isArray(row.slidePlans) ? (row.slidePlans as SlidePlan[]) : [],
+        recreatedPostId: typeof row.recreatedPostId === "string" ? row.recreatedPostId : null,
       };
     })
     .filter((version): version is ScriptVersion => Boolean(version));
@@ -136,6 +158,25 @@ function statusBadgeVariant(status: RecreatedHistoryItem["status"]): "default" |
   if (status === "completed") return "success";
   if (status === "failed") return "warning";
   return "default";
+}
+
+function historyChanged(prev: RecreatedHistoryItem[], next: RecreatedHistoryItem[]): boolean {
+  if (prev.length !== next.length) return true;
+
+  for (let index = 0; index < prev.length; index += 1) {
+    const current = prev[index];
+    const incoming = next[index];
+
+    if (current.id !== incoming.id) return true;
+    if (current.status !== incoming.status) return true;
+    if (current.updated_at !== incoming.updated_at) return true;
+    if ((current.generated_media_urls?.length || 0) !== (incoming.generated_media_urls?.length || 0)) {
+      return true;
+    }
+    if ((current.caption || "") !== (incoming.caption || "")) return true;
+  }
+
+  return false;
 }
 
 interface PostDetailViewProps {
@@ -157,6 +198,8 @@ export function PostDetailView({ postId }: PostDetailViewProps) {
   const [isGeneratingScript, setIsGeneratingScript] = useState(false);
   const [isGeneratingImages, setIsGeneratingImages] = useState(false);
   const [error, setError] = useState("");
+  const [reasoningModel, setReasoningModel] = useState(DEFAULT_REASONING_MODEL);
+  const [imageGenerationModel, setImageGenerationModel] = useState(DEFAULT_IMAGE_GENERATION_MODEL);
   const [recreatedPostId, setRecreatedPostId] = useState<string | null>(null);
   const [history, setHistory] = useState<RecreatedHistoryItem[]>([]);
   const [isHistoryLoading, setIsHistoryLoading] = useState(false);
@@ -164,6 +207,10 @@ export function PostDetailView({ postId }: PostDetailViewProps) {
   const [downloadingImageIds, setDownloadingImageIds] = useState<Record<string, boolean>>({});
   const [captionLoadingBySetId, setCaptionLoadingBySetId] = useState<Record<string, boolean>>({});
   const [captionsBySetId, setCaptionsBySetId] = useState<Record<string, string>>({});
+  const [postingInstagramBySetId, setPostingInstagramBySetId] = useState<Record<string, boolean>>({});
+  const [instagramResultBySetId, setInstagramResultBySetId] = useState<
+    Record<string, { mediaId: string; permalink: string | null }>
+  >({});
 
   const referenceImages = useMemo(() => {
     if (selectedPost?.media_urls?.length) return selectedPost.media_urls;
@@ -276,12 +323,17 @@ export function PostDetailView({ postId }: PostDetailViewProps) {
           script,
           slidePlans,
           recreatedPostId: captionRecreatedPostId,
+          reasoningModel,
         }),
       });
 
       const data = await response.json();
       if (!response.ok) {
         throw new Error(data.error || "Failed to generate caption");
+      }
+
+      if (isReasoningModel(data.reasoningModel)) {
+        setReasoningModel(data.reasoningModel);
       }
 
       const caption = typeof data.caption === "string" ? data.caption.trim() : "";
@@ -296,9 +348,9 @@ export function PostDetailView({ postId }: PostDetailViewProps) {
           prev.map((item) =>
             item.id === captionRecreatedPostId
               ? {
-                  ...item,
-                  caption,
-                }
+                ...item,
+                caption,
+              }
               : item
           )
         );
@@ -310,22 +362,89 @@ export function PostDetailView({ postId }: PostDetailViewProps) {
     }
   };
 
-  const loadHistory = useCallback(async () => {
+  const handlePublishToInstagram = async ({
+    setId,
+    imageUrls,
+    caption,
+    recreatedPostId: publishRecreatedPostId,
+  }: {
+    setId: string;
+    imageUrls: string[];
+    caption?: string;
+    recreatedPostId?: string | null;
+  }) => {
     if (!activeCollection) return;
+    if (imageUrls.length === 0) {
+      setError("No images available for Instagram publishing.");
+      return;
+    }
 
-    setIsHistoryLoading(true);
+    setPostingInstagramBySetId((prev) => ({ ...prev, [setId]: true }));
+    setError("");
+
+    try {
+      const response = await fetch("/api/social/instagram/publish", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          collectionId: activeCollection.id,
+          postId,
+          recreatedPostId: publishRecreatedPostId,
+          imageUrls,
+          caption: caption || "",
+        }),
+      });
+
+      const data = await response.json();
+      if (!response.ok) {
+        throw new Error(data.error || "Failed to publish to Instagram");
+      }
+
+      const mediaId = typeof data.mediaId === "string" ? data.mediaId : "";
+      if (!mediaId) {
+        throw new Error("Instagram publish succeeded but no media ID was returned.");
+      }
+
+      const permalink = typeof data.permalink === "string" ? data.permalink : null;
+
+      setInstagramResultBySetId((prev) => ({
+        ...prev,
+        [setId]: {
+          mediaId,
+          permalink,
+        },
+      }));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to publish to Instagram");
+    } finally {
+      setPostingInstagramBySetId((prev) => ({ ...prev, [setId]: false }));
+    }
+  };
+
+  const loadHistory = useCallback(async (options?: { silent?: boolean }) => {
+    if (!activeCollection) return;
+    const silent = Boolean(options?.silent);
+
+    if (!silent) {
+      setIsHistoryLoading(true);
+    }
 
     try {
       const response = await fetch(`/api/recreate/history/${activeCollection.id}/${postId}`);
       if (!response.ok) throw new Error("Failed to fetch recreation history");
 
       const data = await response.json();
-      setHistory(Array.isArray(data) ? (data as RecreatedHistoryItem[]) : []);
+      const nextHistory = Array.isArray(data) ? (data as RecreatedHistoryItem[]) : [];
+      setHistory((prev) => (historyChanged(prev, nextHistory) ? nextHistory : prev));
     } catch (err) {
       console.error("Failed to fetch recreation history:", err);
-      setHistory([]);
+      if (!silent) {
+        setHistory([]);
+      }
     } finally {
-      setIsHistoryLoading(false);
+      if (!silent) {
+        setIsHistoryLoading(false);
+      }
     }
   }, [activeCollection, postId]);
 
@@ -341,6 +460,8 @@ export function PostDetailView({ postId }: PostDetailViewProps) {
     setRecreatedPostId(null);
     setCaptionsBySetId({});
     setCaptionLoadingBySetId({});
+    setPostingInstagramBySetId({});
+    setInstagramResultBySetId({});
 
     if (selectedPost.media_urls?.length) {
       setSelectedReferenceImages(selectedPost.media_urls);
@@ -357,6 +478,18 @@ export function PostDetailView({ postId }: PostDetailViewProps) {
 
     loadHistory();
   }, [activeCollection, loadHistory]);
+
+  useEffect(() => {
+    if (!isGeneratingImages) return;
+
+    const intervalId = window.setInterval(() => {
+      void loadHistory({ silent: true });
+    }, 2500);
+
+    return () => {
+      window.clearInterval(intervalId);
+    };
+  }, [isGeneratingImages, loadHistory]);
 
   const handleGenerateScript = async () => {
     if (!activeCollection || !selectedPost) return;
@@ -376,12 +509,17 @@ export function PostDetailView({ postId }: PostDetailViewProps) {
           postId: selectedPost.id,
           collectionId: activeCollection.id,
           referenceImageUrls: selectedReferenceImages,
+          reasoningModel,
         }),
       });
 
       const data = await response.json();
       if (!response.ok) {
         throw new Error(data.error || "Failed to generate script");
+      }
+
+      if (isReasoningModel(data.reasoningModel)) {
+        setReasoningModel(data.reasoningModel);
       }
 
       const canRecreate = typeof data.canRecreate === "boolean" ? data.canRecreate : Boolean(data.isIslamic);
@@ -404,25 +542,28 @@ export function PostDetailView({ postId }: PostDetailViewProps) {
         return;
       }
 
-      const versions = Array.isArray(data.versions)
+      const versions: ScriptVersion[] = Array.isArray(data.versions)
         ? sanitizeScriptVersions(data.versions)
-        : (() => {
-            const fallbackScript = typeof data.script === "string" ? data.script : "";
-            if (!fallbackScript.trim()) return [];
-            const fallbackMode: ScriptVersion["adaptationMode"] = data.isAppNicheRelevant
-              ? "app_context"
-              : "variant_only";
-            return [
-              {
-                id: "fallback",
-                label: "Generated Script",
-                adaptationMode: fallbackMode,
-                usesAppContext: fallbackMode === "app_context",
-                script: fallbackScript,
-                slidePlans: Array.isArray(data.slidePlans) ? (data.slidePlans as SlidePlan[]) : [],
-              },
-            ];
-          })();
+        : ((): ScriptVersion[] => {
+          const fallbackScript = typeof data.script === "string" ? data.script : "";
+          if (!fallbackScript.trim()) return [];
+          const fallbackMode: ScriptVersion["adaptationMode"] = data.isAppNicheRelevant
+            ? "app_context"
+            : "variant_only";
+          return [
+            {
+              id: "fallback",
+              label: "Generated Script",
+              adaptationMode: fallbackMode,
+              usesAppContext: fallbackMode === "app_context",
+              uiGenerationMode: "ai_creative",
+              followsReferenceLayout: false,
+              script: fallbackScript,
+              slidePlans: Array.isArray(data.slidePlans) ? (data.slidePlans as SlidePlan[]) : [],
+              recreatedPostId: typeof data.recreatedPostId === "string" ? data.recreatedPostId : null,
+            },
+          ];
+        })();
 
       if (versions.length === 0) {
         throw new Error("No script version was generated.");
@@ -466,6 +607,8 @@ export function PostDetailView({ postId }: PostDetailViewProps) {
           postId: selectedPost.id,
           appName: activeCollection.app_name,
           recreatedPostId,
+          reasoningModel,
+          imageGenerationModel,
         }),
       });
 
@@ -474,7 +617,21 @@ export function PostDetailView({ postId }: PostDetailViewProps) {
         throw new Error(data.error || "Failed to generate images");
       }
 
+      if (isReasoningModel(data.reasoningModel)) {
+        setReasoningModel(data.reasoningModel);
+      }
+
+      if (isImageGenerationModel(data.imageGenerationModel)) {
+        setImageGenerationModel(data.imageGenerationModel);
+      }
+
       const results = Array.isArray(data.versionResults) ? (data.versionResults as GeneratedVersionResult[]) : [];
+      const failedVersions = Array.isArray(data.failedVersions)
+        ? data.failedVersions.filter(
+          (item: unknown): item is { label?: string; error?: string } =>
+            typeof item === "object" && item !== null
+        )
+        : [];
 
       if (results.length === 0 && Array.isArray(data.images)) {
         setGeneratedVersions([
@@ -483,13 +640,25 @@ export function PostDetailView({ postId }: PostDetailViewProps) {
             label: activeVersion?.label || "Generated Output",
             adaptationMode: activeVersion?.adaptationMode || "variant_only",
             usesAppContext: Boolean(activeVersion?.usesAppContext),
+            uiGenerationMode: activeVersion?.uiGenerationMode || "ai_creative",
+            followsReferenceLayout: Boolean(activeVersion?.followsReferenceLayout),
             script: fallbackScript,
             plans: fallbackPlans,
             images: data.images,
+            recreatedPostId: typeof data.recreatedPostId === "string" ? data.recreatedPostId : null,
           },
         ]);
       } else {
         setGeneratedVersions(results);
+      }
+
+      if (failedVersions.length > 0) {
+        const failures = failedVersions
+          .map((item: { label?: string; error?: string }) =>
+            `${item.label || "Version"}: ${item.error || "Unknown error"}`
+          )
+          .join(" | ");
+        setError(`Some versions failed during verification pipeline. ${failures}`);
       }
 
       setStep("complete");
@@ -512,6 +681,8 @@ export function PostDetailView({ postId }: PostDetailViewProps) {
     setSelectedReferenceImages(referenceImages);
     setCaptionsBySetId({});
     setCaptionLoadingBySetId({});
+    setPostingInstagramBySetId({});
+    setInstagramResultBySetId({});
   };
 
   const isRecreationBlocked = Boolean(nicheState && !nicheState.canRecreate);
@@ -519,27 +690,27 @@ export function PostDetailView({ postId }: PostDetailViewProps) {
   const generationButtonConfig =
     step === "prepare"
       ? {
-          label: isGeneratingScript ? "Classifying and generating scripts..." : "Step 1: Classify & Generate Scripts",
-          onClick: handleGenerateScript,
-          isLoading: isGeneratingScript,
-          icon: Wand2,
-          disabled: false,
-        }
+        label: isGeneratingScript ? "Classifying and generating scripts..." : "Step 1: Classify & Generate Scripts",
+        onClick: handleGenerateScript,
+        isLoading: isGeneratingScript,
+        icon: Wand2,
+        disabled: false,
+      }
       : step === "script"
         ? {
-            label: isGeneratingImages ? "Generating images..." : "Step 2: Generate All Versions",
-            onClick: handleGenerateImages,
-            isLoading: isGeneratingImages,
-            icon: Sparkles,
-            disabled: scriptVersions.length === 0,
-          }
+          label: isGeneratingImages ? "Generating images..." : "Step 2: Generate All Versions",
+          onClick: handleGenerateImages,
+          isLoading: isGeneratingImages,
+          icon: Sparkles,
+          disabled: scriptVersions.length === 0,
+        }
         : {
-            label: "Start New Draft Session",
-            onClick: resetSession,
-            isLoading: false,
-            icon: Wand2,
-            disabled: false,
-          };
+          label: "Start New Draft Session",
+          onClick: resetSession,
+          isLoading: false,
+          icon: Wand2,
+          disabled: false,
+        };
 
   const GenerationIcon = generationButtonConfig.icon;
 
@@ -699,9 +870,8 @@ export function PostDetailView({ postId }: PostDetailViewProps) {
                               prev.includes(url) ? prev.filter((item) => item !== url) : [...prev, url]
                             );
                           }}
-                          className={`relative overflow-hidden rounded-xl border ${
-                            selected ? "border-rose-400 ring-2 ring-rose-200" : "border-slate-200"
-                          }`}
+                          className={`relative overflow-hidden rounded-xl border ${selected ? "border-rose-400 ring-2 ring-rose-200" : "border-slate-200"
+                            }`}
                         >
                           <img src={url} alt={`Reference ${index + 1}`} className="aspect-square w-full object-cover" />
                           <span className="absolute left-2 top-2 rounded-md bg-white/90 px-2 py-0.5 text-[11px] font-medium text-slate-700">
@@ -716,6 +886,46 @@ export function PostDetailView({ postId }: PostDetailViewProps) {
                     No source images found. The model will use post text only.
                   </p>
                 )}
+              </div>
+
+              <div className="space-y-2">
+                <p className="text-sm font-semibold text-slate-800">Reasoning Model</p>
+                <select
+                  value={reasoningModel}
+                  onChange={(event) => {
+                    const value = event.target.value;
+                    if (isReasoningModel(value)) {
+                      setReasoningModel(value);
+                    }
+                  }}
+                  className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700 outline-none transition focus:border-rose-400 focus:ring-2 focus:ring-rose-200"
+                >
+                  {REASONING_MODELS.map((model) => (
+                    <option key={model.id} value={model.id}>
+                      {model.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="space-y-2">
+                <p className="text-sm font-semibold text-slate-800">Image Generation Model</p>
+                <select
+                  value={imageGenerationModel}
+                  onChange={(event) => {
+                    const value = event.target.value;
+                    if (isImageGenerationModel(value)) {
+                      setImageGenerationModel(value);
+                    }
+                  }}
+                  className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700 outline-none transition focus:border-rose-400 focus:ring-2 focus:ring-rose-200"
+                >
+                  {IMAGE_GENERATION_MODELS.map((model) => (
+                    <option key={model.id} value={model.id}>
+                      {model.label}
+                    </option>
+                  ))}
+                </select>
               </div>
 
               {isRecreationBlocked ? (
@@ -757,11 +967,10 @@ export function PostDetailView({ postId }: PostDetailViewProps) {
                     <button
                       key={version.id}
                       onClick={() => setActiveVersionId(version.id)}
-                      className={`rounded-lg border px-3 py-2 text-sm font-medium transition ${
-                        activeVersionId === version.id
-                          ? "border-rose-300 bg-rose-50 text-rose-700"
-                          : "border-slate-200 bg-white text-slate-600 hover:border-slate-300"
-                      }`}
+                      className={`rounded-lg border px-3 py-2 text-sm font-medium transition ${activeVersionId === version.id
+                        ? "border-rose-300 bg-rose-50 text-rose-700"
+                        : "border-slate-200 bg-white text-slate-600 hover:border-slate-300"
+                        }`}
                     >
                       {version.label}
                     </button>
@@ -773,6 +982,9 @@ export function PostDetailView({ postId }: PostDetailViewProps) {
                     <div className="flex flex-wrap items-center gap-2">
                       <Badge variant={activeVersion.usesAppContext ? "success" : "default"}>
                         {activeVersion.adaptationMode}
+                      </Badge>
+                      <Badge variant="default">
+                        {activeVersion.uiGenerationMode === "reference_exact" ? "Exact Source UI" : "AI Creative UI"}
                       </Badge>
                       <Badge variant="default">{activeVersion.slidePlans.length} slides planned</Badge>
                       <Button variant="ghost" size="sm" onClick={() => navigator.clipboard.writeText(activeVersion.script)}>
@@ -791,6 +1003,16 @@ export function PostDetailView({ postId }: PostDetailViewProps) {
                           <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Slide {index + 1}</p>
                           <p className="mt-1 text-sm font-semibold text-slate-800">{plan.headline}</p>
                           <p className="mt-1 text-xs text-slate-600">{plan.supportingText || "No supporting text"}</p>
+                          {plan.figmaInstructions && plan.figmaInstructions.length > 0 && (
+                            <div className="mt-2 border-t border-slate-100 pt-2">
+                              <p className="text-[11px] font-semibold uppercase tracking-wide text-rose-500">Figma Instructions</p>
+                              <ol className="mt-1 list-inside list-decimal space-y-0.5 text-xs text-slate-600">
+                                {plan.figmaInstructions.map((step, stepIndex) => (
+                                  <li key={stepIndex}>{step}</li>
+                                ))}
+                              </ol>
+                            </div>
+                          )}
                         </div>
                       ))}
                     </div>
@@ -812,11 +1034,15 @@ export function PostDetailView({ postId }: PostDetailViewProps) {
                     const captionKey = `current-${result.id}`;
                     const caption = captionsBySetId[captionKey] || result.caption || "";
                     const hasCaption = Boolean(caption.trim());
+                    const instagramResult = instagramResultBySetId[captionKey];
 
                     return (
                       <div key={result.id} className="space-y-3 rounded-xl border border-slate-200 bg-slate-50 p-4">
                         <div className="flex flex-wrap items-center gap-2">
                           <Badge variant={result.usesAppContext ? "success" : "default"}>{result.label}</Badge>
+                          <Badge variant="default">
+                            {result.uiGenerationMode === "reference_exact" ? "Exact Source UI" : "AI Creative UI"}
+                          </Badge>
                           <Badge variant="default">{result.images.length} images</Badge>
                           <div className="ml-auto flex flex-wrap items-center gap-2">
                             {hasCaption ? (
@@ -838,6 +1064,7 @@ export function PostDetailView({ postId }: PostDetailViewProps) {
                                     setId: captionKey,
                                     script: result.script,
                                     slidePlans: result.plans,
+                                    recreatedPostId: result.recreatedPostId,
                                   })
                                 }
                               >
@@ -857,6 +1084,37 @@ export function PostDetailView({ postId }: PostDetailViewProps) {
                               <Download className="mr-2 h-4 w-4" />
                               Download All
                             </Button>
+                            {instagramResult?.permalink ? (
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => {
+                                  if (!instagramResult.permalink) return;
+                                  window.open(instagramResult.permalink, "_blank", "noopener,noreferrer");
+                                }}
+                              >
+                                <ExternalLink className="mr-2 h-4 w-4" />
+                                View on Instagram
+                              </Button>
+                            ) : (
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                disabled={result.images.length === 0}
+                                isLoading={Boolean(postingInstagramBySetId[captionKey])}
+                                onClick={() =>
+                                  handlePublishToInstagram({
+                                    setId: captionKey,
+                                    imageUrls: result.images,
+                                    caption,
+                                    recreatedPostId: result.recreatedPostId,
+                                  })
+                                }
+                              >
+                                <Send className="mr-2 h-4 w-4" />
+                                Post to Instagram
+                              </Button>
+                            )}
                           </div>
                         </div>
                         <div className="grid grid-cols-2 gap-3 md:grid-cols-3">
@@ -897,6 +1155,13 @@ export function PostDetailView({ postId }: PostDetailViewProps) {
                             <p className="mt-1 whitespace-pre-wrap text-sm text-slate-700">{caption}</p>
                           </div>
                         ) : null}
+                        {instagramResult ? (
+                          <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-800">
+                            {instagramResult.permalink
+                              ? "Posted to Instagram successfully."
+                              : `Posted to Instagram (Media ID: ${instagramResult.mediaId}).`}
+                          </div>
+                        ) : null}
                       </div>
                     );
                   })}
@@ -921,6 +1186,8 @@ export function PostDetailView({ postId }: PostDetailViewProps) {
                     const captionKey = `history-${item.id}`;
                     const caption = item.caption || captionsBySetId[captionKey] || "";
                     const hasCaption = Boolean(caption.trim());
+                    const instagramResult = instagramResultBySetId[captionKey];
+                    const generatedCount = item.generated_media_urls?.length || 0;
 
                     return (
                       <div key={item.id} className="rounded-xl border border-slate-200 bg-slate-50 p-4">
@@ -971,8 +1238,46 @@ export function PostDetailView({ postId }: PostDetailViewProps) {
                               <Download className="mr-2 h-4 w-4" />
                               Download All
                             </Button>
+                            {instagramResult?.permalink ? (
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => {
+                                  if (!instagramResult.permalink) return;
+                                  window.open(instagramResult.permalink, "_blank", "noopener,noreferrer");
+                                }}
+                              >
+                                <ExternalLink className="mr-2 h-4 w-4" />
+                                View on Instagram
+                              </Button>
+                            ) : (
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                disabled={!item.generated_media_urls?.length}
+                                isLoading={Boolean(postingInstagramBySetId[captionKey])}
+                                onClick={() =>
+                                  handlePublishToInstagram({
+                                    setId: captionKey,
+                                    imageUrls: item.generated_media_urls || [],
+                                    caption,
+                                    recreatedPostId: item.id,
+                                  })
+                                }
+                              >
+                                <Send className="mr-2 h-4 w-4" />
+                                Post to Instagram
+                              </Button>
+                            )}
                           </div>
                         </div>
+                        {item.status === "generating" ? (
+                          <div className="mb-3 rounded-lg border border-slate-200 bg-white p-3">
+                            <p className="text-xs text-slate-600">
+                              Generating slides... {generatedCount} image{generatedCount === 1 ? "" : "s"} ready.
+                            </p>
+                          </div>
+                        ) : null}
                         {Array.isArray(item.generated_media_urls) && item.generated_media_urls.length > 0 ? (
                           <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
                             {item.generated_media_urls.map((url, index) => {
@@ -1013,6 +1318,13 @@ export function PostDetailView({ postId }: PostDetailViewProps) {
                           <div className="mt-3 rounded-lg border border-slate-200 bg-white p-3">
                             <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Caption</p>
                             <p className="mt-1 whitespace-pre-wrap text-sm text-slate-700">{caption}</p>
+                          </div>
+                        ) : null}
+                        {instagramResult ? (
+                          <div className="mt-3 rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-800">
+                            {instagramResult.permalink
+                              ? "Posted to Instagram successfully."
+                              : `Posted to Instagram (Media ID: ${instagramResult.mediaId}).`}
                           </div>
                         ) : null}
                       </div>

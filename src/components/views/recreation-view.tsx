@@ -19,31 +19,10 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Badge } from "@/components/ui/badge";
 
 type SlidePlan = {
-  imagePrompt: string;
   headline: string;
   supportingText: string;
-  textPlacement: "top" | "center" | "bottom";
-  uiInstructions: {
-    layoutConcept: string;
-    artDirection: string;
-    typography: {
-      headlineFontFamily: string;
-      headlineFontWeight: string;
-      supportingFontFamily: string;
-      supportingFontWeight: string;
-      alignment: "left" | "center" | "right";
-    };
-    composition: {
-      textArea: string;
-      safeMargins: string;
-      elementNotes: string[];
-    };
-    styling: {
-      panelStyle: string;
-      accentStyle: string;
-      iconStyle: string;
-    };
-  };
+  figmaInstructions: string[];
+  assetPrompts: { prompt: string; description: string }[];
 };
 
 type ScriptVersion = {
@@ -188,22 +167,22 @@ export function RecreationView() {
       const versions = Array.isArray(data.versions)
         ? sanitizeScriptVersions(data.versions)
         : (() => {
-            const fallbackScript = typeof data.script === "string" ? data.script : "";
-            if (!fallbackScript.trim()) return [];
-            const fallbackMode: ScriptVersion["adaptationMode"] = data.isAppNicheRelevant
-              ? "app_context"
-              : "variant_only";
-            return [
-              {
-                id: "fallback",
-                label: "Generated Script",
-                adaptationMode: fallbackMode,
-                usesAppContext: fallbackMode === "app_context",
-                script: fallbackScript,
-                slidePlans: Array.isArray(data.slidePlans) ? (data.slidePlans as SlidePlan[]) : [],
-              },
-            ];
-          })();
+          const fallbackScript = typeof data.script === "string" ? data.script : "";
+          if (!fallbackScript.trim()) return [];
+          const fallbackMode: ScriptVersion["adaptationMode"] = data.isAppNicheRelevant
+            ? "app_context"
+            : "variant_only";
+          return [
+            {
+              id: "fallback",
+              label: "Generated Script",
+              adaptationMode: fallbackMode,
+              usesAppContext: fallbackMode === "app_context",
+              script: fallbackScript,
+              slidePlans: Array.isArray(data.slidePlans) ? (data.slidePlans as SlidePlan[]) : [],
+            },
+          ];
+        })();
 
       if (versions.length === 0) {
         throw new Error("No script version was generated.");
@@ -386,9 +365,8 @@ export function RecreationView() {
                               prev.includes(url) ? prev.filter((item) => item !== url) : [...prev, url]
                             );
                           }}
-                          className={`relative overflow-hidden rounded-xl border ${
-                            selected ? "border-rose-400 ring-2 ring-rose-200" : "border-slate-200"
-                          }`}
+                          className={`relative overflow-hidden rounded-xl border ${selected ? "border-rose-400 ring-2 ring-rose-200" : "border-slate-200"
+                            }`}
                         >
                           <img src={url} alt={`Reference ${index + 1}`} className="aspect-square w-full object-cover" />
                           <span className="absolute left-2 top-2 rounded-md bg-white/90 px-2 py-0.5 text-[11px] font-medium text-slate-700">
@@ -443,11 +421,10 @@ export function RecreationView() {
                     <button
                       key={version.id}
                       onClick={() => setActiveVersionId(version.id)}
-                      className={`rounded-lg border px-3 py-2 text-sm font-medium transition ${
-                        activeVersionId === version.id
-                          ? "border-rose-300 bg-rose-50 text-rose-700"
-                          : "border-slate-200 bg-white text-slate-600 hover:border-slate-300"
-                      }`}
+                      className={`rounded-lg border px-3 py-2 text-sm font-medium transition ${activeVersionId === version.id
+                        ? "border-rose-300 bg-rose-50 text-rose-700"
+                        : "border-slate-200 bg-white text-slate-600 hover:border-slate-300"
+                        }`}
                     >
                       {version.label}
                     </button>
@@ -481,6 +458,16 @@ export function RecreationView() {
                           <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Slide {index + 1}</p>
                           <p className="mt-1 text-sm font-semibold text-slate-800">{plan.headline}</p>
                           <p className="mt-1 text-xs text-slate-600">{plan.supportingText || "No supporting text"}</p>
+                          {plan.figmaInstructions && plan.figmaInstructions.length > 0 && (
+                            <div className="mt-2 border-t border-slate-100 pt-2">
+                              <p className="text-[11px] font-semibold uppercase tracking-wide text-rose-500">Figma Instructions</p>
+                              <ol className="mt-1 list-inside list-decimal space-y-0.5 text-xs text-slate-600">
+                                {plan.figmaInstructions.map((step, stepIndex) => (
+                                  <li key={stepIndex}>{step}</li>
+                                ))}
+                              </ol>
+                            </div>
+                          )}
                         </div>
                       ))}
                     </div>

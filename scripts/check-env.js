@@ -76,6 +76,18 @@ const optionalProxyEnvVars = {
     description: 'Bearer token for remote extractor service',
     example: 'your_shared_secret_token',
   },
+  'INSTAGRAM_GRAPH_ACCESS_TOKEN': {
+    description: 'Instagram Graph API access token with content publish permissions',
+    example: 'EAABsbCS1iHgBA...',
+  },
+  'INSTAGRAM_GRAPH_USER_ID': {
+    description: 'Instagram Business/Creator user ID for publishing',
+    example: '17841400000000000',
+  },
+  'INSTAGRAM_GRAPH_API_VERSION': {
+    description: 'Instagram Graph API version',
+    example: 'v22.0',
+  },
 };
 
 console.log('🔍 Checking environment variables from .env file...\n');

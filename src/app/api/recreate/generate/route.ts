@@ -1,10 +1,21 @@
 import { NextRequest, NextResponse } from "next/server";
-import { detectNicheRelevance, generateImagePrompts } from "@/lib/gemini";
-import type { AdaptationMode, SlideGenerationPlan } from "@/lib/gemini";
+import { generateSlideDesignPlans } from "@/lib/gemini";
+import type { AdaptationMode, SlideGenerationPlan, UIGenerationMode } from "@/lib/gemini";
 import { generateSlideImages } from "@/lib/gemini-image";
+import {
+  DEFAULT_IMAGE_GENERATION_MODEL,
+  isImageGenerationModel,
+} from "@/lib/image-generation-model";
+import {
+  DEFAULT_REASONING_MODEL,
+  isReasoningModel,
+} from "@/lib/reasoning-model";
 import { supabase } from "@/lib/supabase";
 
-const APP_BRAND_PRIMARY_COLOR = "#EE6A84";
+export const maxDuration = 300;
+
+const APP_BRAND_PRIMARY_COLOR = "#F36F97";
+const APP_BRAND_GRADIENT = ["#F36F97", "#EEB4C3", "#F7DFD6"];
 const APP_LOGO_PATH = "/Users/sultanibneusman/Desktop/Perri/assets/images/app-logo.png";
 const APP_FEATURE_MOCKUP_PATH = "/Users/sultanibneusman/Downloads/feature screenshots/main_hero.PNG";
 
@@ -40,13 +51,57 @@ function asAdaptationMode(value: unknown): AdaptationMode | null {
   return null;
 }
 
+function asUIGenerationMode(value: unknown): UIGenerationMode | null {
+  if (value === "reference_exact" || value === "ai_creative") return value;
+  return null;
+}
+
 interface GenerationVersionInput {
   id: string;
   label: string;
   adaptationMode: AdaptationMode;
   usesAppContext: boolean;
+  uiGenerationMode: UIGenerationMode;
+  followsReferenceLayout: boolean;
   script: string;
   slidePlans: SlideGenerationPlan[];
+  recreatedPostId?: string;
+}
+
+async function persistRecreatedPost({
+  recreatedPostId,
+  collectionId,
+  postId,
+  status,
+  script,
+  generatedMediaUrls,
+  slidePlans,
+}: {
+  recreatedPostId: string;
+  collectionId: string;
+  postId: string;
+  status: "draft" | "generating" | "completed" | "failed";
+  script?: string;
+  generatedMediaUrls?: string[];
+  slidePlans?: unknown[];
+}): Promise<void> {
+  const updatePayload: Record<string, unknown> = {
+    status,
+    updated_at: new Date().toISOString(),
+  };
+
+  if (typeof script === "string") updatePayload.script = script;
+  if (Array.isArray(generatedMediaUrls)) updatePayload.generated_media_urls = generatedMediaUrls;
+  if (Array.isArray(slidePlans)) updatePayload.slide_plans = slidePlans;
+
+  const { error } = await supabase
+    .from("recreated_posts")
+    .update(updatePayload)
+    .eq("id", recreatedPostId)
+    .eq("original_post_id", postId)
+    .eq("collection_id", collectionId);
+
+  if (error) throw error;
 }
 
 function sanitizeSlidePlans(rawPlans: unknown): SlideGenerationPlan[] {
@@ -57,86 +112,28 @@ function sanitizeSlidePlans(rawPlans: unknown): SlideGenerationPlan[] {
       if (typeof item !== "object" || item === null) return null;
 
       const plan = item as Record<string, unknown>;
-      const imagePrompt = typeof plan.imagePrompt === "string" ? plan.imagePrompt.trim() : "";
       const headline = typeof plan.headline === "string" ? plan.headline.trim() : "";
-      const supportingText =
-        typeof plan.supportingText === "string" ? plan.supportingText.trim() : "";
+      const supportingText = typeof plan.supportingText === "string" ? plan.supportingText.trim() : "";
 
-      const textPlacement =
-        typeof plan.textPlacement === "string" && ["top", "center", "bottom"].includes(plan.textPlacement)
-          ? (plan.textPlacement as "top" | "center" | "bottom")
-          : "top";
+      const figmaInstructions = Array.isArray(plan.figmaInstructions)
+        ? plan.figmaInstructions.filter(
+          (step: unknown): step is string => typeof step === "string" && (step as string).trim().length > 0
+        )
+        : [];
 
-      const uiRaw =
-        typeof plan.uiInstructions === "object" && plan.uiInstructions !== null
-          ? (plan.uiInstructions as Record<string, unknown>)
-          : null;
+      const assetPrompts = Array.isArray(plan.assetPrompts)
+        ? plan.assetPrompts
+          .filter((a: unknown): a is Record<string, unknown> => typeof a === "object" && a !== null)
+          .map((a: Record<string, unknown>) => ({
+            prompt: typeof a.prompt === "string" ? a.prompt : "",
+            description: typeof a.description === "string" ? a.description : "Asset",
+          }))
+          .filter((a: { prompt: string }) => a.prompt.length > 0)
+        : [];
 
-      if (!imagePrompt || !headline || !uiRaw) return null;
+      if (!headline && figmaInstructions.length === 0) return null;
 
-      const typography =
-        typeof uiRaw.typography === "object" && uiRaw.typography !== null
-          ? (uiRaw.typography as Record<string, unknown>)
-          : null;
-
-      if (!typography) return null;
-
-      const alignment =
-        typeof typography.alignment === "string" && ["left", "center", "right"].includes(typography.alignment)
-          ? (typography.alignment as "left" | "center" | "right")
-          : "left";
-
-      const composition =
-        typeof uiRaw.composition === "object" && uiRaw.composition !== null
-          ? (uiRaw.composition as Record<string, unknown>)
-          : {};
-      const styling =
-        typeof uiRaw.styling === "object" && uiRaw.styling !== null
-          ? (uiRaw.styling as Record<string, unknown>)
-          : {};
-
-      const uiInstructions: SlideGenerationPlan["uiInstructions"] = {
-        layoutConcept:
-          typeof uiRaw.layoutConcept === "string" ? uiRaw.layoutConcept : "Editorial layout",
-        artDirection: typeof uiRaw.artDirection === "string" ? uiRaw.artDirection : "Clean social aesthetic",
-        typography: {
-          headlineFontFamily:
-            typeof typography.headlineFontFamily === "string"
-              ? typography.headlineFontFamily
-              : "Space Grotesk",
-          headlineFontWeight:
-            typeof typography.headlineFontWeight === "string" ? typography.headlineFontWeight : "700",
-          supportingFontFamily:
-            typeof typography.supportingFontFamily === "string"
-              ? typography.supportingFontFamily
-              : "Inter",
-          supportingFontWeight:
-            typeof typography.supportingFontWeight === "string"
-              ? typography.supportingFontWeight
-              : "500",
-          alignment,
-        },
-        composition: {
-          textArea: typeof composition.textArea === "string" ? composition.textArea : "Upper third",
-          safeMargins: typeof composition.safeMargins === "string" ? composition.safeMargins : "8%",
-          elementNotes: Array.isArray(composition.elementNotes)
-            ? composition.elementNotes.filter((note): note is string => typeof note === "string")
-            : [],
-        },
-        styling: {
-          panelStyle: typeof styling.panelStyle === "string" ? styling.panelStyle : "Soft panel",
-          accentStyle: typeof styling.accentStyle === "string" ? styling.accentStyle : "Minimal accent",
-          iconStyle: typeof styling.iconStyle === "string" ? styling.iconStyle : "Simple iconography",
-        },
-      };
-
-      return {
-        imagePrompt,
-        headline,
-        supportingText,
-        textPlacement,
-        uiInstructions,
-      };
+      return { headline, supportingText, figmaInstructions, assetPrompts };
     })
     .filter((plan): plan is SlideGenerationPlan => Boolean(plan))
     .slice(0, 10);
@@ -154,6 +151,12 @@ export async function POST(request: NextRequest) {
     const postId = asNonEmptyString(body.postId);
     const appName = asNonEmptyString(body.appName);
     const recreatedPostId = asNonEmptyString(body.recreatedPostId);
+    const imageGenerationModel = isImageGenerationModel(body.imageGenerationModel)
+      ? body.imageGenerationModel
+      : DEFAULT_IMAGE_GENERATION_MODEL;
+    const reasoningModel = isReasoningModel(body.reasoningModel)
+      ? body.reasoningModel
+      : DEFAULT_REASONING_MODEL;
 
     const fallbackMode: AdaptationMode = resolveAppContextMode(script ?? "", body.isAppNicheRelevant)
       ? "app_context"
@@ -214,64 +217,66 @@ export async function POST(request: NextRequest) {
             (adaptationMode === "app_context" ? "App Context Rewrite" : "Original Topic Variant"),
           adaptationMode,
           usesAppContext: adaptationMode === "app_context",
+          uiGenerationMode: asUIGenerationMode(item.uiGenerationMode) || "ai_creative",
+          followsReferenceLayout: asUIGenerationMode(item.uiGenerationMode) === "reference_exact",
           script: versionScript,
           slidePlans: sanitizeSlidePlans(item.slidePlans),
+          recreatedPostId: asNonEmptyString(item.recreatedPostId) || undefined,
         };
       })
       .filter((version): version is GenerationVersionInput => Boolean(version));
 
     const fallbackVersion: GenerationVersionInput | null = script
       ? {
-          id: fallbackMode,
-          label: fallbackMode === "app_context" ? "App Context Rewrite" : "Original Topic Variant",
-          adaptationMode: fallbackMode,
-          usesAppContext: fallbackMode === "app_context",
-          script,
-          slidePlans: sanitizeSlidePlans(incomingSlidePlans),
-        }
+        id: fallbackMode,
+        label: fallbackMode === "app_context" ? "App Context Rewrite" : "Original Topic Variant",
+        adaptationMode: fallbackMode,
+        usesAppContext: fallbackMode === "app_context",
+        uiGenerationMode: "ai_creative",
+        followsReferenceLayout: false,
+        script,
+        slidePlans: sanitizeSlidePlans(incomingSlidePlans),
+        recreatedPostId: recreatedPostId || undefined,
+      }
       : null;
 
-    const versionsToGenerate = explicitVersions.length > 0
+    const rawVersionsToGenerate = explicitVersions.length > 0
       ? explicitVersions
       : fallbackVersion
         ? [fallbackVersion]
         : [];
 
+    const versionsToGenerate =
+      recreatedPostId && rawVersionsToGenerate.length > 0 && !rawVersionsToGenerate.some((v) => v.recreatedPostId)
+        ? rawVersionsToGenerate.map((version, index) =>
+          index === 0
+            ? {
+              ...version,
+              recreatedPostId,
+            }
+            : version
+        )
+        : rawVersionsToGenerate;
+
     if (versionsToGenerate.length === 0) {
       throw new Error("No valid generation version payload found.");
     }
 
-    let nicheResultPromise: Promise<Awaited<ReturnType<typeof detectNicheRelevance>>> | null = null;
-    const getNicheResult = async () => {
-      if (!nicheResultPromise) {
-        nicheResultPromise = detectNicheRelevance(
-          {
-            title: null,
-            description: null,
-            platform,
-          },
-          appContext,
-          appName,
-          referenceImageUrls
-        );
-      }
-      return nicheResultPromise;
-    };
-
+    // If slide plans are missing, generate them using the new per-slide approach
     const hydratedVersions = await Promise.all(
       versionsToGenerate.map(async (version) => {
-        if (version.slidePlans.length > 0) return version;
+        if (version.slidePlans.length > 0) {
+          return version;
+        }
 
-        const niche = await getNicheResult();
-        const slidePlans = await generateImagePrompts(
-          version.script,
-          appName,
-          6,
-          platform,
+        const slidePlans = await generateSlideDesignPlans(
           referenceImageUrls,
-          appContext || undefined,
-          niche,
-          version.adaptationMode
+          version.script,
+          platform,
+          APP_BRAND_PRIMARY_COLOR,
+          APP_BRAND_GRADIENT,
+          appName,
+          reasoningModel
         );
 
         return {
@@ -281,80 +286,180 @@ export async function POST(request: NextRequest) {
       })
     );
 
-    const generationId = `${recreatedPostId || "run"}-${Date.now()}`;
-
-    // Step 2: Generate all image variants
-    const versionResults = await Promise.all(
+    const versionsWithRows = await Promise.all(
       hydratedVersions.map(async (version) => {
-        const images = await generateSlideImages(version.slidePlans, {
-          collectionId,
-          postId,
-          platform,
-          generationId,
-          versionId: version.id,
-          brandAssets: version.usesAppContext
-            ? {
-                appName,
-                primaryColorHex: APP_BRAND_PRIMARY_COLOR,
-                logoImagePath: APP_LOGO_PATH,
-                featureMockupPath: APP_FEATURE_MOCKUP_PATH,
-              }
-            : undefined,
-        });
+        if (version.recreatedPostId) return version;
+
+        const { data: inserted, error: insertError } = await supabase
+          .from("recreated_posts")
+          .insert({
+            original_post_id: postId,
+            collection_id: collectionId,
+            script: version.script,
+            generated_media_urls: [],
+            status: "draft",
+          })
+          .select("id")
+          .single();
+
+        if (insertError) throw insertError;
 
         return {
-          id: version.id,
-          label: version.label,
-          adaptationMode: version.adaptationMode,
-          usesAppContext: version.usesAppContext,
-          script: version.script,
-          plans: version.slidePlans,
-          images,
+          ...version,
+          recreatedPostId: inserted.id,
         };
       })
     );
 
-    const primaryResult = versionResults[0];
-    const images = primaryResult.images;
+    const generationId = `${recreatedPostId || "run"}-${Date.now()}`;
 
-    // Step 3: Persist this recreation session
-    if (recreatedPostId) {
-      const { error: updateError } = await supabase
-        .from("recreated_posts")
-        .update({
-          script: primaryResult.script,
-          generated_media_urls: images,
-          status: "completed",
-          updated_at: new Date().toISOString(),
-        })
-        .eq("id", recreatedPostId)
-        .eq("original_post_id", postId)
-        .eq("collection_id", collectionId);
+    // Generate images from asset prompts and persist incrementally
+    const versionExecution = await Promise.all(
+      versionsWithRows.map(async (version) => {
+        const rowId = version.recreatedPostId;
+        if (!rowId) {
+          return {
+            success: false as const,
+            versionId: version.id,
+            label: version.label,
+            error: "Missing recreated post row id for generation.",
+          };
+        }
 
-      if (updateError) {
-        console.error("Failed to update recreated post:", updateError);
-      }
-    } else {
-      const { error: insertError } = await supabase
-        .from("recreated_posts")
-        .insert({
-          original_post_id: postId,
-          collection_id: collectionId,
-          script: primaryResult.script,
-          generated_media_urls: images,
-          status: "completed",
-        });
+        try {
+          await persistRecreatedPost({
+            recreatedPostId: rowId,
+            collectionId,
+            postId,
+            status: "generating",
+            script: version.script,
+            generatedMediaUrls: [],
+          });
 
-      if (insertError) {
-        console.error("Failed to insert recreated post:", insertError);
-      }
+          const partialImages: string[] = [];
+
+          const images = await generateSlideImages(version.slidePlans, {
+            collectionId,
+            postId,
+            platform,
+            generationId,
+            versionId: version.id,
+            imageModel: imageGenerationModel,
+            onSlideComplete: async ({ slideIndex, imageUrl }) => {
+              partialImages[slideIndex] = imageUrl;
+              const generatedMediaUrls = partialImages.filter(
+                (item): item is string => typeof item === "string" && item.trim().length > 0
+              );
+
+              try {
+                await persistRecreatedPost({
+                  recreatedPostId: rowId,
+                  collectionId,
+                  postId,
+                  status: "generating",
+                  generatedMediaUrls,
+                });
+              } catch (persistError) {
+                console.error("[recreate/generate] failed to persist partial images", {
+                  recreatedPostId: rowId,
+                  versionId: version.id,
+                  slideIndex,
+                  error: persistError instanceof Error ? persistError.message : String(persistError),
+                });
+              }
+            },
+            uiGenerationMode: version.uiGenerationMode,
+            referenceImageUrls,
+            brandAssets: {
+              appName,
+              primaryColorHex: APP_BRAND_PRIMARY_COLOR,
+              gradientHexColors: APP_BRAND_GRADIENT,
+              logoImagePath: APP_LOGO_PATH,
+              featureMockupPath: APP_FEATURE_MOCKUP_PATH,
+            },
+          });
+
+          await persistRecreatedPost({
+            recreatedPostId: rowId,
+            collectionId,
+            postId,
+            status: "completed",
+            script: version.script,
+            generatedMediaUrls: images,
+            slidePlans: version.slidePlans,
+          });
+
+          return {
+            success: true as const,
+            result: {
+              id: version.id,
+              label: version.label,
+              adaptationMode: version.adaptationMode,
+              usesAppContext: version.usesAppContext,
+              uiGenerationMode: version.uiGenerationMode,
+              followsReferenceLayout: version.followsReferenceLayout,
+              script: version.script,
+              plans: version.slidePlans,
+              images,
+              recreatedPostId: rowId,
+            },
+          };
+        } catch (versionError) {
+          await persistRecreatedPost({
+            recreatedPostId: rowId,
+            collectionId,
+            postId,
+            status: "failed",
+            script: version.script,
+          });
+
+          return {
+            success: false as const,
+            versionId: version.id,
+            label: version.label,
+            recreatedPostId: rowId,
+            error:
+              versionError instanceof Error
+                ? versionError.message
+                : "Image generation pipeline failed.",
+          };
+        }
+      })
+    );
+
+    const persistedVersionResults = versionExecution
+      .filter((entry): entry is Extract<(typeof versionExecution)[number], { success: true }> => entry.success)
+      .map((entry) => entry.result);
+
+    const failedVersions = versionExecution
+      .filter((entry): entry is Extract<(typeof versionExecution)[number], { success: false }> => !entry.success)
+      .map((entry) => ({
+        versionId: entry.versionId,
+        label: entry.label,
+        recreatedPostId: "recreatedPostId" in entry ? entry.recreatedPostId || null : null,
+        error: entry.error,
+      }));
+
+    if (persistedVersionResults.length === 0) {
+      throw new Error(
+        failedVersions[0]?.error || "All version image pipelines failed before producing any output."
+      );
     }
 
+    const firstRequestedVersionId = versionsWithRows[0]?.id;
+    const persistedPrimaryResult =
+      persistedVersionResults.find((result) => result.id === firstRequestedVersionId) ||
+      persistedVersionResults[0];
+
     return NextResponse.json({
-      images,
-      plans: primaryResult.plans,
-      primaryVersionId: primaryResult.id,
-      versionResults,
+      images: persistedPrimaryResult.images,
+      plans: persistedPrimaryResult.plans,
+      primaryVersionId: persistedPrimaryResult.id,
+      recreatedPostId: persistedPrimaryResult.recreatedPostId || null,
+      imageGenerationModel,
+      reasoningModel,
+      versionResults: persistedVersionResults,
+      failedVersions,
     });
   } catch (err) {
     return NextResponse.json(

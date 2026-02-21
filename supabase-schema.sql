@@ -38,6 +38,7 @@ CREATE TABLE recreated_posts (
   script TEXT NOT NULL,
   generated_media_urls TEXT[],
   status TEXT NOT NULL DEFAULT 'draft',
+  generation_state JSONB DEFAULT '{}'::jsonb,
   created_at TIMESTAMPTZ DEFAULT NOW(),
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );

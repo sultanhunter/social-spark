@@ -1,5 +1,6 @@
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import { getSlideImageSpec } from "@/lib/utils";
+import { DEFAULT_REASONING_MODEL, type ReasoningModel } from "@/lib/reasoning-model";
 
 const genAI = new GoogleGenerativeAI(process.env.GOOGLE_GEMINI_API_KEY!);
 
@@ -15,33 +16,13 @@ export interface NicheRelevanceResult {
 }
 
 export type AdaptationMode = "app_context" | "variant_only";
+export type UIGenerationMode = "reference_exact" | "ai_creative";
 
 export interface SlideGenerationPlan {
-  imagePrompt: string;
   headline: string;
   supportingText: string;
-  textPlacement: "top" | "center" | "bottom";
-  uiInstructions: {
-    layoutConcept: string;
-    artDirection: string;
-    typography: {
-      headlineFontFamily: string;
-      headlineFontWeight: string;
-      supportingFontFamily: string;
-      supportingFontWeight: string;
-      alignment: "left" | "center" | "right";
-    };
-    composition: {
-      textArea: string;
-      safeMargins: string;
-      elementNotes: string[];
-    };
-    styling: {
-      panelStyle: string;
-      accentStyle: string;
-      iconStyle: string;
-    };
-  };
+  figmaInstructions: string[];
+  assetPrompts: { prompt: string; description: string }[];
 }
 
 export function detectAdaptationModeFromScript(script: string): AdaptationMode {
@@ -105,9 +86,10 @@ export async function detectNicheRelevance(
   },
   appContext: string,
   appName: string,
-  referenceImageUrls: string[] = []
+  referenceImageUrls: string[] = [],
+  reasoningModel: ReasoningModel = DEFAULT_REASONING_MODEL
 ): Promise<NicheRelevanceResult> {
-  const model = genAI.getGenerativeModel({ model: "gemini-3-pro-preview" });
+  const model = genAI.getGenerativeModel({ model: reasoningModel });
 
   const prompt = `You are a strict social-post classifier for a two-step niche gate.
 
@@ -189,9 +171,10 @@ export async function generatePostScript(
   appName: string,
   referenceImageUrls: string[] = [],
   nicheRelevance?: NicheRelevanceResult,
-  forcedAdaptationMode?: AdaptationMode
+  forcedAdaptationMode?: AdaptationMode,
+  reasoningModel: ReasoningModel = DEFAULT_REASONING_MODEL
 ): Promise<string> {
-  const model = genAI.getGenerativeModel({ model: "gemini-3-pro-preview" });
+  const model = genAI.getGenerativeModel({ model: reasoningModel });
 
   const relevanceBlock = nicheRelevance
     ? `
@@ -260,35 +243,151 @@ Keep copy natural, specific, and non-generic.`;
   return result.response.text();
 }
 
-function parseSlidePlans(text: string, slideCount: number): SlideGenerationPlan[] {
+/* ---------- Step 1: Extract slide texts from original images ---------- */
+
+export interface ExtractedSlideText {
+  slideIndex: number;
+  headline: string;
+  supportingText: string;
+}
+
+export async function extractSlideTexts(
+  imageUrls: string[],
+  reasoningModel: ReasoningModel = DEFAULT_REASONING_MODEL
+): Promise<ExtractedSlideText[]> {
+  if (imageUrls.length === 0) return [];
+
+  const model = genAI.getGenerativeModel({ model: reasoningModel });
+  const imageParts = await buildReferenceImageParts(imageUrls);
+  if (imageParts.length === 0) {
+    throw new Error("Failed to load slide images for text extraction.");
+  }
+
+  const prompt = `You are looking at ${imageParts.length} social media carousel slide images.
+
+For EACH slide image, extract the text that appears on it. Identify the main headline and any supporting/body text separately.
+
+Return JSON array with one object per slide, in order:
+[
+  { "slideIndex": 0, "headline": "...", "supportingText": "..." },
+  { "slideIndex": 1, "headline": "...", "supportingText": "..." }
+]
+
+Rules:
+- Extract the EXACT text as it appears on each slide.
+- If a slide has no headline, set headline to "".
+- If a slide has no supporting text, set supportingText to "".
+- Do not add or modify any text — transcribe exactly.
+- JSON only, no markdown.`;
+
+  const result = await model.generateContent([{ text: prompt }, ...imageParts]);
+  const parsed = parseJsonFromModel(result.response.text());
+
+  if (!Array.isArray(parsed)) {
+    return imageUrls.map((_, i) => ({ slideIndex: i, headline: "", supportingText: "" }));
+  }
+
+  return parsed.map((item, i) => {
+    const row = typeof item === "object" && item !== null ? (item as Record<string, unknown>) : {};
+    return {
+      slideIndex: i,
+      headline: typeof row.headline === "string" ? row.headline.trim() : "",
+      supportingText: typeof row.supportingText === "string" ? row.supportingText.trim() : "",
+    };
+  });
+}
+
+/* ---------- Step 3: Per-slide Figma instructions + asset prompts ---------- */
+
+export async function generateSlideDesignPlans(
+  originalImageUrls: string[],
+  script: string,
+  platform: string,
+  brandPrimaryColor: string,
+  brandGradient: string[],
+  appName: string,
+  reasoningModel: ReasoningModel = DEFAULT_REASONING_MODEL
+): Promise<SlideGenerationPlan[]> {
+  const model = genAI.getGenerativeModel({ model: reasoningModel });
+  const imageSpec = getSlideImageSpec(platform);
+  const gradientStr = brandGradient.join(" → ");
+
+  const imageParts = await buildReferenceImageParts(originalImageUrls);
+
+  const prompt = `You are an expert art director and Figma designer. I am showing you ${imageParts.length} original carousel slide images and a rewritten script for our brand.
+
+YOUR TASK: For EACH slide, produce:
+1. **figmaInstructions** — step-by-step instructions to recreate this slide's EXACT visual layout and style in Figma, but using OUR brand identity. Be extremely specific:
+   - Mention exact positions (e.g. "48px from top-left"), sizes (e.g. "width: 600px"), spacings
+   - Reference our brand gradient: ${gradientStr} — use these for backgrounds, panels, accent shapes, overlays
+   - Include brand logo placement (position, size)
+   - Specify font names, weights, sizes, colors for each text layer
+   - Describe any shapes, dividers, icons, overlays, and their exact styling
+   - The goal is that a designer can follow these steps to build the slide in Figma without guessing
+
+2. **assetPrompts** — an array of image asset descriptions that need to be AI-generated for this slide. Each asset is something the Figma design will use (e.g. a background photo, an illustration, an icon, a texture, a product mockup). For each, provide:
+   - "prompt": a detailed image generation prompt (NO text/typography in the image)
+   - "description": a short label (e.g. "Background gradient photo", "Hero illustration")
+
+3. **headline** — the new headline from the script for this slide
+4. **supportingText** — the new supporting text from the script for this slide
+
+REWRITTEN SCRIPT (all slides):
+${script}
+
+BRAND IDENTITY:
+- App Name: ${appName}
+- Primary Color: ${brandPrimaryColor}
+- Brand Gradient: ${gradientStr}
+- Target size: ${imageSpec.width}×${imageSpec.height} (${imageSpec.aspectRatio})
+
+RULES:
+- Look at each original slide image carefully to understand its layout, composition, typography placement, visual hierarchy, and style.
+- Your figmaInstructions should recreate that SAME style/layout but adapted with our brand colors (${gradientStr}), our copy from the script, and our logo.
+- assetPrompts must NEVER include text/typography in the generated images. Assets are purely visual elements.
+- Match the number of slides in the script to the provided images. If the script has more slides than images, use the last image's style for extra slides.
+
+Return JSON array with one object per slide:
+[
+  {
+    "headline": "New headline from script",
+    "supportingText": "New supporting text from script",
+    "figmaInstructions": [
+      "Step 1: Create a ${imageSpec.width}×${imageSpec.height} frame...",
+      "Step 2: ...",
+      "..."
+    ],
+    "assetPrompts": [
+      { "prompt": "Detailed image generation prompt for asset...", "description": "Background photo" },
+      { "prompt": "...", "description": "Decorative element" }
+    ]
+  }
+]
+
+JSON only. No markdown.`;
+
+  const content = imageParts.length > 0
+    ? [{ text: prompt }, ...imageParts]
+    : [{ text: prompt }];
+
+  const result = await model.generateContent(content);
+  return parseSlideDesignPlans(result.response.text(), originalImageUrls.length);
+}
+
+function parseSlideDesignPlans(text: string, slideCount: number): SlideGenerationPlan[] {
   const parsed = parseJsonFromModel(text);
 
-  const fallback = Array.from({ length: slideCount }, (_, index) => ({
-    imagePrompt: "Editorial social carousel scene with strong hierarchy and premium composition.",
-    headline: `Slide ${index + 1}`,
+  const fallback: SlideGenerationPlan[] = Array.from({ length: slideCount }, (_, i) => ({
+    headline: `Slide ${i + 1}`,
     supportingText: "",
-    textPlacement: "top" as const,
-    uiInstructions: {
-      layoutConcept: "Dynamic editorial card",
-      artDirection: "Premium and modern",
-      typography: {
-        headlineFontFamily: "Space Grotesk",
-        headlineFontWeight: "700",
-        supportingFontFamily: "Inter",
-        supportingFontWeight: "500",
-        alignment: "left" as const,
-      },
-      composition: {
-        textArea: "Upper third",
-        safeMargins: "8% all sides",
-        elementNotes: ["Keep clear hierarchy"],
-      },
-      styling: {
-        panelStyle: "Subtle translucent panel",
-        accentStyle: "Soft contrast accent",
-        iconStyle: "Minimal icons",
-      },
-    },
+    figmaInstructions: [
+      "Create a 1080×1080 frame in Figma.",
+      "Place the generated asset as the background layer.",
+      "Add headline text using your brand font.",
+    ],
+    assetPrompts: [
+      { prompt: "Clean abstract background with soft pink-to-blush gradients.", description: "Background" },
+    ],
   }));
 
   if (!Array.isArray(parsed)) return fallback;
@@ -297,75 +396,27 @@ function parseSlidePlans(text: string, slideCount: number): SlideGenerationPlan[
     .map((item): SlideGenerationPlan | null => {
       if (typeof item !== "object" || item === null) return null;
       const row = item as Record<string, unknown>;
-      const imagePrompt = typeof row.imagePrompt === "string" ? row.imagePrompt.trim() : "";
+
       const headline = typeof row.headline === "string" ? row.headline.trim() : "";
       const supportingText = typeof row.supportingText === "string" ? row.supportingText.trim() : "";
-      const textPlacement =
-        typeof row.textPlacement === "string" && ["top", "center", "bottom"].includes(row.textPlacement)
-          ? (row.textPlacement as "top" | "center" | "bottom")
-          : "top";
 
-      const uiRaw =
-        typeof row.uiInstructions === "object" && row.uiInstructions !== null
-          ? (row.uiInstructions as Record<string, unknown>)
-          : {};
-      const typoRaw =
-        typeof uiRaw.typography === "object" && uiRaw.typography !== null
-          ? (uiRaw.typography as Record<string, unknown>)
-          : {};
-      const compositionRaw =
-        typeof uiRaw.composition === "object" && uiRaw.composition !== null
-          ? (uiRaw.composition as Record<string, unknown>)
-          : {};
-      const stylingRaw =
-        typeof uiRaw.styling === "object" && uiRaw.styling !== null
-          ? (uiRaw.styling as Record<string, unknown>)
-          : {};
+      const figmaInstructions = Array.isArray(row.figmaInstructions)
+        ? row.figmaInstructions.filter((s): s is string => typeof s === "string" && s.trim().length > 0)
+        : [];
 
-      if (!imagePrompt || !headline) return null;
+      const assetPrompts = Array.isArray(row.assetPrompts)
+        ? row.assetPrompts
+          .filter((a): a is Record<string, unknown> => typeof a === "object" && a !== null)
+          .map((a) => ({
+            prompt: typeof a.prompt === "string" ? a.prompt : "",
+            description: typeof a.description === "string" ? a.description : "Asset",
+          }))
+          .filter((a) => a.prompt.length > 0)
+        : [];
 
-      const uiInstructions: SlideGenerationPlan["uiInstructions"] = {
-        layoutConcept:
-          typeof uiRaw.layoutConcept === "string" ? uiRaw.layoutConcept : "Editorial text composition",
-        artDirection: typeof uiRaw.artDirection === "string" ? uiRaw.artDirection : "Clean and premium",
-        typography: {
-          headlineFontFamily:
-            typeof typoRaw.headlineFontFamily === "string" ? typoRaw.headlineFontFamily : "Space Grotesk",
-          headlineFontWeight:
-            typeof typoRaw.headlineFontWeight === "string" ? typoRaw.headlineFontWeight : "700",
-          supportingFontFamily:
-            typeof typoRaw.supportingFontFamily === "string" ? typoRaw.supportingFontFamily : "Inter",
-          supportingFontWeight:
-            typeof typoRaw.supportingFontWeight === "string" ? typoRaw.supportingFontWeight : "500",
-          alignment:
-            typeof typoRaw.alignment === "string" && ["left", "center", "right"].includes(typoRaw.alignment)
-              ? (typoRaw.alignment as "left" | "center" | "right")
-              : "left",
-        },
-        composition: {
-          textArea: typeof compositionRaw.textArea === "string" ? compositionRaw.textArea : "Upper third",
-          safeMargins:
-            typeof compositionRaw.safeMargins === "string" ? compositionRaw.safeMargins : "8% all sides",
-          elementNotes: Array.isArray(compositionRaw.elementNotes)
-            ? compositionRaw.elementNotes.filter((note): note is string => typeof note === "string")
-            : [],
-        },
-        styling: {
-          panelStyle:
-            typeof stylingRaw.panelStyle === "string" ? stylingRaw.panelStyle : "Subtle translucent panel",
-          accentStyle:
-            typeof stylingRaw.accentStyle === "string" ? stylingRaw.accentStyle : "Soft contrast accent",
-          iconStyle: typeof stylingRaw.iconStyle === "string" ? stylingRaw.iconStyle : "Minimal icons",
-        },
-      };
+      if (!headline && figmaInstructions.length === 0) return null;
 
-      return {
-        imagePrompt,
-        headline,
-        supportingText,
-        textPlacement,
-        uiInstructions,
-      };
+      return { headline, supportingText, figmaInstructions, assetPrompts };
     })
     .filter((plan): plan is SlideGenerationPlan => Boolean(plan));
 
@@ -374,107 +425,7 @@ function parseSlidePlans(text: string, slideCount: number): SlideGenerationPlan[
   return [...plans, ...fallback.slice(0, slideCount - plans.length)];
 }
 
-export async function generateImagePrompts(
-  script: string,
-  appName: string,
-  slideCount: number,
-  platform: string,
-  referenceImageUrls: string[] = [],
-  appContext?: string,
-  nicheRelevance?: NicheRelevanceResult,
-  forcedAdaptationMode?: AdaptationMode
-): Promise<SlideGenerationPlan[]> {
-  const model = genAI.getGenerativeModel({ model: "gemini-3-pro-preview" });
-  const imageSpec = getSlideImageSpec(platform);
-
-  const relevanceBlock = nicheRelevance
-    ? `
-NICHE CLASSIFICATION:
-- isIslamic: ${nicheRelevance.isIslamic}
-- isPregnancyOrPeriodRelated: ${nicheRelevance.isPregnancyOrPeriodRelated}
-- canIncorporateAppContext: ${nicheRelevance.canIncorporateAppContext}
-- canReframeToIslamicAppContext: ${nicheRelevance.canReframeToIslamicAppContext}
-- canRecreate: ${nicheRelevance.canRecreate}
-- isAppNicheRelevant: ${nicheRelevance.isAppNicheRelevant}
-- confidence: ${nicheRelevance.confidence}
-- reason: ${nicheRelevance.reason}
-`
-    : "";
-
-  const forcedModeBlock = forcedAdaptationMode
-    ? `
-FORCED OUTPUT MODE:
-- You MUST produce slides for adaptation mode: ${forcedAdaptationMode}
-- Do not generate plans for the other mode.
-`
-    : "";
-
-  const prompt = `Generate ${slideCount} slide-generation plans for ${appName}.
-
-SCRIPT:
-${script}
-
-APP CONTEXT:
-${appContext || "N/A"}
-${relevanceBlock}
-${forcedModeBlock}
-
-RULES:
-- If canRecreate=false, do not force app context.
-- If isIslamic=true and isPregnancyOrPeriodRelated=true, plans should align copy + visuals to app context.
-- If isIslamic=true and isPregnancyOrPeriodRelated=false, keep same topic/vibe/structure unless app-context mode is explicitly required.
-- If isIslamic=false and isPregnancyOrPeriodRelated=true, only align to app context when canReframeToIslamicAppContext=true.
-- If FORCED OUTPUT MODE is provided, follow it exactly.
-- Use the original references for structure and pacing, not exact duplication.
-- Ensure strong variation across slides (layout, hierarchy, visual rhythm, typography).
-- Target ${platform} with ${imageSpec.width}x${imageSpec.height} (${imageSpec.aspectRatio}).
-
-Return JSON array with exactly ${slideCount} items:
-[
-  {
-    "imagePrompt": "Full final slide render instructions with background + typography + UI",
-    "headline": "string",
-    "supportingText": "string",
-    "textPlacement": "top|center|bottom",
-    "uiInstructions": {
-      "layoutConcept": "string",
-      "artDirection": "string",
-      "typography": {
-        "headlineFontFamily": "string",
-        "headlineFontWeight": "string",
-        "supportingFontFamily": "string",
-        "supportingFontWeight": "string",
-        "alignment": "left|center|right"
-      },
-      "composition": {
-        "textArea": "string",
-        "safeMargins": "string",
-        "elementNotes": ["string"]
-      },
-      "styling": {
-        "panelStyle": "string",
-        "accentStyle": "string",
-        "iconStyle": "string"
-      }
-    }
-  }
-]
-
-No markdown. JSON only.`;
-
-  let result;
-  if (referenceImageUrls.length > 0) {
-    const imageParts = await buildReferenceImageParts(referenceImageUrls);
-    result =
-      imageParts.length > 0
-        ? await model.generateContent([{ text: prompt }, ...imageParts])
-        : await model.generateContent(prompt);
-  } else {
-    result = await model.generateContent(prompt);
-  }
-
-  return parseSlidePlans(result.response.text(), slideCount);
-}
+/* ---------- Caption generation ---------- */
 
 function cleanCaption(text: string): string {
   let output = text.trim();
@@ -502,6 +453,7 @@ export async function generatePostCaption({
   slideSummaries = [],
   originalTitle,
   originalDescription,
+  reasoningModel = DEFAULT_REASONING_MODEL,
 }: {
   script: string;
   appName: string;
@@ -510,8 +462,9 @@ export async function generatePostCaption({
   slideSummaries?: string[];
   originalTitle?: string | null;
   originalDescription?: string | null;
+  reasoningModel?: ReasoningModel;
 }): Promise<string> {
-  const model = genAI.getGenerativeModel({ model: "gemini-3-pro-preview" });
+  const model = genAI.getGenerativeModel({ model: reasoningModel });
 
   const slidesBlock = slideSummaries.length > 0 ? `SLIDES:\n- ${slideSummaries.join("\n- ")}` : "";
   const originalBlock = originalTitle || originalDescription

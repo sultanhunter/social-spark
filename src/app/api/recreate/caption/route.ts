@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { generatePostCaption } from "@/lib/gemini";
+import { DEFAULT_REASONING_MODEL, isReasoningModel } from "@/lib/reasoning-model";
 import { supabase } from "@/lib/supabase";
 
 function asNonEmptyString(value: unknown): string | null {
@@ -46,6 +47,9 @@ export async function POST(request: NextRequest) {
     const recreatedPostId = asNonEmptyString(body.recreatedPostId);
     const slideSummaries = summarizeSlides(body.slidePlans);
     let script = asNonEmptyString(body.script);
+    const reasoningModel = isReasoningModel(body.reasoningModel)
+      ? body.reasoningModel
+      : DEFAULT_REASONING_MODEL;
 
     if (!collectionId || !postId) {
       return NextResponse.json(
@@ -101,6 +105,7 @@ export async function POST(request: NextRequest) {
       slideSummaries,
       originalTitle: asNonEmptyString(postResult.data?.title),
       originalDescription: asNonEmptyString(postResult.data?.description),
+      reasoningModel,
     });
 
     if (recreatedPostId) {
@@ -119,7 +124,7 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    return NextResponse.json({ caption });
+    return NextResponse.json({ caption, reasoningModel });
   } catch (err) {
     return NextResponse.json(
       { error: err instanceof Error ? err.message : "Failed to generate caption" },

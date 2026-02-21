@@ -129,7 +129,7 @@ export async function POST(request: NextRequest) {
 
         if (metaResponse.ok) {
           const html = await metaResponse.text();
-          
+
           const ogImage = html.match(
             /<meta[^>]*property="og:image"[^>]*content="([^"]*)"[^>]*>/i
           );
@@ -143,7 +143,7 @@ export async function POST(request: NextRequest) {
           if (ogImage && ogImage[1]) {
             originalImageUrls = [ogImage[1]];
           }
-          
+
           postTitle = postTitle || ogTitle?.[1] || null;
           postDescription = ogDescription?.[1] || null;
 
@@ -163,7 +163,11 @@ export async function POST(request: NextRequest) {
     if (originalImageUrls.length > 0) {
       try {
         console.log(
-          `[posts-save] req=${requestId} r2_upload_start count=${originalImageUrls.length}`
+          `[posts-save] req=$
+
+          
+          
+          {requestId} r2_upload_start count=${originalImageUrls.length}`
         );
         mediaUrls = await downloadAndUploadMultipleToR2(
           originalImageUrls,
