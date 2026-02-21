@@ -7,9 +7,12 @@ import {
   ArrowLeft,
   CheckCircle2,
   Copy,
+  Download,
+  Eraser,
   FileText,
   Image as ImageIcon,
   Layers,
+  Loader2,
   Sparkles,
   Wand2,
 } from "lucide-react";
@@ -101,6 +104,49 @@ export function RecreationView() {
   const [scriptVersions, setScriptVersions] = useState<ScriptVersion[]>([]);
   const [activeVersionId, setActiveVersionId] = useState<string>("");
   const [generatedVersions, setGeneratedVersions] = useState<GeneratedVersionResult[]>([]);
+  const [removeBgLoading, setRemoveBgLoading] = useState<Record<string, boolean>>({});
+
+  const handleDownload = async (url: string, filename: string) => {
+    try {
+      const res = await fetch(url);
+      const blob = await res.blob();
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = filename;
+      a.click();
+      URL.revokeObjectURL(a.href);
+    } catch {
+      window.open(url, "_blank");
+    }
+  };
+
+  const handleRemoveBg = async (versionId: string, imageIndex: number, imageUrl: string) => {
+    const key = `${versionId}-${imageIndex}`;
+    setRemoveBgLoading((prev) => ({ ...prev, [key]: true }));
+    try {
+      const res = await fetch("/api/remove-bg", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ imageUrl }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Failed");
+
+      // Add bg-removed image right after the original
+      setGeneratedVersions((prev) =>
+        prev.map((v) => {
+          if (v.id !== versionId) return v;
+          const newImages = [...v.images];
+          newImages.splice(imageIndex + 1, 0, data.url);
+          return { ...v, images: newImages };
+        })
+      );
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Background removal failed");
+    } finally {
+      setRemoveBgLoading((prev) => ({ ...prev, [key]: false }));
+    }
+  };
   const [selectedReferenceImages, setSelectedReferenceImages] = useState<string[]>([]);
   const [nicheState, setNicheState] = useState<NicheState>(null);
   const [isGeneratingScript, setIsGeneratingScript] = useState(false);
@@ -492,11 +538,40 @@ export function RecreationView() {
                         <Badge variant="default">{result.images.length} images</Badge>
                       </div>
                       <div className="grid grid-cols-2 gap-3 md:grid-cols-3">
-                        {result.images.map((url, index) => (
-                          <div key={`${result.id}-${index}`} className="overflow-hidden rounded-lg border border-slate-200 bg-white">
-                            <img src={url} alt={`${result.label} slide ${index + 1}`} className="aspect-square w-full object-cover" />
-                          </div>
-                        ))}
+                        {result.images.map((url, index) => {
+                          const bgKey = `${result.id}-${index}`;
+                          const isRemoving = removeBgLoading[bgKey];
+                          return (
+                            <div key={bgKey} className="group relative overflow-hidden rounded-lg border border-slate-200 bg-white">
+                              <img src={url} alt={`${result.label} slide ${index + 1}`} className="aspect-square w-full object-cover" />
+                              <div className="absolute inset-x-0 bottom-0 flex gap-1 bg-gradient-to-t from-black/60 to-transparent p-2 opacity-0 transition-opacity group-hover:opacity-100">
+                                <Button
+                                  size="sm"
+                                  variant="ghost"
+                                  className="h-7 flex-1 bg-white/20 text-[11px] text-white backdrop-blur-sm hover:bg-white/40"
+                                  onClick={() => handleDownload(url, `${result.label}-slide-${index + 1}.png`)}
+                                >
+                                  <Download className="mr-1 h-3 w-3" />
+                                  Download
+                                </Button>
+                                <Button
+                                  size="sm"
+                                  variant="ghost"
+                                  className="h-7 flex-1 bg-white/20 text-[11px] text-white backdrop-blur-sm hover:bg-white/40"
+                                  disabled={isRemoving}
+                                  onClick={() => handleRemoveBg(result.id, index, url)}
+                                >
+                                  {isRemoving ? (
+                                    <Loader2 className="mr-1 h-3 w-3 animate-spin" />
+                                  ) : (
+                                    <Eraser className="mr-1 h-3 w-3" />
+                                  )}
+                                  {isRemoving ? "Removing..." : "Remove BG"}
+                                </Button>
+                              </div>
+                            </div>
+                          );
+                        })}
                       </div>
                     </div>
                   ))}

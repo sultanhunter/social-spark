@@ -225,9 +225,22 @@ OUTPUT:
   Slide X
   Headline: ...
   Supporting: ...
-  Visual: ...
+  Body: ...
 
-Keep copy natural, specific, and non-generic.`;
+CRITICAL TEXT RULES:
+- You MUST write out ALL the exact text that will appear on each slide.
+- If a slide has Arabic text (dua, Quran verse, hadith), write the FULL Arabic text, not a description of it.
+- If a slide has a quote, write the FULL quote, not "a quote about X".
+- ISLAMIC REFERENCES: Every Quran verse, hadith, or dua MUST include its source reference on the same slide:
+  * Quran: Include surah name and ayah number (e.g. "Surah Al-Baqarah 2:286")
+  * Hadith: Include the collection and narrator (e.g. "Sahih Muslim, narrated by Abu Hurairah")
+  * Dua: Include the name or source (e.g. "Dua before sleeping - Sahih Al-Bukhari")
+  * Place the reference as part of the Supporting or Body text so it appears on the slide.
+- "Headline" = the main short title text on the slide.
+- "Supporting" = the secondary/subtitle text on the slide.
+- "Body" = any additional text (paragraphs, bullet points, arabic text, quotes, references, etc.). If there is no body text, omit this field.
+- Do NOT include any visual directions, image descriptions, or design notes. Only the text copy.
+- Keep copy natural, specific, and non-generic.`;
 
   let result;
   if (referenceImageUrls.length > 0) {
@@ -345,6 +358,7 @@ RULES:
 - Look at each original slide image carefully to understand its layout, composition, typography placement, visual hierarchy, and style.
 - Your figmaInstructions should recreate that SAME style/layout but adapted with our brand colors (${gradientStr}), our copy from the script, and our logo.
 - assetPrompts must NEVER include text/typography in the generated images. Assets are purely visual elements.
+- assetPrompts MUST specify that the asset is rendered on a PLAIN WHITE or SOLID COLOR background. Do NOT include gradients, shadows, glows, bokeh, lens flares, vignettes, or any background effects — the asset needs clean background removal.
 - Match the number of slides in the script to the provided images. If the script has more slides than images, use the last image's style for extra slides.
 
 Return JSON array with one object per slide:
