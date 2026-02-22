@@ -37,6 +37,8 @@ REQUIREMENTS:
 - Start by creating the main frame: const frame = figma.createFrame(); frame.resize(${slideWidth}, ${slideHeight}); etc.
 - All child elements should be appended to the frame or nested parents using parent.appendChild(child).
 - For text nodes, ALWAYS load fonts first: await figma.loadFontAsync({ family: "Inter", style: "Regular" })
+- FONT RULES: Only use "Inter" or "Roboto" families. Figma style names have SPACES: "Regular", "Medium", "Semi Bold" (NOT "SemiBold"), "Bold", "Extra Bold" (NOT "ExtraBold"), "Light", "Italic". Always wrap loadFontAsync in try/catch with fallback to Inter Regular.
+- Do NOT use fonts like "Lora", "Playfair Display", "Noto Naskh Arabic", etc. — they are not available in Figma by default.
 - For any image/photo assets mentioned, create a rectangle placeholder with a light fill and name it descriptively (e.g. node.name = "Image: Background photo").
 - Use exact positions, sizes, colors, fonts, and spacings from the instructions.
 - Colors must be in 0-1 range (e.g. #F36F97 = { r: 0.953, g: 0.435, b: 0.592 }).

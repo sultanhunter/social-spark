@@ -6,10 +6,14 @@ import {
   AlertCircle,
   ArrowLeft,
   CheckCircle2,
+  ChevronDown,
+  ChevronUp,
   Copy,
   Download,
+  Eraser,
   ExternalLink,
   Image as ImageIcon,
+  Loader2,
   Send,
   Sparkles,
   Wand2,
@@ -101,6 +105,7 @@ type RecreatedHistoryItem = {
   } | null;
   created_at: string;
   updated_at: string;
+  slide_plans?: SlidePlan[] | null;
 };
 
 function isAdaptationMode(value: unknown): value is "app_context" | "variant_only" {
@@ -154,6 +159,73 @@ function toPercent(value: number): string {
   return `${Math.round(value * 100)}%`;
 }
 
+function HistorySlidePlans({ plans, itemId }: { plans: SlidePlan[]; itemId: string }) {
+  const [expanded, setExpanded] = useState(false);
+  const [copied, setCopied] = useState(false);
+
+  const allInstructions = plans
+    .map((p, i) => {
+      const lines = [`--- Slide ${i + 1}: ${p.headline} ---`, ...p.figmaInstructions];
+      return lines.join("\n");
+    })
+    .join("\n\n");
+
+  const handleCopy = () => {
+    navigator.clipboard.writeText(allInstructions);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
+  return (
+    <div className="mb-3 rounded-lg border border-slate-200 bg-white">
+      <button
+        className="flex w-full items-center justify-between p-3 text-left text-xs font-medium text-slate-600 hover:bg-slate-50"
+        onClick={() => setExpanded(!expanded)}
+      >
+        <span>Figma Instructions ({plans.length} slides)</span>
+        {expanded ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
+      </button>
+      {expanded && (
+        <div className="border-t border-slate-100 p-3">
+          <div className="mb-2 flex gap-2">
+            <Button variant="outline" size="sm" onClick={handleCopy}>
+              <Copy className="mr-1 h-3 w-3" />
+              {copied ? "Copied!" : "Copy All Instructions"}
+            </Button>
+          </div>
+          <div className="space-y-3">
+            {plans.map((plan, i) => (
+              <div key={`${itemId}-plan-${i}`} className="rounded-lg border border-slate-100 bg-slate-50 p-2.5">
+                <p className="text-xs font-semibold text-slate-700">
+                  Slide {i + 1}: {plan.headline}
+                </p>
+                {plan.supportingText && (
+                  <p className="mt-0.5 text-[11px] text-slate-500">{plan.supportingText}</p>
+                )}
+                <ul className="mt-1.5 space-y-0.5">
+                  {plan.figmaInstructions.map((instruction, j) => (
+                    <li key={j} className="text-[11px] leading-relaxed text-slate-600">
+                      {instruction}
+                    </li>
+                  ))}
+                </ul>
+                {plan.assetPrompts?.length > 0 && (
+                  <div className="mt-1.5 border-t border-slate-100 pt-1.5">
+                    <p className="text-[10px] font-medium uppercase tracking-wide text-slate-400">Assets</p>
+                    {plan.assetPrompts.map((asset, k) => (
+                      <p key={k} className="text-[11px] text-slate-500">• {asset.description || asset.prompt}</p>
+                    ))}
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function statusBadgeVariant(status: RecreatedHistoryItem["status"]): "default" | "warning" | "success" {
   if (status === "completed") return "success";
   if (status === "failed") return "warning";
@@ -205,6 +277,38 @@ export function PostDetailView({ postId }: PostDetailViewProps) {
   const [isHistoryLoading, setIsHistoryLoading] = useState(false);
   const [downloadingSetIds, setDownloadingSetIds] = useState<Record<string, boolean>>({});
   const [downloadingImageIds, setDownloadingImageIds] = useState<Record<string, boolean>>({});
+  const [removeBgLoading, setRemoveBgLoading] = useState<Record<string, boolean>>({});
+
+  const handleRemoveBg = async (imageKey: string, imageUrl: string, versionId?: string, historyItemId?: string) => {
+    setRemoveBgLoading((prev) => ({ ...prev, [imageKey]: true }));
+    try {
+      const res = await fetch("/api/remove-bg", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ imageUrl }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Failed");
+
+      if (versionId) {
+        setGeneratedVersions((prev) =>
+          prev.map((v) => {
+            if (v.id !== versionId) return v;
+            const newImages = [...v.images];
+            newImages[imageKey.split("-").pop() ? Number(imageKey.split("-").pop()) : 0] = data.url;
+            return { ...v, images: newImages };
+          })
+        );
+      }
+      if (historyItemId) {
+        window.open(data.url, "_blank");
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Background removal failed");
+    } finally {
+      setRemoveBgLoading((prev) => ({ ...prev, [imageKey]: false }));
+    }
+  };
   const [captionLoadingBySetId, setCaptionLoadingBySetId] = useState<Record<string, boolean>>({});
   const [captionsBySetId, setCaptionsBySetId] = useState<Record<string, string>>({});
   const [postingInstagramBySetId, setPostingInstagramBySetId] = useState<Record<string, boolean>>({});
@@ -1131,18 +1235,32 @@ export function PostDetailView({ postId }: PostDetailViewProps) {
                                   alt={`${result.label} slide ${index + 1}`}
                                   className="aspect-square w-full object-cover"
                                 />
-                                <div className="border-t border-slate-200 bg-white p-2">
+                                <div className="flex gap-1 border-t border-slate-200 bg-white p-1.5">
                                   <Button
                                     variant="ghost"
                                     size="sm"
-                                    className="w-full justify-center"
+                                    className="h-7 flex-1 justify-center p-0 text-[11px]"
                                     isLoading={Boolean(downloadingImageIds[imageId])}
                                     onClick={() =>
                                       downloadSingleImage(imageId, `${result.id}-current`, url, index)
                                     }
                                   >
-                                    <Download className="mr-2 h-4 w-4" />
+                                    <Download className="mr-1 h-3 w-3" />
                                     Download
+                                  </Button>
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    className="h-7 flex-1 justify-center p-0 text-[11px]"
+                                    disabled={Boolean(removeBgLoading[imageId])}
+                                    onClick={() => handleRemoveBg(imageId, url, result.id)}
+                                  >
+                                    {removeBgLoading[imageId] ? (
+                                      <Loader2 className="mr-1 h-3 w-3 animate-spin" />
+                                    ) : (
+                                      <Eraser className="mr-1 h-3 w-3" />
+                                    )}
+                                    {removeBgLoading[imageId] ? "Removing..." : "Remove BG"}
                                   </Button>
                                 </div>
                               </div>
@@ -1278,6 +1396,9 @@ export function PostDetailView({ postId }: PostDetailViewProps) {
                             </p>
                           </div>
                         ) : null}
+                        {Array.isArray(item.slide_plans) && item.slide_plans.length > 0 && (
+                          <HistorySlidePlans plans={item.slide_plans} itemId={item.id} />
+                        )}
                         {Array.isArray(item.generated_media_urls) && item.generated_media_urls.length > 0 ? (
                           <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
                             {item.generated_media_urls.map((url, index) => {
@@ -1293,18 +1414,32 @@ export function PostDetailView({ postId }: PostDetailViewProps) {
                                     alt={`Recreated slide ${index + 1}`}
                                     className="aspect-square w-full object-cover"
                                   />
-                                  <div className="border-t border-slate-200 bg-white p-2">
+                                  <div className="flex gap-1 border-t border-slate-200 bg-white p-1.5">
                                     <Button
                                       variant="ghost"
                                       size="sm"
-                                      className="w-full justify-center"
+                                      className="h-7 flex-1 justify-center p-0 text-[11px]"
                                       isLoading={Boolean(downloadingImageIds[imageId])}
                                       onClick={() =>
                                         downloadSingleImage(imageId, `recreated-${item.id}`, url, index)
                                       }
                                     >
-                                      <Download className="mr-2 h-4 w-4" />
+                                      <Download className="mr-1 h-3 w-3" />
                                       Download
+                                    </Button>
+                                    <Button
+                                      variant="ghost"
+                                      size="sm"
+                                      className="h-7 flex-1 justify-center p-0 text-[11px]"
+                                      disabled={Boolean(removeBgLoading[imageId])}
+                                      onClick={() => handleRemoveBg(imageId, url, undefined, item.id)}
+                                    >
+                                      {removeBgLoading[imageId] ? (
+                                        <Loader2 className="mr-1 h-3 w-3 animate-spin" />
+                                      ) : (
+                                        <Eraser className="mr-1 h-3 w-3" />
+                                      )}
+                                      {removeBgLoading[imageId] ? "Removing..." : "Remove BG"}
                                     </Button>
                                   </div>
                                 </div>

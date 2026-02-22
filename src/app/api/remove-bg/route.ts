@@ -15,18 +15,14 @@ export async function POST(request: NextRequest) {
         }
 
         // Call fal.ai BiRefNet for background removal
-        const response = await fetch("https://queue.fal.run/fal-ai/birefnet", {
-            method: "POST",
+        const response = await fetch('https://fal.run/fal-ai/birefnet', {
+            method: 'POST',
             headers: {
-                Authorization: `Key ${falApiKey}`,
-                "Content-Type": "application/json",
+                'Authorization': `Key ${falApiKey}`,
+                'Content-Type': 'application/json',
             },
             body: JSON.stringify({
-                image_url: imageUrl,
-                model: "General Use (Light)",
-                operating_resolution: "1024x1024",
-                output_format: "png",
-                refine_foreground: true,
+                image_url: imageUrl
             }),
         });
 
@@ -36,11 +32,11 @@ export async function POST(request: NextRequest) {
             throw new Error(`Background removal failed (${response.status})`);
         }
 
-        const result = (await response.json()) as Record<string, unknown>;
+        const result = await response.json();
 
         // fal.ai returns { image: { url, width, height, ... } }
-        const image = result.image as Record<string, unknown> | undefined;
-        const resultUrl = typeof image?.url === "string" ? image.url : null;
+
+        const resultUrl = result.image.url;
 
         if (!resultUrl) {
             throw new Error("No image returned from background removal");

@@ -10,7 +10,7 @@ export async function GET(
 
     const primaryQuery = await supabase
       .from("recreated_posts")
-      .select("id, script, generated_media_urls, caption, status, generation_state, created_at, updated_at")
+      .select("id, script, generated_media_urls, caption, status, generation_state, slide_plans, created_at, updated_at")
       .eq("collection_id", collectionId)
       .eq("original_post_id", postId)
       .order("created_at", { ascending: false });
@@ -25,7 +25,7 @@ export async function GET(
 
     const fallbackQuery = await supabase
       .from("recreated_posts")
-      .select("id, script, generated_media_urls, caption, status, created_at, updated_at")
+      .select("id, script, generated_media_urls, caption, status, slide_plans, created_at, updated_at")
       .eq("collection_id", collectionId)
       .eq("original_post_id", postId)
       .order("created_at", { ascending: false });

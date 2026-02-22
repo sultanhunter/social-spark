@@ -132,12 +132,12 @@ export function RecreationView() {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Failed");
 
-      // Add bg-removed image right after the original
+      // Replace the image in state with the bg-removed version
       setGeneratedVersions((prev) =>
         prev.map((v) => {
           if (v.id !== versionId) return v;
           const newImages = [...v.images];
-          newImages.splice(imageIndex + 1, 0, data.url);
+          newImages[imageIndex] = data.url;
           return { ...v, images: newImages };
         })
       );

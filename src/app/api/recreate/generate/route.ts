@@ -1,3 +1,4 @@
+import path from "path";
 import { NextRequest, NextResponse } from "next/server";
 import { generateSlideDesignPlans } from "@/lib/gemini";
 import type { AdaptationMode, SlideGenerationPlan, UIGenerationMode } from "@/lib/gemini";
@@ -17,7 +18,7 @@ export const maxDuration = 300;
 const APP_BRAND_PRIMARY_COLOR = "#F36F97";
 const APP_BRAND_GRADIENT = ["#F36F97", "#EEB4C3", "#F7DFD6"];
 const APP_LOGO_PATH = "/Users/sultanibneusman/Desktop/Perri/assets/images/app-logo.png";
-const APP_FEATURE_MOCKUP_PATH = "/Users/sultanibneusman/Downloads/feature screenshots/main_hero.PNG";
+const APP_FEATURE_MOCKUP_PATH = path.join(process.cwd(), "public/assets/main_hero.png");
 
 function asNonEmptyString(value: unknown): string | null {
   return typeof value === "string" && value.trim().length > 0 ? value : null;

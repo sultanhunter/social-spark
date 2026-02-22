@@ -50,6 +50,7 @@ interface BrandAssets {
   gradientHexColors?: string[];
   logoImagePath?: string;
   featureMockupPath?: string;
+  featureMockupUrl?: string;
 }
 
 const genAI = new GoogleGenerativeAI(process.env.GOOGLE_GEMINI_API_KEY!);
@@ -178,7 +179,11 @@ async function getBrandImageParts(brandAssets?: BrandAssets): Promise<{
 
   const [logoPart, featureMockupPart] = await Promise.all([
     brandAssets.logoImagePath ? loadLocalImagePart(brandAssets.logoImagePath) : Promise.resolve(null),
-    brandAssets.featureMockupPath ? loadLocalImagePart(brandAssets.featureMockupPath) : Promise.resolve(null),
+    brandAssets.featureMockupUrl
+      ? loadRemoteImagePart(brandAssets.featureMockupUrl)
+      : brandAssets.featureMockupPath
+        ? loadLocalImagePart(brandAssets.featureMockupPath)
+        : Promise.resolve(null),
   ]);
 
   return { logoPart, featureMockupPart };
