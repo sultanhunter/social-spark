@@ -538,40 +538,56 @@ export function RecreationView() {
                         <Badge variant="default">{result.images.length} images</Badge>
                       </div>
                       <div className="grid grid-cols-2 gap-3 md:grid-cols-3">
-                        {result.images.map((url, index) => {
-                          const bgKey = `${result.id}-${index}`;
-                          const isRemoving = removeBgLoading[bgKey];
-                          return (
-                            <div key={bgKey} className="group relative overflow-hidden rounded-lg border border-slate-200 bg-white">
-                              <img src={url} alt={`${result.label} slide ${index + 1}`} className="aspect-square w-full object-cover" />
-                              <div className="absolute inset-x-0 bottom-0 flex gap-1 bg-gradient-to-t from-black/60 to-transparent p-2 opacity-0 transition-opacity group-hover:opacity-100">
-                                <Button
-                                  size="sm"
-                                  variant="ghost"
-                                  className="h-7 flex-1 bg-white/20 text-[11px] text-white backdrop-blur-sm hover:bg-white/40"
-                                  onClick={() => handleDownload(url, `${result.label}-slide-${index + 1}.png`)}
-                                >
-                                  <Download className="mr-1 h-3 w-3" />
-                                  Download
-                                </Button>
-                                <Button
-                                  size="sm"
-                                  variant="ghost"
-                                  className="h-7 flex-1 bg-white/20 text-[11px] text-white backdrop-blur-sm hover:bg-white/40"
-                                  disabled={isRemoving}
-                                  onClick={() => handleRemoveBg(result.id, index, url)}
-                                >
-                                  {isRemoving ? (
-                                    <Loader2 className="mr-1 h-3 w-3 animate-spin" />
-                                  ) : (
-                                    <Eraser className="mr-1 h-3 w-3" />
-                                  )}
-                                  {isRemoving ? "Removing..." : "Remove BG"}
-                                </Button>
+                        {(() => {
+                          const assetNames: string[] = [];
+                          for (const plan of result.plans) {
+                            if (plan.assetPrompts.length === 0) {
+                              assetNames.push(`Slide: ${plan.headline}`);
+                            } else {
+                              for (const asset of plan.assetPrompts) {
+                                assetNames.push(asset.description || asset.prompt.slice(0, 60));
+                              }
+                            }
+                          }
+                          return result.images.map((url, index) => {
+                            const bgKey = `${result.id}-${index}`;
+                            const isRemoving = removeBgLoading[bgKey];
+                            const assetName = assetNames[index] || `Asset ${index + 1}`;
+                            return (
+                              <div key={bgKey} className="group relative overflow-hidden rounded-lg border border-slate-200 bg-white">
+                                <img src={url} alt={assetName} className="aspect-square w-full object-cover" />
+                                <p className="truncate border-t border-slate-100 bg-slate-50 px-2 py-1 text-[10px] font-medium text-slate-500" title={assetName}>
+                                  {assetName}
+                                </p>
+                                <div className="absolute inset-x-0 bottom-0 flex gap-1 bg-gradient-to-t from-black/60 to-transparent p-2 opacity-0 transition-opacity group-hover:opacity-100">
+                                  <Button
+                                    size="sm"
+                                    variant="ghost"
+                                    className="h-7 flex-1 bg-white/20 text-[11px] text-white backdrop-blur-sm hover:bg-white/40"
+                                    onClick={() => handleDownload(url, `${result.label}-slide-${index + 1}.png`)}
+                                  >
+                                    <Download className="mr-1 h-3 w-3" />
+                                    Download
+                                  </Button>
+                                  <Button
+                                    size="sm"
+                                    variant="ghost"
+                                    className="h-7 flex-1 bg-white/20 text-[11px] text-white backdrop-blur-sm hover:bg-white/40"
+                                    disabled={isRemoving}
+                                    onClick={() => handleRemoveBg(result.id, index, url)}
+                                  >
+                                    {isRemoving ? (
+                                      <Loader2 className="mr-1 h-3 w-3 animate-spin" />
+                                    ) : (
+                                      <Eraser className="mr-1 h-3 w-3" />
+                                    )}
+                                    {isRemoving ? "Removing..." : "Remove BG"}
+                                  </Button>
+                                </div>
                               </div>
-                            </div>
-                          );
-                        })}
+                            );
+                          });
+                        })()}
                       </div>
                     </div>
                   ))}
@@ -581,7 +597,7 @@ export function RecreationView() {
           )}
         </div>
       </div>
-    </div>
+    </div >
   );
 }
 

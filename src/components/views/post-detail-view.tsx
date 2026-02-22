@@ -1222,50 +1222,67 @@ export function PostDetailView({ postId }: PostDetailViewProps) {
                           </div>
                         </div>
                         <div className="grid grid-cols-2 gap-3 md:grid-cols-3">
-                          {result.images.map((url, index) => {
-                            const imageId = `current-${result.id}-${index}`;
+                          {(() => {
+                            // Build flat list of asset descriptions from slide plans
+                            const assetNames: string[] = [];
+                            for (const plan of result.plans) {
+                              if (plan.assetPrompts.length === 0) {
+                                assetNames.push(`Slide: ${plan.headline}`);
+                              } else {
+                                for (const asset of plan.assetPrompts) {
+                                  assetNames.push(asset.description || asset.prompt.slice(0, 60));
+                                }
+                              }
+                            }
+                            return result.images.map((url, index) => {
+                              const imageId = `current-${result.id}-${index}`;
+                              const assetName = assetNames[index] || `Asset ${index + 1}`;
 
-                            return (
-                              <div
-                                key={`${result.id}-${index}`}
-                                className="overflow-hidden rounded-lg border border-slate-200 bg-white"
-                              >
-                                <img
-                                  src={url}
-                                  alt={`${result.label} slide ${index + 1}`}
-                                  className="aspect-square w-full object-cover"
-                                />
-                                <div className="flex gap-1 border-t border-slate-200 bg-white p-1.5">
-                                  <Button
-                                    variant="ghost"
-                                    size="sm"
-                                    className="h-7 flex-1 justify-center p-0 text-[11px]"
-                                    isLoading={Boolean(downloadingImageIds[imageId])}
-                                    onClick={() =>
-                                      downloadSingleImage(imageId, `${result.id}-current`, url, index)
-                                    }
-                                  >
-                                    <Download className="mr-1 h-3 w-3" />
-                                    Download
-                                  </Button>
-                                  <Button
-                                    variant="ghost"
-                                    size="sm"
-                                    className="h-7 flex-1 justify-center p-0 text-[11px]"
-                                    disabled={Boolean(removeBgLoading[imageId])}
-                                    onClick={() => handleRemoveBg(imageId, url, result.id)}
-                                  >
-                                    {removeBgLoading[imageId] ? (
-                                      <Loader2 className="mr-1 h-3 w-3 animate-spin" />
-                                    ) : (
-                                      <Eraser className="mr-1 h-3 w-3" />
-                                    )}
-                                    {removeBgLoading[imageId] ? "Removing..." : "Remove BG"}
-                                  </Button>
+                              return (
+                                <div
+                                  key={`${result.id}-${index}`}
+                                  className="overflow-hidden rounded-lg border border-slate-200 bg-white"
+                                >
+                                  <img
+                                    src={url}
+                                    alt={assetName}
+                                    className="aspect-square w-full object-cover"
+                                  />
+                                  <p className="truncate border-t border-slate-100 bg-slate-50 px-2 py-1 text-[10px] font-medium text-slate-500" title={assetName}>
+                                    {assetName}
+                                  </p>
+                                  <div className="flex gap-1 border-t border-slate-200 bg-white p-1.5">
+                                    <Button
+                                      variant="ghost"
+                                      size="sm"
+                                      className="h-7 flex-1 justify-center p-0 text-[11px]"
+                                      isLoading={Boolean(downloadingImageIds[imageId])}
+                                      onClick={() =>
+                                        downloadSingleImage(imageId, `${result.id}-current`, url, index)
+                                      }
+                                    >
+                                      <Download className="mr-1 h-3 w-3" />
+                                      Download
+                                    </Button>
+                                    <Button
+                                      variant="ghost"
+                                      size="sm"
+                                      className="h-7 flex-1 justify-center p-0 text-[11px]"
+                                      disabled={Boolean(removeBgLoading[imageId])}
+                                      onClick={() => handleRemoveBg(imageId, url, result.id)}
+                                    >
+                                      {removeBgLoading[imageId] ? (
+                                        <Loader2 className="mr-1 h-3 w-3 animate-spin" />
+                                      ) : (
+                                        <Eraser className="mr-1 h-3 w-3" />
+                                      )}
+                                      {removeBgLoading[imageId] ? "Removing..." : "Remove BG"}
+                                    </Button>
+                                  </div>
                                 </div>
-                              </div>
-                            );
-                          })}
+                              );
+                            });
+                          })()}
                         </div>
                         {hasCaption ? (
                           <div className="rounded-lg border border-slate-200 bg-white p-3">
@@ -1273,13 +1290,15 @@ export function PostDetailView({ postId }: PostDetailViewProps) {
                             <p className="mt-1 whitespace-pre-wrap text-sm text-slate-700">{caption}</p>
                           </div>
                         ) : null}
-                        {instagramResult ? (
-                          <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-800">
-                            {instagramResult.permalink
-                              ? "Posted to Instagram successfully."
-                              : `Posted to Instagram (Media ID: ${instagramResult.mediaId}).`}
-                          </div>
-                        ) : null}
+                        {
+                          instagramResult ? (
+                            <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-800">
+                              {instagramResult.permalink
+                                ? "Posted to Instagram successfully."
+                                : `Posted to Instagram (Media ID: ${instagramResult.mediaId}).`}
+                            </div>
+                          ) : null
+                        }
                       </div>
                     );
                   })}
@@ -1401,50 +1420,69 @@ export function PostDetailView({ postId }: PostDetailViewProps) {
                         )}
                         {Array.isArray(item.generated_media_urls) && item.generated_media_urls.length > 0 ? (
                           <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
-                            {item.generated_media_urls.map((url, index) => {
-                              const imageId = `history-${item.id}-${index}`;
+                            {(() => {
+                              // Build flat list of asset descriptions from slide plans
+                              const assetNames: string[] = [];
+                              if (Array.isArray(item.slide_plans)) {
+                                for (const plan of item.slide_plans) {
+                                  if (plan.assetPrompts.length === 0) {
+                                    assetNames.push(`Slide: ${plan.headline}`);
+                                  } else {
+                                    for (const asset of plan.assetPrompts) {
+                                      assetNames.push(asset.description || asset.prompt.slice(0, 60));
+                                    }
+                                  }
+                                }
+                              }
+                              return item.generated_media_urls.map((url, index) => {
+                                const imageId = `history-${item.id}-${index}`;
+                                const assetName = assetNames[index] || `Asset ${index + 1}`;
 
-                              return (
-                                <div
-                                  key={`${item.id}-${index}`}
-                                  className="overflow-hidden rounded-lg border border-slate-200 bg-white"
-                                >
-                                  <img
-                                    src={url}
-                                    alt={`Recreated slide ${index + 1}`}
-                                    className="aspect-square w-full object-cover"
-                                  />
-                                  <div className="flex gap-1 border-t border-slate-200 bg-white p-1.5">
-                                    <Button
-                                      variant="ghost"
-                                      size="sm"
-                                      className="h-7 flex-1 justify-center p-0 text-[11px]"
-                                      isLoading={Boolean(downloadingImageIds[imageId])}
-                                      onClick={() =>
-                                        downloadSingleImage(imageId, `recreated-${item.id}`, url, index)
-                                      }
-                                    >
-                                      <Download className="mr-1 h-3 w-3" />
-                                      Download
-                                    </Button>
-                                    <Button
-                                      variant="ghost"
-                                      size="sm"
-                                      className="h-7 flex-1 justify-center p-0 text-[11px]"
-                                      disabled={Boolean(removeBgLoading[imageId])}
-                                      onClick={() => handleRemoveBg(imageId, url, undefined, item.id)}
-                                    >
-                                      {removeBgLoading[imageId] ? (
-                                        <Loader2 className="mr-1 h-3 w-3 animate-spin" />
-                                      ) : (
-                                        <Eraser className="mr-1 h-3 w-3" />
-                                      )}
-                                      {removeBgLoading[imageId] ? "Removing..." : "Remove BG"}
-                                    </Button>
+                                return (
+                                  <div
+                                    key={`${item.id}-${index}`}
+                                    className="overflow-hidden rounded-lg border border-slate-200 bg-white"
+                                  >
+                                    <img
+                                      src={url}
+                                      alt={assetName}
+                                      className="aspect-square w-full object-cover"
+                                    />
+                                    <p className="truncate border-t border-slate-100 bg-slate-50 px-2 py-1 text-[10px] font-medium text-slate-500" title={assetName}>
+                                      {assetName}
+                                    </p>
+                                    <div className="flex gap-1 border-t border-slate-200 bg-white p-1.5">
+                                      <Button
+                                        variant="ghost"
+                                        size="sm"
+                                        className="h-7 flex-1 justify-center p-0 text-[11px]"
+                                        isLoading={Boolean(downloadingImageIds[imageId])}
+                                        onClick={() =>
+                                          downloadSingleImage(imageId, `recreated-${item.id}`, url, index)
+                                        }
+                                      >
+                                        <Download className="mr-1 h-3 w-3" />
+                                        Download
+                                      </Button>
+                                      <Button
+                                        variant="ghost"
+                                        size="sm"
+                                        className="h-7 flex-1 justify-center p-0 text-[11px]"
+                                        disabled={Boolean(removeBgLoading[imageId])}
+                                        onClick={() => handleRemoveBg(imageId, url, undefined, item.id)}
+                                      >
+                                        {removeBgLoading[imageId] ? (
+                                          <Loader2 className="mr-1 h-3 w-3 animate-spin" />
+                                        ) : (
+                                          <Eraser className="mr-1 h-3 w-3" />
+                                        )}
+                                        {removeBgLoading[imageId] ? "Removing..." : "Remove BG"}
+                                      </Button>
+                                    </div>
                                   </div>
-                                </div>
-                              );
-                            })}
+                                );
+                              });
+                            })()}
                           </div>
                         ) : (
                           <p className="text-xs text-slate-500">No images generated for this recreation yet.</p>
@@ -1471,7 +1509,7 @@ export function PostDetailView({ postId }: PostDetailViewProps) {
           </Card>
         </div>
       </div>
-    </div>
+    </div >
   );
 }
 
