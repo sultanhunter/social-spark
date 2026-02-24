@@ -256,6 +256,100 @@ CRITICAL TEXT RULES:
   return result.response.text();
 }
 
+export async function generateHookStrategyScript({
+  sourceScript,
+  adaptationMode,
+  appName,
+  appContext,
+  originalPost,
+  strategyPlaybook,
+  referenceImageUrls = [],
+  reasoningModel = DEFAULT_REASONING_MODEL,
+}: {
+  sourceScript: string;
+  adaptationMode: AdaptationMode;
+  appName: string;
+  appContext: string;
+  originalPost: {
+    title: string | null;
+    description: string | null;
+    platform: string;
+    postType: string;
+  };
+  strategyPlaybook: string;
+  referenceImageUrls?: string[];
+  reasoningModel?: ReasoningModel;
+}): Promise<string> {
+  const model = genAI.getGenerativeModel({ model: reasoningModel });
+
+  const prompt = `You are an expert Instagram carousel strategist and copywriter.
+
+You must rewrite the SOURCE SCRIPT into a new high-retention carousel script that follows the provided playbook exactly.
+
+ORIGINAL POST:
+- Platform: ${originalPost.platform}
+- Type: ${originalPost.postType === "image_slides" ? "Image Carousel/Slides" : "Short-form Video"}
+- Title: ${originalPost.title || "N/A"}
+- Description: ${originalPost.description || "N/A"}
+
+APP:
+- App Name: ${appName}
+- App Context: ${appContext}
+
+SOURCE SCRIPT:
+${sourceScript}
+
+CAROUSEL PLAYBOOK TO FOLLOW:
+${strategyPlaybook}
+
+NON-NEGOTIABLE RULES:
+- Keep adaptation mode fixed: ${adaptationMode}
+- Start output with exactly: Adaptation Mode: ${adaptationMode}
+- Produce 6-8 slides.
+- Enforce playbook rhythm:
+  * Slide 1 = pattern-break primary hook
+  * Slide 2 = standalone second hook
+  * Middle slides alternate dense and light pacing
+  * Final slide includes synthesis + CTA + next-angle seed
+- Use selective CAPS only on attention-critical words (do not overuse).
+- Voice must feel conversational and practical, not robotic.
+- Dense slides must include clear bullets or numbered steps.
+- Include constructive controversy on one middle slide (bold but respectful).
+- Keep copy concise enough for carousel readability.
+
+OUTPUT FORMAT:
+- Use this exact structure:
+  Adaptation Mode: ${adaptationMode}
+
+  Slide 1
+  Headline: ...
+  Supporting: ...
+  Body: ...
+
+  Slide 2
+  Headline: ...
+  Supporting: ...
+  Body: ...
+
+  (continue for all slides)
+
+- Provide exact on-slide text only.
+- Do not include visual/design instructions.
+- No markdown code fences.`;
+
+  let result;
+  if (referenceImageUrls.length > 0) {
+    const imageParts = await buildReferenceImageParts(referenceImageUrls);
+    result = imageParts.length > 0
+      ? await model.generateContent([{ text: prompt }, ...imageParts])
+      : await model.generateContent(prompt);
+  } else {
+    result = await model.generateContent(prompt);
+  }
+
+  return result.response.text();
+}
+
 /* ---------- Step 1: Extract slide texts from original images ---------- */
 
 export interface ExtractedSlideText {

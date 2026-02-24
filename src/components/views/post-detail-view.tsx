@@ -269,6 +269,7 @@ export function PostDetailView({ postId }: PostDetailViewProps) {
   const [nicheState, setNicheState] = useState<NicheState>(null);
   const [isGeneratingScript, setIsGeneratingScript] = useState(false);
   const [isGeneratingImages, setIsGeneratingImages] = useState(false);
+  const [scriptRequestMode, setScriptRequestMode] = useState<"default" | "hook_strategy">("default");
   const [error, setError] = useState("");
   const [reasoningModel, setReasoningModel] = useState(DEFAULT_REASONING_MODEL);
   const [imageGenerationModel, setImageGenerationModel] = useState(DEFAULT_IMAGE_GENERATION_MODEL);
@@ -595,13 +596,14 @@ export function PostDetailView({ postId }: PostDetailViewProps) {
     };
   }, [isGeneratingImages, loadHistory]);
 
-  const handleGenerateScript = async () => {
+  const handleGenerateScript = async (mode: "default" | "hook_strategy" = "default") => {
     if (!activeCollection || !selectedPost) return;
     if (referenceImages.length > 0 && selectedReferenceImages.length === 0) {
       setError("Select at least one reference image before generating scripts.");
       return;
     }
 
+    setScriptRequestMode(mode);
     setIsGeneratingScript(true);
     setError("");
 
@@ -613,6 +615,7 @@ export function PostDetailView({ postId }: PostDetailViewProps) {
           postId: selectedPost.id,
           collectionId: activeCollection.id,
           referenceImageUrls: selectedReferenceImages,
+          includeHookStrategy: mode === "hook_strategy",
           reasoningModel,
         }),
       });
@@ -674,7 +677,12 @@ export function PostDetailView({ postId }: PostDetailViewProps) {
       }
 
       setScriptVersions(versions);
-      setActiveVersionId(data.primaryVersionId || versions[0].id);
+      const hookVersion = versions.find((version) => version.id.includes("hook_strategy"));
+      setActiveVersionId(
+        mode === "hook_strategy"
+          ? hookVersion?.id || data.primaryVersionId || versions[0].id
+          : data.primaryVersionId || versions[0].id
+      );
       setGeneratedVersions([]);
       setRecreatedPostId(typeof data.recreatedPostId === "string" ? data.recreatedPostId : null);
       setStep("script");
@@ -683,6 +691,7 @@ export function PostDetailView({ postId }: PostDetailViewProps) {
       setError(err instanceof Error ? err.message : "Script generation failed");
     } finally {
       setIsGeneratingScript(false);
+      setScriptRequestMode("default");
     }
   };
 
@@ -794,11 +803,16 @@ export function PostDetailView({ postId }: PostDetailViewProps) {
   const generationButtonConfig =
     step === "prepare"
       ? {
-        label: isGeneratingScript ? "Classifying and generating scripts..." : "Step 1: Classify & Generate Scripts",
-        onClick: handleGenerateScript,
-        isLoading: isGeneratingScript,
+        label:
+          isGeneratingScript && scriptRequestMode === "default"
+            ? "Classifying and generating scripts..."
+            : "Step 1: Classify & Generate Scripts",
+        onClick: () => {
+          void handleGenerateScript("default");
+        },
+        isLoading: isGeneratingScript && scriptRequestMode === "default",
         icon: Wand2,
-        disabled: false,
+        disabled: isGeneratingScript,
       }
       : step === "script"
         ? {
@@ -955,7 +969,7 @@ export function PostDetailView({ postId }: PostDetailViewProps) {
             <CardHeader>
               <CardTitle className="text-lg">Recreate This Post</CardTitle>
               <CardDescription>
-                The flow first checks Islamic + pregnancy/period match before deciding which recreation sets to generate.
+                The flow checks Islamic + pregnancy/period match, then you can run standard recreation or an optional hook-strategy recreation.
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-5">
@@ -1047,6 +1061,21 @@ export function PostDetailView({ postId }: PostDetailViewProps) {
                     <GenerationIcon className="mr-2 h-4 w-4" />
                     {generationButtonConfig.label}
                   </Button>
+                  {step === "prepare" ? (
+                    <Button
+                      variant="outline"
+                      onClick={() => {
+                        void handleGenerateScript("hook_strategy");
+                      }}
+                      isLoading={isGeneratingScript && scriptRequestMode === "hook_strategy"}
+                      disabled={isGeneratingScript}
+                    >
+                      <Sparkles className="mr-2 h-4 w-4" />
+                      {isGeneratingScript && scriptRequestMode === "hook_strategy"
+                        ? "Generating hook strategy..."
+                        : "Hook Strategy Recreation"}
+                    </Button>
+                  ) : null}
                 </div>
               )}
 

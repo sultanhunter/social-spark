@@ -104,6 +104,7 @@ export function RecreationView() {
   const [scriptVersions, setScriptVersions] = useState<ScriptVersion[]>([]);
   const [activeVersionId, setActiveVersionId] = useState<string>("");
   const [generatedVersions, setGeneratedVersions] = useState<GeneratedVersionResult[]>([]);
+  const [scriptRequestMode, setScriptRequestMode] = useState<"default" | "hook_strategy">("default");
   const [removeBgLoading, setRemoveBgLoading] = useState<Record<string, boolean>>({});
 
   const handleDownload = async (url: string, filename: string) => {
@@ -184,13 +185,14 @@ export function RecreationView() {
     return <PostSelectionView />;
   }
 
-  const handleGenerateScript = async () => {
+  const handleGenerateScript = async (mode: "default" | "hook_strategy" = "default") => {
     if (!activeCollection) return;
     if (referenceImages.length > 0 && selectedReferenceImages.length === 0) {
       setError("Select at least one reference image before generating scripts.");
       return;
     }
 
+    setScriptRequestMode(mode);
     setIsGeneratingScript(true);
     setError("");
 
@@ -202,6 +204,7 @@ export function RecreationView() {
           postId: selectedPost.id,
           collectionId: activeCollection.id,
           referenceImageUrls: selectedReferenceImages,
+          includeHookStrategy: mode === "hook_strategy",
         }),
       });
 
@@ -235,7 +238,12 @@ export function RecreationView() {
       }
 
       setScriptVersions(versions);
-      setActiveVersionId(data.primaryVersionId || versions[0].id);
+      const hookVersion = versions.find((version) => version.id.includes("hook_strategy"));
+      setActiveVersionId(
+        mode === "hook_strategy"
+          ? hookVersion?.id || data.primaryVersionId || versions[0].id
+          : data.primaryVersionId || versions[0].id
+      );
       setGeneratedVersions([]);
       setNicheState({
         isRelevant: Boolean(data.isAppNicheRelevant),
@@ -247,6 +255,7 @@ export function RecreationView() {
       setError(err instanceof Error ? err.message : "Script generation failed");
     } finally {
       setIsGeneratingScript(false);
+      setScriptRequestMode("default");
     }
   };
 
@@ -392,7 +401,7 @@ export function RecreationView() {
             <CardHeader>
               <CardTitle className="text-lg">Recreation Studio</CardTitle>
               <CardDescription>
-                If the post is outside your niche, the system creates two versions: one app-context rewrite and one neutral variant.
+                Run the default recreation flow, or optionally generate a separate hook-strategy version set.
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-5">
@@ -430,9 +439,28 @@ export function RecreationView() {
               </div>
 
               <div className="flex flex-wrap gap-3">
-                <Button variant="primary" onClick={handleGenerateScript} isLoading={isGeneratingScript}>
+                <Button
+                  variant="primary"
+                  onClick={() => handleGenerateScript("default")}
+                  isLoading={isGeneratingScript && scriptRequestMode === "default"}
+                  disabled={isGeneratingScript}
+                >
                   <Wand2 className="mr-2 h-4 w-4" />
-                  {isGeneratingScript ? "Generating scripts..." : "Generate Scripts"}
+                  {isGeneratingScript && scriptRequestMode === "default"
+                    ? "Generating scripts..."
+                    : "Generate Scripts"}
+                </Button>
+
+                <Button
+                  variant="outline"
+                  onClick={() => handleGenerateScript("hook_strategy")}
+                  isLoading={isGeneratingScript && scriptRequestMode === "hook_strategy"}
+                  disabled={isGeneratingScript}
+                >
+                  <Sparkles className="mr-2 h-4 w-4" />
+                  {isGeneratingScript && scriptRequestMode === "hook_strategy"
+                    ? "Generating hook strategy..."
+                    : "Generate Hook Strategy Set"}
                 </Button>
 
                 <Button

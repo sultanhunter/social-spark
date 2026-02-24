@@ -1,8 +1,11 @@
+import path from "path";
+import { readFile } from "fs/promises";
 import { NextRequest, NextResponse } from "next/server";
 import { supabase } from "@/lib/supabase";
 import {
   detectNicheRelevance,
   extractSlideTexts,
+  generateHookStrategyScript,
   generatePostScript,
   generateSlideDesignPlans,
   type AdaptationMode,
@@ -16,6 +19,11 @@ import {
 
 const APP_BRAND_PRIMARY_COLOR = "#F36F97";
 const APP_BRAND_GRADIENT = ["#F36F97", "#EEB4C3", "#F7DFD6"];
+const CAROUSEL_HOOK_STRATEGY_DOC_PATH = path.join(
+  process.cwd(),
+  "docs/carousel-hook-strategy.md"
+);
+const FALLBACK_HOOK_STRATEGY = `Slide 1: pattern-breaking hook. Slide 2: second standalone hook. Alternate dense and light pacing in middle slides. Use selective CAPS only for critical words. Keep voice conversational. Dense slides must include bullets/steps. Add one constructive-controversy slide. End with synthesis + CTA + next-angle seed.`;
 
 interface ScriptVersion {
   id: string;
@@ -48,12 +56,29 @@ function buildVersionLabel(adaptationMode: AdaptationMode): string {
   return adaptationMode === "app_context" ? "App Context" : "Original Topic";
 }
 
+function buildHookVersionLabel(adaptationMode: AdaptationMode): string {
+  return adaptationMode === "app_context"
+    ? "Hook Strategy (App Context)"
+    : "Hook Strategy (Original Topic)";
+}
+
+async function loadHookStrategyPlaybook(): Promise<string> {
+  try {
+    const fileContent = await readFile(CAROUSEL_HOOK_STRATEGY_DOC_PATH, "utf8");
+    const trimmed = fileContent.trim();
+    return trimmed.length > 0 ? trimmed : FALLBACK_HOOK_STRATEGY;
+  } catch {
+    return FALLBACK_HOOK_STRATEGY;
+  }
+}
+
 export async function POST(request: NextRequest) {
   try {
     const body = (await request.json()) as Record<string, unknown>;
     const postId = asNonEmptyString(body.postId);
     const collectionId = asNonEmptyString(body.collectionId);
     const referenceImageUrls = body.referenceImageUrls;
+    const includeHookStrategy = body.includeHookStrategy === true;
     const reasoningModel = isReasoningModel(body.reasoningModel)
       ? body.reasoningModel
       : DEFAULT_REASONING_MODEL;
@@ -213,7 +238,7 @@ export async function POST(request: NextRequest) {
 
     // ---------- Step 3: Per-slide Figma instructions + asset prompts ----------
     console.log("[script] Step 3: Generating per-slide design plans...");
-    const versions = await Promise.all(
+    const baseVersions = await Promise.all(
       adaptationModes.map(async (mode): Promise<ScriptVersion> => {
         const modeScript = scriptMap.get(mode);
         if (!modeScript) {
@@ -242,6 +267,60 @@ export async function POST(request: NextRequest) {
         };
       })
     );
+
+    let hookStrategyVersion: ScriptVersion | null = null;
+
+    if (includeHookStrategy) {
+      const hookSourceMode: AdaptationMode = adaptationModes.includes("variant_only")
+        ? "variant_only"
+        : adaptationModes[0];
+      const hookSourceScript = scriptMap.get(hookSourceMode);
+
+      if (hookSourceScript) {
+        try {
+          const hookStrategyPlaybook = await loadHookStrategyPlaybook();
+          const hookScript = await generateHookStrategyScript({
+            sourceScript: hookSourceScript,
+            adaptationMode: hookSourceMode,
+            appName,
+            appContext,
+            originalPost,
+            strategyPlaybook: hookStrategyPlaybook,
+            referenceImageUrls: selectedReferenceImageUrls,
+            reasoningModel,
+          });
+
+          const hookSlidePlans = await generateSlideDesignPlans(
+            selectedReferenceImageUrls,
+            hookScript,
+            post.platform,
+            APP_BRAND_PRIMARY_COLOR,
+            APP_BRAND_GRADIENT,
+            appName,
+            reasoningModel
+          );
+
+          hookStrategyVersion = {
+            id: `${hookSourceMode}_hook_strategy`,
+            label: buildHookVersionLabel(hookSourceMode),
+            adaptationMode: hookSourceMode,
+            usesAppContext: hookSourceMode === "app_context",
+            uiGenerationMode: "ai_creative",
+            followsReferenceLayout: false,
+            script: hookScript,
+            slidePlans: hookSlidePlans,
+          };
+        } catch (hookError) {
+          console.warn("[script] Hook strategy generation failed; continuing without hook version", {
+            error: hookError instanceof Error ? hookError.message : String(hookError),
+          });
+        }
+      }
+    }
+
+    const versions = hookStrategyVersion
+      ? [...baseVersions, hookStrategyVersion]
+      : baseVersions;
 
     const primaryVersion = versions[0];
 
