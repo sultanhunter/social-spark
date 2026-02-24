@@ -9,7 +9,7 @@ function asNonEmptyString(value: unknown): string | null {
 
 async function markJobFailed(jobId: string, error: string) {
   await supabase
-    .from("recreated_posts")
+    .from("blog_generation_jobs")
     .update({
       status: "failed",
       generation_state: {
@@ -46,12 +46,9 @@ export async function POST(request: NextRequest) {
     }
 
     const { data: job, error: insertError } = await supabase
-      .from("recreated_posts")
+      .from("blog_generation_jobs")
       .insert({
-        original_post_id: null,
         collection_id: collectionId,
-        script: "BLOG_AGENT_JOB",
-        generated_media_urls: [],
         status: "generating",
         generation_state: {
           kind: "blog_agent",
@@ -64,6 +61,11 @@ export async function POST(request: NextRequest) {
       .single();
 
     if (insertError || !job?.id) {
+      if (insertError?.message?.toLowerCase().includes("blog_generation_jobs")) {
+        throw new Error(
+          "Missing blog_generation_jobs table. Create it in Supabase before using blog generation."
+        );
+      }
       throw new Error(insertError?.message || "Failed to create generation job.");
     }
 

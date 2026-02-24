@@ -9,7 +9,7 @@ export async function GET(
     const { jobId } = await params;
 
     const { data: job, error } = await supabase
-      .from("recreated_posts")
+      .from("blog_generation_jobs")
       .select("id, status, generation_state, created_at, updated_at")
       .eq("id", jobId)
       .single();
