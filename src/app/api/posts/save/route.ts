@@ -4,6 +4,7 @@ import { extractPlatform } from "@/lib/utils";
 import { downloadAndUploadMultipleToR2 } from "@/lib/r2";
 import { fetchWithProxy } from "@/lib/proxy-fetch";
 import { extractSocialPost } from "@/lib/social-extractor";
+import { fetchTikTokPost } from "@/lib/tiktok";
 import { randomUUID } from "crypto";
 
 export const runtime = "nodejs";
@@ -59,6 +60,12 @@ async function sleep(ms: number): Promise<void> {
 type SavedPostInsertRow = {
   id: string;
 } & Record<string, unknown>;
+
+function dedupeHttpUrls(urls: string[]): string[] {
+  return Array.from(
+    new Set(urls.filter((url) => typeof url === "string" && /^https?:\/\//i.test(url.trim())))
+  );
+}
 
 export async function POST(request: NextRequest) {
   const requestId = randomUUID().slice(0, 8);
@@ -124,7 +131,7 @@ export async function POST(request: NextRequest) {
 
           const extracted = await extractSocialPost(url, platform, sessionId);
 
-          originalImageUrls = extracted.mediaUrls;
+          originalImageUrls = dedupeHttpUrls(extracted.mediaUrls);
           postTitle = postTitle || extracted.title;
           postDescription = postDescription || extracted.description;
 
@@ -138,6 +145,29 @@ export async function POST(request: NextRequest) {
           };
 
           if (originalImageUrls.length > 0) {
+            if (platform === "tiktok" && postType === "image_slides") {
+              try {
+                const tiktokFallback = await fetchTikTokPost(url);
+                const merged = dedupeHttpUrls([...originalImageUrls, ...tiktokFallback.mediaUrls]);
+
+                if (merged.length > originalImageUrls.length) {
+                  originalImageUrls = merged;
+                  metadata = {
+                    ...metadata,
+                    tiktokFallbackExtractor: "local-html-parser",
+                    mergedMediaCount: merged.length,
+                  };
+                  console.log(
+                    `[posts-save] req=${requestId} tiktok_fallback_merged media=${merged.length}`
+                  );
+                }
+              } catch (fallbackError) {
+                console.warn(
+                  `[posts-save] req=${requestId} tiktok_fallback_failed message=${asErrorMessage(fallbackError)}`
+                );
+              }
+            }
+
             console.log(
               `[posts-save] req=${requestId} extraction_success platform=${platform} attempt=${attempt} media=${originalImageUrls.length} extractor=${extracted.extractor}`
             );

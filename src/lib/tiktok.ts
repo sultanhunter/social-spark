@@ -11,6 +11,40 @@ export interface TikTokPostData {
   isVideo: boolean;
 }
 
+function pushFirstValidUrl(candidates: unknown, mediaUrls: string[]) {
+  if (!Array.isArray(candidates)) return;
+  const url = candidates.find(
+    (item): item is string => typeof item === "string" && /^https?:\/\//i.test(item)
+  );
+  if (url && !mediaUrls.includes(url)) {
+    mediaUrls.push(url);
+  }
+}
+
+function extractImagePostUrls(imagePost: unknown, mediaUrls: string[]) {
+  if (!imagePost || typeof imagePost !== "object") return;
+  const imagePostRow = imagePost as Record<string, unknown>;
+  const images = imagePostRow.images;
+  if (!Array.isArray(images)) return;
+
+  for (const image of images) {
+    if (!image || typeof image !== "object") continue;
+    const imageRow = image as Record<string, unknown>;
+
+    const imageUrlObj =
+      typeof imageRow.imageURL === "object" && imageRow.imageURL !== null
+        ? (imageRow.imageURL as Record<string, unknown>)
+        : null;
+    const displayImageObj =
+      typeof imageRow.displayImage === "object" && imageRow.displayImage !== null
+        ? (imageRow.displayImage as Record<string, unknown>)
+        : null;
+
+    pushFirstValidUrl(imageUrlObj?.urlList, mediaUrls);
+    pushFirstValidUrl(displayImageObj?.urlList, mediaUrls);
+  }
+}
+
 /**
  * Extract TikTok video ID from URL
  */
@@ -79,6 +113,7 @@ function extractTikTokDataFromHTML(html: string): TikTokPostData {
   const mediaUrls: string[] = [];
   let description: string | null = null;
   let username: string | null = null;
+  let isVideo = true;
 
   // Try to find SIGI_STATE data (TikTok's state management)
   const sigiMatch = html.match(/<script[^>]*id="SIGI_STATE"[^>]*>([^<]+)<\/script>/);
@@ -94,6 +129,13 @@ function extractTikTokDataFromHTML(html: string): TikTokPostData {
         if (videoData) {
           description = videoData.desc || null;
           username = videoData.author || null;
+
+          if (videoData.imagePost) {
+            extractImagePostUrls(videoData.imagePost, mediaUrls);
+            if (mediaUrls.length > 0) {
+              isVideo = false;
+            }
+          }
           
           // Get video cover/thumbnail
           if (videoData.video?.cover) {
@@ -120,6 +162,13 @@ function extractTikTokDataFromHTML(html: string): TikTokPostData {
       if (itemInfo) {
         description = description || itemInfo.desc || null;
         username = username || itemInfo.author?.uniqueId || null;
+
+        if (itemInfo.imagePost) {
+          extractImagePostUrls(itemInfo.imagePost, mediaUrls);
+          if (mediaUrls.length > 0) {
+            isVideo = false;
+          }
+        }
         
         if (itemInfo.video?.cover && !mediaUrls.includes(itemInfo.video.cover)) {
           mediaUrls.push(itemInfo.video.cover);
@@ -152,6 +201,6 @@ function extractTikTokDataFromHTML(html: string): TikTokPostData {
     mediaUrls,
     thumbnailUrl: mediaUrls[0] || null,
     username,
-    isVideo: true,
+    isVideo,
   };
 }
