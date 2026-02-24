@@ -57,9 +57,25 @@ function asUIGenerationMode(value: unknown): UIGenerationMode | null {
   return null;
 }
 
+function deriveSetType(
+  versionId: string,
+  adaptationMode: AdaptationMode
+): "variant_only" | "app_context" | "hook_strategy" {
+  if (versionId.includes("hook_strategy")) return "hook_strategy";
+  return adaptationMode;
+}
+
+function asSetType(value: unknown): "variant_only" | "app_context" | "hook_strategy" | null {
+  if (value === "variant_only" || value === "app_context" || value === "hook_strategy") {
+    return value;
+  }
+  return null;
+}
+
 interface GenerationVersionInput {
   id: string;
   label: string;
+  setType: "variant_only" | "app_context" | "hook_strategy";
   adaptationMode: AdaptationMode;
   usesAppContext: boolean;
   uiGenerationMode: UIGenerationMode;
@@ -216,6 +232,9 @@ export async function POST(request: NextRequest) {
           label:
             asNonEmptyString(item.label) ||
             (adaptationMode === "app_context" ? "App Context Rewrite" : "Original Topic Variant"),
+          setType:
+            asSetType(item.setType) ||
+            deriveSetType(asNonEmptyString(item.id) || `version-${index + 1}`, adaptationMode),
           adaptationMode,
           usesAppContext: adaptationMode === "app_context",
           uiGenerationMode: asUIGenerationMode(item.uiGenerationMode) || "ai_creative",
@@ -231,6 +250,7 @@ export async function POST(request: NextRequest) {
       ? {
         id: fallbackMode,
         label: fallbackMode === "app_context" ? "App Context Rewrite" : "Original Topic Variant",
+        setType: deriveSetType(fallbackMode, fallbackMode),
         adaptationMode: fallbackMode,
         usesAppContext: fallbackMode === "app_context",
         uiGenerationMode: "ai_creative",
@@ -291,19 +311,42 @@ export async function POST(request: NextRequest) {
       hydratedVersions.map(async (version) => {
         if (version.recreatedPostId) return version;
 
-        const { data: inserted, error: insertError } = await supabase
+        const draftPayload: Record<string, unknown> = {
+          original_post_id: postId,
+          collection_id: collectionId,
+          script: version.script,
+          slide_plans: version.slidePlans,
+          generated_media_urls: [],
+          generation_state: {
+            setType: version.setType,
+            adaptationMode: version.adaptationMode,
+            versionLabel: version.label,
+          },
+          status: "draft",
+        };
+
+        let { data: inserted, error: insertError } = await supabase
           .from("recreated_posts")
-          .insert({
-            original_post_id: postId,
-            collection_id: collectionId,
-            script: version.script,
-            generated_media_urls: [],
-            status: "draft",
-          })
+          .insert(draftPayload)
           .select("id")
           .single();
 
+        if (insertError && /generation_state/i.test(insertError.message || "")) {
+          const fallbackPayload = { ...draftPayload };
+          delete fallbackPayload.generation_state;
+
+          const fallbackInsert = await supabase
+            .from("recreated_posts")
+            .insert(fallbackPayload)
+            .select("id")
+            .single();
+
+          inserted = fallbackInsert.data;
+          insertError = fallbackInsert.error;
+        }
+
         if (insertError) throw insertError;
+        if (!inserted) throw new Error("Failed to create recreated post row");
 
         return {
           ...version,
@@ -334,6 +377,7 @@ export async function POST(request: NextRequest) {
             postId,
             status: "generating",
             script: version.script,
+            slidePlans: version.slidePlans,
             generatedMediaUrls: [],
           });
 
@@ -412,6 +456,7 @@ export async function POST(request: NextRequest) {
             postId,
             status: "failed",
             script: version.script,
+            slidePlans: version.slidePlans,
           });
 
           return {

@@ -87,6 +87,9 @@ type RecreatedHistoryItem = {
   caption?: string | null;
   status: "draft" | "generating" | "completed" | "failed";
   generation_state?: {
+    setType?: string;
+    adaptationMode?: string;
+    versionLabel?: string;
     stage?: string;
     totalSlides?: number;
     completedSlides?: number;
@@ -230,6 +233,32 @@ function statusBadgeVariant(status: RecreatedHistoryItem["status"]): "default" |
   if (status === "completed") return "success";
   if (status === "failed") return "warning";
   return "default";
+}
+
+function normalizeHistorySetType(value: unknown): "variant_only" | "app_context" | "hook_strategy" | null {
+  if (value === "variant_only" || value === "app_context" || value === "hook_strategy") {
+    return value;
+  }
+  return null;
+}
+
+function inferHistorySetType(item: RecreatedHistoryItem): "variant_only" | "app_context" | "hook_strategy" | "unknown" {
+  const fromState = normalizeHistorySetType(item.generation_state?.setType);
+  if (fromState) return fromState;
+
+  if (typeof item.script === "string") {
+    if (/Adaptation Mode\s*:\s*app_context/i.test(item.script)) return "app_context";
+    if (/Adaptation Mode\s*:\s*variant_only/i.test(item.script)) return "variant_only";
+  }
+
+  return "unknown";
+}
+
+function setTypeLabel(value: "variant_only" | "app_context" | "hook_strategy" | "unknown"): string {
+  if (value === "hook_strategy") return "hook_strategy";
+  if (value === "app_context") return "app_context";
+  if (value === "variant_only") return "variant_only";
+  return "unknown";
 }
 
 function historyChanged(prev: RecreatedHistoryItem[], next: RecreatedHistoryItem[]): boolean {
@@ -543,6 +572,7 @@ export function PostDetailView({ postId }: PostDetailViewProps) {
       const adaptationMode: "app_context" | "variant_only" = /Adaptation Mode\s*:\s*app_context/i.test(script)
         ? "app_context"
         : "variant_only";
+      const setType = inferHistorySetType(item);
 
       const slidePlans = Array.isArray(item.slide_plans) ? item.slide_plans : [];
 
@@ -556,6 +586,7 @@ export function PostDetailView({ postId }: PostDetailViewProps) {
             {
               id: `history-${item.id}`,
               label: "History Regeneration",
+              setType: setType === "unknown" ? adaptationMode : setType,
               adaptationMode,
               usesAppContext: adaptationMode === "app_context",
               uiGenerationMode: "ai_creative",
@@ -1426,11 +1457,13 @@ export function PostDetailView({ postId }: PostDetailViewProps) {
                     const hasCaption = Boolean(caption.trim());
                     const instagramResult = instagramResultBySetId[captionKey];
                     const generatedCount = item.generated_media_urls?.length || 0;
+                    const historySetType = inferHistorySetType(item);
 
                     return (
                       <div key={item.id} className="rounded-xl border border-slate-200 bg-slate-50 p-4">
                         <div className="mb-3 flex flex-wrap items-center gap-2">
                           <Badge variant={statusBadgeVariant(item.status)}>{item.status}</Badge>
+                          <Badge variant="default">{setTypeLabel(historySetType)}</Badge>
                           <Badge variant="default">{item.generated_media_urls?.length || 0} images</Badge>
                           <span className="text-xs text-slate-500">Created {formatDate(item.created_at)}</span>
                           <div className="ml-auto flex flex-wrap items-center gap-2">

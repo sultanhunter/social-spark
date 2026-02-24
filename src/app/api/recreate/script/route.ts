@@ -28,6 +28,7 @@ const FALLBACK_HOOK_STRATEGY = `Slide 1: pattern-breaking hook. Slide 2: second 
 interface ScriptVersion {
   id: string;
   label: string;
+  setType: "variant_only" | "app_context" | "hook_strategy";
   adaptationMode: AdaptationMode;
   usesAppContext: boolean;
   uiGenerationMode: UIGenerationMode;
@@ -60,6 +61,11 @@ function buildHookVersionLabel(adaptationMode: AdaptationMode): string {
   return adaptationMode === "app_context"
     ? "Hook Strategy (App Context)"
     : "Hook Strategy (Original Topic)";
+}
+
+function deriveSetType(versionId: string, adaptationMode: AdaptationMode): "variant_only" | "app_context" | "hook_strategy" {
+  if (versionId.includes("hook_strategy")) return "hook_strategy";
+  return adaptationMode;
 }
 
 async function loadHookStrategyPlaybook(): Promise<string> {
@@ -280,6 +286,7 @@ export async function POST(request: NextRequest) {
         {
           id: `${hookSourceMode}_hook_strategy`,
           label: buildHookVersionLabel(hookSourceMode),
+          setType: "hook_strategy",
           adaptationMode: hookSourceMode,
           usesAppContext: hookSourceMode === "app_context",
           uiGenerationMode: "ai_creative",
@@ -309,6 +316,7 @@ export async function POST(request: NextRequest) {
           return {
             id: mode,
             label: buildVersionLabel(mode),
+            setType: deriveSetType(mode, mode),
             adaptationMode: mode,
             usesAppContext: mode === "app_context",
             uiGenerationMode: "ai_creative" as UIGenerationMode,
@@ -331,18 +339,41 @@ export async function POST(request: NextRequest) {
 
     const versionsWithRecreatedIds = await Promise.all(
       versions.map(async (version) => {
-        const { data: recreated, error: insertError } = await supabase
+        const draftPayload: Record<string, unknown> = {
+          original_post_id: postId,
+          collection_id: collectionId,
+          script: version.script,
+          slide_plans: version.slidePlans,
+          generation_state: {
+            setType: version.setType,
+            adaptationMode: version.adaptationMode,
+            versionLabel: version.label,
+          },
+          status: "draft",
+        };
+
+        let { data: recreated, error: insertError } = await supabase
           .from("recreated_posts")
-          .insert({
-            original_post_id: postId,
-            collection_id: collectionId,
-            script: version.script,
-            status: "draft",
-          })
+          .insert(draftPayload)
           .select("id")
           .single();
 
+        if (insertError && /generation_state/i.test(insertError.message || "")) {
+          const fallbackPayload = { ...draftPayload };
+          delete fallbackPayload.generation_state;
+
+          const fallbackInsert = await supabase
+            .from("recreated_posts")
+            .insert(fallbackPayload)
+            .select("id")
+            .single();
+
+          recreated = fallbackInsert.data;
+          insertError = fallbackInsert.error;
+        }
+
         if (insertError) throw insertError;
+        if (!recreated) throw new Error("Failed to create recreated post row");
 
         return {
           ...version,
