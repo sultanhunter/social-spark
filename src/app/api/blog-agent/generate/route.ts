@@ -1,51 +1,43 @@
 import { NextRequest, NextResponse } from "next/server";
-import {
-  createTopicResearchBrief,
-  discoverTrendingBlogTopic,
-  generateSeoBlogDraft,
-  BLOG_REASONING_MODEL,
-} from "@/lib/blog-agent";
-import { generateBlogImages, injectBlogImagesIntoMarkdown } from "@/lib/blog-image";
-import { createBlogDraft } from "@/lib/muslimah-blog-api";
+import { BLOG_REASONING_MODEL } from "@/lib/blog-agent";
 import { isReasoningModel } from "@/lib/reasoning-model";
 import { supabase } from "@/lib/supabase";
-
-export const maxDuration = 600;
 
 function asNonEmptyString(value: unknown): string | null {
   return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
 }
 
-function getCollectionAppContext(collection: unknown): string {
-  if (typeof collection !== "object" || collection === null) return "";
-  const row = collection as Record<string, unknown>;
-
-  return (
-    asNonEmptyString(row.app_description) ||
-    asNonEmptyString(row.app_context) ||
-    "Muslimah Pro supports Muslim women with faith-centered wellness, period tracking, and practical Islamic guidance."
-  );
+async function markJobFailed(jobId: string, error: string) {
+  await supabase
+    .from("recreated_posts")
+    .update({
+      status: "failed",
+      generation_state: {
+        kind: "blog_agent",
+        status: "failed",
+        error,
+        failed_at: new Date().toISOString(),
+      },
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", jobId);
 }
 
 export async function POST(request: NextRequest) {
   try {
     const body = (await request.json()) as Record<string, unknown>;
-
     const collectionId = asNonEmptyString(body.collectionId);
     const reasoningModel = isReasoningModel(body.reasoningModel)
       ? body.reasoningModel
       : BLOG_REASONING_MODEL;
 
     if (!collectionId) {
-      return NextResponse.json(
-        { error: "Collection ID is required." },
-        { status: 400 }
-      );
+      return NextResponse.json({ error: "Collection ID is required." }, { status: 400 });
     }
 
     const { data: collection, error: collectionError } = await supabase
       .from("collections")
-      .select("*")
+      .select("id")
       .eq("id", collectionId)
       .single();
 
@@ -53,101 +45,78 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Collection not found." }, { status: 404 });
     }
 
-    const appName = asNonEmptyString(collection.app_name) || "Muslimah Pro";
-    const appContext = getCollectionAppContext(collection);
+    const { data: job, error: insertError } = await supabase
+      .from("recreated_posts")
+      .insert({
+        original_post_id: null,
+        collection_id: collectionId,
+        script: "BLOG_AGENT_JOB",
+        generated_media_urls: [],
+        status: "generating",
+        generation_state: {
+          kind: "blog_agent",
+          status: "generating",
+          reasoningModel,
+          created_at: new Date().toISOString(),
+        },
+      })
+      .select("id, status, created_at")
+      .single();
 
-    let topicPlan;
+    if (insertError || !job?.id) {
+      throw new Error(insertError?.message || "Failed to create generation job.");
+    }
+
+    const workerUrl = asNonEmptyString(process.env.BLOG_AGENT_WORKER_URL);
+    if (!workerUrl) {
+      await markJobFailed(job.id, "Missing BLOG_AGENT_WORKER_URL environment variable.");
+      return NextResponse.json(
+        { error: "Missing BLOG_AGENT_WORKER_URL environment variable." },
+        { status: 500 }
+      );
+    }
+
+    const workerToken = asNonEmptyString(process.env.BLOG_AGENT_WORKER_TOKEN);
+
     try {
-      topicPlan = await discoverTrendingBlogTopic({
-        appName,
-        appContext,
-        reasoningModel,
+      const delegateResponse = await fetch(workerUrl, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(workerToken ? { Authorization: `Bearer ${workerToken}` } : {}),
+        },
+        body: JSON.stringify({
+          jobId: job.id,
+          collectionId,
+          reasoningModel,
+        }),
       });
+
+      if (!delegateResponse.ok) {
+        const payload = (await delegateResponse.json().catch(() => ({}))) as { error?: string };
+        const message = payload.error || `Worker delegation failed with status ${delegateResponse.status}`;
+        await markJobFailed(job.id, message);
+        return NextResponse.json({ error: message, jobId: job.id }, { status: 502 });
+      }
     } catch (error) {
-      throw new Error(
-        `Trend discovery failed: ${error instanceof Error ? error.message : "Unknown error"}`
-      );
+      const message =
+        error instanceof Error ? `Failed to delegate generation: ${error.message}` : "Failed to delegate generation.";
+      await markJobFailed(job.id, message);
+      return NextResponse.json({ error: message, jobId: job.id }, { status: 502 });
     }
 
-    let research;
-    try {
-      research = await createTopicResearchBrief({
-        topic: topicPlan.selectedTopic,
-        appName,
-        appContext,
-        reasoningModel,
-      });
-    } catch (error) {
-      throw new Error(
-        `Topic research failed: ${error instanceof Error ? error.message : "Unknown error"}`
-      );
-    }
-
-    let draft;
-    try {
-      draft = await generateSeoBlogDraft({
-        topic: topicPlan.selectedTopic,
-        appName,
-        appContext,
-        research,
-        reasoningModel,
-      });
-    } catch (error) {
-      throw new Error(
-        `Draft generation failed: ${error instanceof Error ? error.message : "Unknown error"}`
-      );
-    }
-
-    let generatedImages;
-    try {
-      generatedImages = await generateBlogImages({
-        topic: topicPlan.selectedTopic,
-        title: draft.title,
-        slug: draft.slug,
-        research,
-        reasoningModel,
-      });
-    } catch (error) {
-      throw new Error(
-        `Image generation failed: ${error instanceof Error ? error.message : "Unknown error"}`
-      );
-    }
-
-    const draftWithImages = {
-      ...draft,
-      content: injectBlogImagesIntoMarkdown({
-        markdown: draft.content,
-        title: draft.title,
-        coverImageUrl: generatedImages.coverImageUrl,
-        inlineImages: generatedImages.inlineImages,
-      }),
-      cover_image: generatedImages.coverImageUrl,
-    };
-
-    let draftPost;
-    try {
-      draftPost = await createBlogDraft(draftWithImages);
-    } catch (error) {
-      throw new Error(
-        `Draft save failed: ${error instanceof Error ? error.message : "Unknown error"}`
-      );
-    }
-
-    return NextResponse.json({
-      model: reasoningModel,
-      topicPlan,
-      research,
-      draft: draftWithImages,
-      generatedImages,
-      draftPost,
-    });
+    return NextResponse.json(
+      {
+        jobId: job.id,
+        status: "generating",
+        message: "Blog generation has started in the background.",
+      },
+      { status: 202 }
+    );
   } catch (err) {
     return NextResponse.json(
       {
-        error:
-          err instanceof Error
-            ? err.message
-            : "Failed to research topic, generate content, and save blog draft.",
+        error: err instanceof Error ? err.message : "Failed to start blog generation job.",
       },
       { status: 500 }
     );

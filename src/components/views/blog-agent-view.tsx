@@ -134,6 +134,20 @@ type BlogPostDetailResponse = {
   error?: string;
 };
 
+type BlogGenerateJobResponse = {
+  jobId?: string;
+  status?: string;
+  message?: string;
+  error?: string;
+};
+
+type BlogGenerationJobStatusResponse = {
+  jobId: string;
+  status: "draft" | "generating" | "completed" | "failed";
+  error?: string | null;
+  result?: BlogAgentGenerateResponse | null;
+};
+
 export function BlogAgentView({ collectionId }: { collectionId: string }) {
   const router = useRouter();
   const { activeCollection } = useAppStore();
@@ -153,6 +167,7 @@ export function BlogAgentView({ collectionId }: { collectionId: string }) {
   const [previewError, setPreviewError] = useState("");
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
+  const [activeJobId, setActiveJobId] = useState<string | null>(null);
 
   const loadPosts = useCallback(async () => {
     setIsLoadingPosts(true);
@@ -178,6 +193,57 @@ export function BlogAgentView({ collectionId }: { collectionId: string }) {
   useEffect(() => {
     void loadPosts();
   }, [loadPosts]);
+
+  useEffect(() => {
+    if (!activeJobId) return;
+
+    let cancelled = false;
+
+    const pollJob = async () => {
+      try {
+        const response = await fetch(`/api/blog-agent/jobs/${encodeURIComponent(activeJobId)}`, {
+          method: "GET",
+          cache: "no-store",
+        });
+        const data = (await response.json()) as BlogGenerationJobStatusResponse & { error?: string };
+
+        if (!response.ok) {
+          throw new Error(data.error || "Failed to check job status.");
+        }
+
+        if (cancelled) return;
+
+        if (data.status === "completed") {
+          if (data.result) {
+            setResult(data.result);
+          }
+          setSuccess("Blog draft generation completed.");
+          setActiveJobId(null);
+          await loadPosts();
+          return;
+        }
+
+        if (data.status === "failed") {
+          setError(data.error || "Background generation failed.");
+          setActiveJobId(null);
+          await loadPosts();
+        }
+      } catch (err) {
+        if (cancelled) return;
+        setError(err instanceof Error ? err.message : "Failed to poll generation status.");
+      }
+    };
+
+    void pollJob();
+    const intervalId = setInterval(() => {
+      void pollJob();
+    }, 7000);
+
+    return () => {
+      cancelled = true;
+      clearInterval(intervalId);
+    };
+  }, [activeJobId, loadPosts]);
 
   const openPreview = async (slug: string) => {
     setIsPreviewOpen(true);
@@ -207,6 +273,7 @@ export function BlogAgentView({ collectionId }: { collectionId: string }) {
     setIsGenerating(true);
     setError("");
     setSuccess("");
+    setActiveJobId(null);
 
     try {
       const response = await fetch("/api/blog-agent/generate", {
@@ -218,21 +285,19 @@ export function BlogAgentView({ collectionId }: { collectionId: string }) {
         }),
       });
 
-      const data = (await response.json()) as BlogAgentGenerateResponse & { error?: string };
+      const data = (await response.json()) as BlogGenerateJobResponse;
 
       if (!response.ok) {
         throw new Error(data.error || "Failed to generate blog draft.");
       }
 
-      if (isReasoningModel(data.model)) {
-        setReasoningModel(data.model);
+      if (!data.jobId) {
+        throw new Error("Generation job did not return a valid job ID.");
       }
 
-      setResult(data);
-      setSuccess(
-        `Draft saved for \"${data.topicPlan.selectedTopic}\" as \"${data.draftPost.slug}\".`
-      );
-      await loadPosts();
+      setResult(null);
+      setActiveJobId(data.jobId);
+      setSuccess("Generation started. The server is preparing your long-form SEO draft in the background.");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Blog generation failed.");
     } finally {
@@ -374,9 +439,13 @@ export function BlogAgentView({ collectionId }: { collectionId: string }) {
               </div>
 
               <div className="flex flex-wrap gap-3">
-                <Button variant="primary" onClick={handleGenerate} isLoading={isGenerating}>
+                <Button variant="primary" onClick={handleGenerate} isLoading={isGenerating || Boolean(activeJobId)}>
                   <Sparkles className="mr-2 h-4 w-4" />
-                  {isGenerating ? "Scanning trends, researching, and writing..." : "Auto-Research + Generate Draft"}
+                  {isGenerating
+                    ? "Queuing generation..."
+                    : activeJobId
+                      ? "Generating in background..."
+                      : "Auto-Research + Generate Draft"}
                 </Button>
 
                 {result?.draft?.content ? (
@@ -407,6 +476,12 @@ export function BlogAgentView({ collectionId }: { collectionId: string }) {
               {success ? (
                 <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700">
                   {success}
+                </div>
+              ) : null}
+
+              {activeJobId ? (
+                <div className="rounded-lg border border-sky-200 bg-sky-50 px-3 py-2 text-sm text-sky-700">
+                  Job {activeJobId.slice(0, 8)} is running on the worker server. This panel updates automatically.
                 </div>
               ) : null}
             </CardContent>
