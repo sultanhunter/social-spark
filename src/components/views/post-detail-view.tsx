@@ -162,13 +162,31 @@ function toPercent(value: number): string {
   return `${Math.round(value * 100)}%`;
 }
 
-function HistorySlidePlans({ plans, itemId }: { plans: SlidePlan[]; itemId: string }) {
+function extractSlideScriptSections(script: string | null | undefined): string[] {
+  if (typeof script !== "string") return [];
+
+  const normalized = script.replace(/\r/g, "").trim();
+  if (!normalized) return [];
+
+  const matches = normalized.match(/(?:^|\n)(Slide\s+\d+[\s\S]*?)(?=\nSlide\s+\d+|$)/gi);
+  if (!matches) return [];
+
+  return matches.map((section) => section.trim()).filter((section) => section.length > 0);
+}
+
+function HistorySlidePlans({ plans, itemId, script }: { plans: SlidePlan[]; itemId: string; script?: string | null }) {
   const [expanded, setExpanded] = useState(false);
   const [copied, setCopied] = useState(false);
+  const slideScripts = useMemo(() => extractSlideScriptSections(script), [script]);
 
   const allInstructions = plans
     .map((p, i) => {
-      const lines = [`--- Slide ${i + 1}: ${p.headline} ---`, ...p.figmaInstructions];
+      const lines = [`--- Slide ${i + 1}: ${p.headline} ---`];
+      const slideScript = slideScripts[i];
+      if (slideScript) {
+        lines.push("Slide Script:", slideScript);
+      }
+      lines.push("Figma Instructions:", ...p.figmaInstructions);
       return lines.join("\n");
     })
     .join("\n\n");
@@ -205,13 +223,24 @@ function HistorySlidePlans({ plans, itemId }: { plans: SlidePlan[]; itemId: stri
                 {plan.supportingText && (
                   <p className="mt-0.5 text-[11px] text-slate-500">{plan.supportingText}</p>
                 )}
-                <ul className="mt-1.5 space-y-0.5">
-                  {plan.figmaInstructions.map((instruction, j) => (
-                    <li key={j} className="text-[11px] leading-relaxed text-slate-600">
-                      {instruction}
-                    </li>
-                  ))}
-                </ul>
+                <div className="mt-1.5 grid gap-2 md:grid-cols-2">
+                  <div className="rounded-md border border-slate-200 bg-white p-2">
+                    <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Slide Script</p>
+                    <p className="mt-1 whitespace-pre-wrap text-[11px] leading-relaxed text-slate-700">
+                      {slideScripts[i] || "Script block not available for this slide."}
+                    </p>
+                  </div>
+                  <div className="rounded-md border border-slate-200 bg-white p-2">
+                    <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Figma Instructions</p>
+                    <ul className="mt-1 space-y-0.5">
+                      {plan.figmaInstructions.map((instruction, j) => (
+                        <li key={j} className="text-[11px] leading-relaxed text-slate-600">
+                          {instruction}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                </div>
                 {plan.assetPrompts?.length > 0 && (
                   <div className="mt-1.5 border-t border-slate-100 pt-1.5">
                     <p className="text-[10px] font-medium uppercase tracking-wide text-slate-400">Assets</p>
@@ -1562,7 +1591,7 @@ export function PostDetailView({ postId }: PostDetailViewProps) {
                           </div>
                         ) : null}
                         {Array.isArray(item.slide_plans) && item.slide_plans.length > 0 && (
-                          <HistorySlidePlans plans={item.slide_plans} itemId={item.id} />
+                          <HistorySlidePlans plans={item.slide_plans} itemId={item.id} script={item.script} />
                         )}
                         {Array.isArray(item.generated_media_urls) && item.generated_media_urls.length > 0 ? (
                           <div className="grid grid-cols-2 gap-2 md:grid-cols-4">

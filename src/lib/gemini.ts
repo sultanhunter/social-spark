@@ -451,6 +451,7 @@ BRAND IDENTITY:
 RULES:
 - Look at each original slide image carefully to understand its layout, composition, typography placement, visual hierarchy, and style.
 - Your figmaInstructions should recreate that SAME style/layout but adapted with our brand colors (${gradientStr}), our copy from the script, and our logo.
+- figmaInstructions must include the exact on-slide copy for that slide (full script content, not placeholders). Include one explicit step that lists the exact text to place.
 - assetPrompts must NEVER include text/typography in the generated images. Assets are purely visual elements.
 - assetPrompts MUST specify that the asset is rendered on a PLAIN WHITE or SOLID COLOR background. Do NOT include gradients, shadows, glows, bokeh, lens flares, vignettes, or any background effects — the asset needs clean background removal.
 - Match the number of slides in the script to the provided images. If the script has more slides than images, use the last image's style for extra slides.
@@ -479,7 +480,37 @@ JSON only. No markdown.`;
     : [{ text: prompt }];
 
   const result = await model.generateContent(content);
-  return parseSlideDesignPlans(result.response.text(), originalImageUrls.length);
+  const plans = parseSlideDesignPlans(result.response.text(), originalImageUrls.length);
+  const slideScripts = extractSlideScriptSections(script);
+
+  return plans.map((plan, index) => {
+    const slideScript = slideScripts[index];
+    if (!slideScript) return plan;
+
+    const hasScriptStep = plan.figmaInstructions.some((step) =>
+      /exact on-slide copy|exact slide script|full script content/i.test(step)
+    );
+
+    if (hasScriptStep) return plan;
+
+    return {
+      ...plan,
+      figmaInstructions: [
+        `Exact on-slide copy for Slide ${index + 1}:\n${slideScript}`,
+        ...plan.figmaInstructions,
+      ],
+    };
+  });
+}
+
+function extractSlideScriptSections(script: string): string[] {
+  const normalized = script.replace(/\r/g, "").trim();
+  if (!normalized) return [];
+
+  const matches = normalized.match(/(?:^|\n)(Slide\s+\d+[\s\S]*?)(?=\nSlide\s+\d+|$)/gi);
+  if (!matches) return [];
+
+  return matches.map((section) => section.trim()).filter((section) => section.length > 0);
 }
 
 function parseSlideDesignPlans(text: string, slideCount: number): SlideGenerationPlan[] {
