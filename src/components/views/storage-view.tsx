@@ -2,14 +2,25 @@
 
 import { useState } from "react";
 import { motion } from "framer-motion";
-import { ArrowRight, FolderOpen, Image as ImageIcon, LayoutGrid, Plus, Sparkles, Video } from "lucide-react";
+import {
+  ArrowRight,
+  BookMarked,
+  FolderOpen,
+  Image as ImageIcon,
+  LayoutGrid,
+  Plus,
+  Sparkles,
+  Video,
+} from "lucide-react";
 import { useAppStore } from "@/store/app-store";
 import { Button } from "@/components/ui/button";
 import { PostCard } from "@/components/posts/post-card";
+import { useRouter } from "next/navigation";
 
 export function StorageView() {
   const { activeCollection, posts, postFilter, setPostFilter, setAddPostOpen } = useAppStore();
   const [isLogoDownloading, setIsLogoDownloading] = useState(false);
+  const router = useRouter();
 
   if (!activeCollection) {
     return <EmptyState />;
@@ -109,10 +120,19 @@ export function StorageView() {
                 </p>
               </div>
             </div>
-            <Button variant="primary" onClick={() => setAddPostOpen(true)}>
-              <Plus className="mr-2 h-4 w-4" />
-              Save Post
-            </Button>
+            <div className="flex flex-wrap items-center gap-2">
+              <Button
+                variant="outline"
+                onClick={() => router.push(`/collections/${activeCollection.id}/blog-agent`)}
+              >
+                <BookMarked className="mr-2 h-4 w-4" />
+                Blog Agent
+              </Button>
+              <Button variant="primary" onClick={() => setAddPostOpen(true)}>
+                <Plus className="mr-2 h-4 w-4" />
+                Save Post
+              </Button>
+            </div>
           </div>
 
           <div className="mt-4 flex flex-wrap items-center gap-2">
