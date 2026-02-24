@@ -68,6 +68,34 @@ const BLOG_MIN_WORDS = 2000;
 const BLOG_MAX_WORDS = 5000;
 const BLOG_MIN_EXTERNAL_LINKS = 5;
 
+type GenerateContentResult = Awaited<
+  ReturnType<ReturnType<typeof genAI.getGenerativeModel>["generateContent"]>
+>;
+
+async function generateWithSearchFallback(
+  modelId: string,
+  payload: Parameters<ReturnType<typeof genAI.getGenerativeModel>["generateContent"]>[0]
+): Promise<GenerateContentResult> {
+  try {
+    const modelWithGoogleSearch = genAI.getGenerativeModel({
+      model: modelId,
+      tools: ([{ googleSearch: {} }] as unknown) as Array<{ googleSearchRetrieval: Record<string, never> }>,
+    });
+    return await modelWithGoogleSearch.generateContent(payload);
+  } catch {
+    try {
+      const modelWithLegacySearch = genAI.getGenerativeModel({
+        model: modelId,
+        tools: [{ googleSearchRetrieval: {} }],
+      });
+      return await modelWithLegacySearch.generateContent(payload);
+    } catch {
+      const modelWithoutSearchTool = genAI.getGenerativeModel({ model: modelId });
+      return modelWithoutSearchTool.generateContent(payload);
+    }
+  }
+}
+
 function normalizeBlogModel(value: unknown): ReasoningModel {
   return isReasoningModel(value) ? value : BLOG_REASONING_MODEL;
 }
@@ -302,17 +330,7 @@ Rules:
     },
   };
 
-  let result;
-  try {
-    const modelWithSearch = genAI.getGenerativeModel({
-      model: normalizeBlogModel(reasoningModel),
-      tools: [{ googleSearchRetrieval: {} }],
-    });
-    result = await modelWithSearch.generateContent(requestPayload);
-  } catch {
-    const fallbackModel = genAI.getGenerativeModel({ model: normalizeBlogModel(reasoningModel) });
-    result = await fallbackModel.generateContent(requestPayload);
-  }
+  const result = await generateWithSearchFallback(normalizeBlogModel(reasoningModel), requestPayload);
 
   const parsed = parseJsonFromModel<Partial<TrendingTopicPlan>>(result.response.text()) || {};
   const candidateTopics = sanitizeTopicCandidates(parsed.candidateTopics, 6);
@@ -582,17 +600,7 @@ Rules:
     },
   };
 
-  let result;
-  try {
-    const modelWithSearch = genAI.getGenerativeModel({
-      model: normalizeBlogModel(reasoningModel),
-      tools: [{ googleSearchRetrieval: {} }],
-    });
-    result = await modelWithSearch.generateContent(requestPayload);
-  } catch {
-    const fallbackModel = genAI.getGenerativeModel({ model: normalizeBlogModel(reasoningModel) });
-    result = await fallbackModel.generateContent(requestPayload);
-  }
+  const result = await generateWithSearchFallback(normalizeBlogModel(reasoningModel), requestPayload);
 
   const parsed = parseJsonFromModel<Partial<BlogResearchBrief>>(result.response.text()) || {};
   const parsedSources = sanitizeSources(parsed.sources);

@@ -65,6 +65,47 @@ export interface RecreatedPost {
   updated_at: string;
 }
 
+export interface CarouselAgentGeneration {
+  id: string;
+  collection_id: string;
+  focus: string | null;
+  topic: string;
+  angle_rationale: string;
+  caption: string;
+  cta: string;
+  hashtags: string[];
+  strategy_checklist: string[];
+  spin_off_angles: string[];
+  reasoning_model: string;
+  image_model: string;
+  generated_images: boolean;
+  status: "completed" | "failed";
+  payload: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CarouselAgentGenerationSlide {
+  id: string;
+  generation_id: string;
+  collection_id: string;
+  slide_number: number;
+  role: string;
+  density: "dense" | "light";
+  overlay_title: string;
+  overlay_lines: string[];
+  headline: string;
+  body_bullets: string[];
+  voice_script: string;
+  hook_purpose: string;
+  caps_words: string[];
+  visual_direction: string;
+  image_prompt: string;
+  alt_text: string;
+  image_url: string | null;
+  created_at: string;
+}
+
 // SQL Schema for Supabase (run this in Supabase SQL editor)
 export const SCHEMA_SQL = `
 -- Collections table
@@ -112,4 +153,54 @@ CREATE TABLE IF NOT EXISTS recreated_posts (
 CREATE INDEX IF NOT EXISTS idx_saved_posts_collection ON saved_posts(collection_id);
 CREATE INDEX IF NOT EXISTS idx_saved_posts_type ON saved_posts(post_type);
 CREATE INDEX IF NOT EXISTS idx_recreated_posts_collection ON recreated_posts(collection_id);
+
+-- Carousel agent generations table
+CREATE TABLE IF NOT EXISTS carousel_agent_generations (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  collection_id UUID REFERENCES collections(id) ON DELETE CASCADE,
+  focus TEXT,
+  topic TEXT NOT NULL,
+  angle_rationale TEXT,
+  caption TEXT,
+  cta TEXT,
+  hashtags TEXT[] DEFAULT '{}',
+  strategy_checklist TEXT[] DEFAULT '{}',
+  spin_off_angles TEXT[] DEFAULT '{}',
+  reasoning_model VARCHAR(120),
+  image_model VARCHAR(120),
+  generated_images BOOLEAN DEFAULT TRUE,
+  status VARCHAR(50) DEFAULT 'completed',
+  payload JSONB DEFAULT '{}'::jsonb,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+  updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+-- Carousel agent slides table
+CREATE TABLE IF NOT EXISTS carousel_agent_generation_slides (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  generation_id UUID REFERENCES carousel_agent_generations(id) ON DELETE CASCADE,
+  collection_id UUID REFERENCES collections(id) ON DELETE CASCADE,
+  slide_number INT NOT NULL,
+  role VARCHAR(80),
+  density VARCHAR(20),
+  overlay_title TEXT,
+  overlay_lines TEXT[] DEFAULT '{}',
+  headline TEXT,
+  body_bullets TEXT[] DEFAULT '{}',
+  voice_script TEXT,
+  hook_purpose TEXT,
+  caps_words TEXT[] DEFAULT '{}',
+  visual_direction TEXT,
+  image_prompt TEXT,
+  alt_text TEXT,
+  image_url TEXT,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+  UNIQUE(generation_id, slide_number)
+);
+
+CREATE INDEX IF NOT EXISTS idx_carousel_agent_generations_collection
+  ON carousel_agent_generations(collection_id);
+
+CREATE INDEX IF NOT EXISTS idx_carousel_agent_generation_slides_generation
+  ON carousel_agent_generation_slides(generation_id);
 `;
