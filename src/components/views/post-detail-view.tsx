@@ -276,6 +276,7 @@ export function PostDetailView({ postId }: PostDetailViewProps) {
   const [recreatedPostId, setRecreatedPostId] = useState<string | null>(null);
   const [history, setHistory] = useState<RecreatedHistoryItem[]>([]);
   const [isHistoryLoading, setIsHistoryLoading] = useState(false);
+  const [generatingHistoryBySetId, setGeneratingHistoryBySetId] = useState<Record<string, boolean>>({});
   const [downloadingSetIds, setDownloadingSetIds] = useState<Record<string, boolean>>({});
   const [downloadingImageIds, setDownloadingImageIds] = useState<Record<string, boolean>>({});
   const [removeBgLoading, setRemoveBgLoading] = useState<Record<string, boolean>>({});
@@ -526,6 +527,74 @@ export function PostDetailView({ postId }: PostDetailViewProps) {
     }
   };
 
+  const handleGenerateHistoryImages = async (item: RecreatedHistoryItem) => {
+    if (!activeCollection || !selectedPost) return;
+
+    const script = typeof item.script === "string" ? item.script.trim() : "";
+    if (!script) {
+      setError("Cannot generate images for this set because its script is missing.");
+      return;
+    }
+
+    setGeneratingHistoryBySetId((prev) => ({ ...prev, [item.id]: true }));
+    setError("");
+
+    try {
+      const adaptationMode: "app_context" | "variant_only" = /Adaptation Mode\s*:\s*app_context/i.test(script)
+        ? "app_context"
+        : "variant_only";
+
+      const slidePlans = Array.isArray(item.slide_plans) ? item.slide_plans : [];
+
+      const response = await fetch("/api/recreate/generate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          script,
+          slidePlans,
+          versions: [
+            {
+              id: `history-${item.id}`,
+              label: "History Regeneration",
+              adaptationMode,
+              usesAppContext: adaptationMode === "app_context",
+              uiGenerationMode: "ai_creative",
+              followsReferenceLayout: false,
+              script,
+              slidePlans,
+              recreatedPostId: item.id,
+            },
+          ],
+          collectionId: activeCollection.id,
+          postId: selectedPost.id,
+          appName: activeCollection.app_name,
+          recreatedPostId: item.id,
+          reasoningModel,
+          imageGenerationModel,
+        }),
+      });
+
+      const data = await response.json();
+      if (!response.ok) {
+        throw new Error(data.error || "Failed to generate images for this set");
+      }
+
+      if (isReasoningModel(data.reasoningModel)) {
+        setReasoningModel(data.reasoningModel);
+      }
+
+      if (isImageGenerationModel(data.imageGenerationModel)) {
+        setImageGenerationModel(data.imageGenerationModel);
+      }
+
+      await loadHistory({ silent: true });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to generate images for this set");
+    } finally {
+      setGeneratingHistoryBySetId((prev) => ({ ...prev, [item.id]: false }));
+    }
+  };
+
   const loadHistory = useCallback(async (options?: { silent?: boolean }) => {
     if (!activeCollection) return;
     const silent = Boolean(options?.silent);
@@ -567,6 +636,7 @@ export function PostDetailView({ postId }: PostDetailViewProps) {
     setCaptionLoadingBySetId({});
     setPostingInstagramBySetId({});
     setInstagramResultBySetId({});
+    setGeneratingHistoryBySetId({});
 
     if (selectedPost.media_urls?.length) {
       setSelectedReferenceImages(selectedPost.media_urls);
@@ -585,7 +655,8 @@ export function PostDetailView({ postId }: PostDetailViewProps) {
   }, [activeCollection, loadHistory]);
 
   useEffect(() => {
-    if (!isGeneratingImages) return;
+    const hasGeneratingHistory = history.some((item) => item.status === "generating");
+    if (!isGeneratingImages && !hasGeneratingHistory) return;
 
     const intervalId = window.setInterval(() => {
       void loadHistory({ silent: true });
@@ -594,7 +665,7 @@ export function PostDetailView({ postId }: PostDetailViewProps) {
     return () => {
       window.clearInterval(intervalId);
     };
-  }, [isGeneratingImages, loadHistory]);
+  }, [isGeneratingImages, history, loadHistory]);
 
   const handleGenerateScript = async (mode: "default" | "hook_strategy" = "default") => {
     if (!activeCollection || !selectedPost) return;
@@ -796,6 +867,7 @@ export function PostDetailView({ postId }: PostDetailViewProps) {
     setCaptionLoadingBySetId({});
     setPostingInstagramBySetId({});
     setInstagramResultBySetId({});
+    setGeneratingHistoryBySetId({});
   };
 
   const isRecreationBlocked = Boolean(nicheState && !nicheState.canRecreate);
@@ -1388,6 +1460,18 @@ export function PostDetailView({ postId }: PostDetailViewProps) {
                                 Generate Caption
                               </Button>
                             )}
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              disabled={item.status === "generating" || !item.script}
+                              isLoading={Boolean(generatingHistoryBySetId[item.id])}
+                              onClick={() => {
+                                void handleGenerateHistoryImages(item);
+                              }}
+                            >
+                              <Sparkles className="mr-2 h-4 w-4" />
+                              {item.generated_media_urls?.length ? "Regenerate Images" : "Generate Images"}
+                            </Button>
                             <Button
                               variant="outline"
                               size="sm"

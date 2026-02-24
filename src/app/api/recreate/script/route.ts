@@ -214,10 +214,17 @@ export async function POST(request: NextRequest) {
       });
     }
 
+    const hookSourceMode: AdaptationMode = adaptationModes.includes("variant_only")
+      ? "variant_only"
+      : adaptationModes[0];
+    const scriptModesToGenerate: AdaptationMode[] = includeHookStrategy
+      ? [hookSourceMode]
+      : adaptationModes;
+
     // ---------- Step 2: Generate rewritten scripts (all slides at once) ----------
     console.log("[script] Step 2: Generating rewritten scripts...");
     const scriptsByMode = await Promise.all(
-      adaptationModes.map(async (mode) => {
+      scriptModesToGenerate.map(async (mode) => {
         const script = await generatePostScript(
           originalPost,
           appContext,
@@ -238,61 +245,60 @@ export async function POST(request: NextRequest) {
 
     // ---------- Step 3: Per-slide Figma instructions + asset prompts ----------
     console.log("[script] Step 3: Generating per-slide design plans...");
-    const baseVersions = await Promise.all(
-      adaptationModes.map(async (mode): Promise<ScriptVersion> => {
-        const modeScript = scriptMap.get(mode);
-        if (!modeScript) {
-          throw new Error(`Missing generated script for adaptation mode: ${mode}`);
-        }
-
-        const slidePlans = await generateSlideDesignPlans(
-          selectedReferenceImageUrls,
-          modeScript,
-          post.platform,
-          APP_BRAND_PRIMARY_COLOR,
-          APP_BRAND_GRADIENT,
-          appName,
-          reasoningModel
-        );
-
-        return {
-          id: mode,
-          label: buildVersionLabel(mode),
-          adaptationMode: mode,
-          usesAppContext: mode === "app_context",
-          uiGenerationMode: "ai_creative" as UIGenerationMode,
-          followsReferenceLayout: false,
-          script: modeScript,
-          slidePlans,
-        };
-      })
-    );
-
-    let hookStrategyVersion: ScriptVersion | null = null;
+    let versions: ScriptVersion[] = [];
 
     if (includeHookStrategy) {
-      const hookSourceMode: AdaptationMode = adaptationModes.includes("variant_only")
-        ? "variant_only"
-        : adaptationModes[0];
       const hookSourceScript = scriptMap.get(hookSourceMode);
 
-      if (hookSourceScript) {
-        try {
-          const hookStrategyPlaybook = await loadHookStrategyPlaybook();
-          const hookScript = await generateHookStrategyScript({
-            sourceScript: hookSourceScript,
-            adaptationMode: hookSourceMode,
-            appName,
-            appContext,
-            originalPost,
-            strategyPlaybook: hookStrategyPlaybook,
-            referenceImageUrls: selectedReferenceImageUrls,
-            reasoningModel,
-          });
+      if (!hookSourceScript) {
+        throw new Error("Failed to generate source script for hook strategy mode.");
+      }
 
-          const hookSlidePlans = await generateSlideDesignPlans(
+      const hookStrategyPlaybook = await loadHookStrategyPlaybook();
+      const hookScript = await generateHookStrategyScript({
+        sourceScript: hookSourceScript,
+        adaptationMode: hookSourceMode,
+        appName,
+        appContext,
+        originalPost,
+        strategyPlaybook: hookStrategyPlaybook,
+        referenceImageUrls: selectedReferenceImageUrls,
+        reasoningModel,
+      });
+
+      const hookSlidePlans = await generateSlideDesignPlans(
+        selectedReferenceImageUrls,
+        hookScript,
+        post.platform,
+        APP_BRAND_PRIMARY_COLOR,
+        APP_BRAND_GRADIENT,
+        appName,
+        reasoningModel
+      );
+
+      versions = [
+        {
+          id: `${hookSourceMode}_hook_strategy`,
+          label: buildHookVersionLabel(hookSourceMode),
+          adaptationMode: hookSourceMode,
+          usesAppContext: hookSourceMode === "app_context",
+          uiGenerationMode: "ai_creative",
+          followsReferenceLayout: false,
+          script: hookScript,
+          slidePlans: hookSlidePlans,
+        },
+      ];
+    } else {
+      versions = await Promise.all(
+        adaptationModes.map(async (mode): Promise<ScriptVersion> => {
+          const modeScript = scriptMap.get(mode);
+          if (!modeScript) {
+            throw new Error(`Missing generated script for adaptation mode: ${mode}`);
+          }
+
+          const slidePlans = await generateSlideDesignPlans(
             selectedReferenceImageUrls,
-            hookScript,
+            modeScript,
             post.platform,
             APP_BRAND_PRIMARY_COLOR,
             APP_BRAND_GRADIENT,
@@ -300,27 +306,23 @@ export async function POST(request: NextRequest) {
             reasoningModel
           );
 
-          hookStrategyVersion = {
-            id: `${hookSourceMode}_hook_strategy`,
-            label: buildHookVersionLabel(hookSourceMode),
-            adaptationMode: hookSourceMode,
-            usesAppContext: hookSourceMode === "app_context",
-            uiGenerationMode: "ai_creative",
+          return {
+            id: mode,
+            label: buildVersionLabel(mode),
+            adaptationMode: mode,
+            usesAppContext: mode === "app_context",
+            uiGenerationMode: "ai_creative" as UIGenerationMode,
             followsReferenceLayout: false,
-            script: hookScript,
-            slidePlans: hookSlidePlans,
+            script: modeScript,
+            slidePlans,
           };
-        } catch (hookError) {
-          console.warn("[script] Hook strategy generation failed; continuing without hook version", {
-            error: hookError instanceof Error ? hookError.message : String(hookError),
-          });
-        }
-      }
+        })
+      );
     }
 
-    const versions = hookStrategyVersion
-      ? [...baseVersions, hookStrategyVersion]
-      : baseVersions;
+    if (versions.length === 0) {
+      throw new Error("No script version was generated.");
+    }
 
     const primaryVersion = versions[0];
 
