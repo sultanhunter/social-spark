@@ -22,11 +22,21 @@ export interface SlideImageSpec {
 }
 
 export function extractPlatform(url: string): SocialPlatform {
-  if (url.includes("instagram.com")) return "instagram";
-  if (url.includes("tiktok.com") || url.includes("vm.tiktok.com")) return "tiktok";
-  if (url.includes("threads.net")) return "threads";
-  if (url.includes("youtube.com") || url.includes("youtu.be")) return "youtube";
-  if (url.includes("twitter.com") || url.includes("x.com")) return "twitter";
+  const normalized = url.trim().toLowerCase();
+
+  let host = "";
+  try {
+    const parsed = new URL(normalized);
+    host = parsed.hostname.toLowerCase();
+  } catch {
+    host = normalized;
+  }
+
+  if (host.includes("instagram.com")) return "instagram";
+  if (host.includes("tiktok.com")) return "tiktok";
+  if (host.includes("threads.net")) return "threads";
+  if (host.includes("youtube.com") || host.includes("youtu.be")) return "youtube";
+  if (host.includes("twitter.com") || host.includes("x.com")) return "twitter";
   return "unknown";
 }
 

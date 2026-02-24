@@ -8,6 +8,58 @@ import { randomUUID } from "crypto";
 
 export const runtime = "nodejs";
 
+function asErrorMessage(error: unknown): string {
+  if (error instanceof Error) return error.message;
+  if (typeof error === "string") return error;
+  if (typeof error === "object" && error !== null && "message" in error) {
+    const message = (error as Record<string, unknown>).message;
+    if (typeof message === "string") return message;
+  }
+  return "Unknown error";
+}
+
+function isTransientSupabaseError(error: unknown): boolean {
+  if (!error || typeof error !== "object") return false;
+
+  const row = error as Record<string, unknown>;
+  const combined = `${typeof row.message === "string" ? row.message : ""} ${typeof row.details === "string" ? row.details : ""}`.toLowerCase();
+
+  return (
+    combined.includes("fetch failed") ||
+    combined.includes("connecttimeouterror") ||
+    combined.includes("und_err_connect_timeout") ||
+    combined.includes("timed out") ||
+    combined.includes("network")
+  );
+}
+
+function isTlsHostnameMismatchError(error: unknown): boolean {
+  if (!error || typeof error !== "object") return false;
+
+  const row = error as Record<string, unknown>;
+  const combined = `${typeof row.message === "string" ? row.message : ""} ${typeof row.details === "string" ? row.details : ""}`.toLowerCase();
+
+  return (
+    combined.includes("err_tls_cert_altname_invalid") ||
+    combined.includes("hostname/ip does not match certificate") ||
+    combined.includes("altnames")
+  );
+}
+
+function getErrorDetails(error: unknown): string | null {
+  if (!error || typeof error !== "object") return null;
+  const row = error as Record<string, unknown>;
+  return typeof row.details === "string" && row.details.trim() ? row.details : null;
+}
+
+async function sleep(ms: number): Promise<void> {
+  await new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+type SavedPostInsertRow = {
+  id: string;
+} & Record<string, unknown>;
+
 export async function POST(request: NextRequest) {
   const requestId = randomUUID().slice(0, 8);
 
@@ -163,11 +215,7 @@ export async function POST(request: NextRequest) {
     if (originalImageUrls.length > 0) {
       try {
         console.log(
-          `[posts-save] req=$
-
-          
-          
-          {requestId} r2_upload_start count=${originalImageUrls.length}`
+          `[posts-save] req=${requestId} r2_upload_start count=${originalImageUrls.length}`
         );
         mediaUrls = await downloadAndUploadMultipleToR2(
           originalImageUrls,
@@ -189,30 +237,117 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // Save to database
-    const { data, error } = await supabase
-      .from("saved_posts")
-      .insert({
-        collection_id: collectionId,
-        original_url: url,
-        platform,
-        post_type: postType,
-        title: postTitle,
-        description: postDescription,
-        media_urls: mediaUrls,
-        thumbnail_url: thumbnailUrl,
-        metadata,
-      })
-      .select()
-      .single();
+    // Save to database (with retry for transient network issues)
+    const insertPayload = {
+      id: tempPostId,
+      collection_id: collectionId,
+      original_url: url,
+      platform,
+      post_type: postType,
+      title: postTitle,
+      description: postDescription,
+      media_urls: mediaUrls,
+      thumbnail_url: thumbnailUrl,
+      metadata: {
+        ...metadata,
+        requestId,
+      },
+    };
 
-    if (error) throw error;
+    const maxDbAttempts = 3;
+    let data: SavedPostInsertRow | null = null;
+    let lastDbError: unknown = null;
+
+    for (let attempt = 1; attempt <= maxDbAttempts; attempt += 1) {
+      const { data: inserted, error: insertError } = await supabase
+        .from("saved_posts")
+        .insert(insertPayload)
+        .select()
+        .single();
+
+      if (!insertError) {
+        data = inserted as SavedPostInsertRow;
+        break;
+      }
+
+      const errorCode = insertError.code;
+
+      if (errorCode === "23505") {
+        const { data: existingRow, error: fetchExistingError } = await supabase
+          .from("saved_posts")
+          .select("*")
+          .eq("id", tempPostId)
+          .maybeSingle();
+
+        if (!fetchExistingError && existingRow) {
+          console.log(
+            `[posts-save] req=${requestId} db_insert_duplicate_recovered postId=${tempPostId}`
+          );
+          data = existingRow as SavedPostInsertRow;
+          break;
+        }
+      }
+
+      lastDbError = insertError;
+      const shouldRetry = isTransientSupabaseError(insertError);
+
+      if (isTlsHostnameMismatchError(insertError)) {
+        break;
+      }
+
+      if (!shouldRetry || attempt === maxDbAttempts) {
+        break;
+      }
+
+      const delayMs = attempt * 600;
+      console.warn(
+        `[posts-save] req=${requestId} db_insert_retry attempt=${attempt + 1}/${maxDbAttempts} delayMs=${delayMs} message=${asErrorMessage(insertError)}`
+      );
+      await sleep(delayMs);
+    }
+
+    if (!data) {
+      throw lastDbError || new Error("Failed to save post");
+    }
+
     console.log(`[posts-save] req=${requestId} success postId=${data.id}`);
     return NextResponse.json(data, { status: 201 });
   } catch (err) {
     console.error(`[posts-save] req=${requestId} unexpected_error`, err);
+
+    const details = getErrorDetails(err);
+
+    if (isTlsHostnameMismatchError(err)) {
+      return NextResponse.json(
+        {
+          error:
+            "TLS certificate mismatch while connecting to Supabase. This is usually caused by network/ISP interception.",
+          details,
+          hint:
+            "Switch network (VPN/mobile hotspot), or change DNS to 1.1.1.1/8.8.8.8 and retry. The app logic is fine; the DB connection is being intercepted.",
+          requestId,
+        },
+        { status: 503 }
+      );
+    }
+
+    if (isTransientSupabaseError(err)) {
+      return NextResponse.json(
+        {
+          error: "Temporary network error while saving to Supabase.",
+          details,
+          requestId,
+        },
+        { status: 503 }
+      );
+    }
+
     return NextResponse.json(
-      { error: err instanceof Error ? err.message : "Failed to save post", requestId },
+      {
+        error: err instanceof Error ? err.message : "Failed to save post",
+        details,
+        requestId,
+      },
       { status: 500 }
     );
   }
