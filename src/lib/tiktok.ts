@@ -45,6 +45,57 @@ function extractImagePostUrls(imagePost: unknown, mediaUrls: string[]) {
   }
 }
 
+function normalizeEscapedUrl(raw: string): string {
+  return raw
+    .replace(/\\u0026/g, "&")
+    .replace(/\\\//g, "/")
+    .replace(/\\u002F/g, "/")
+    .replace(/\\u003D/g, "=")
+    .replace(/\\u0025/g, "%")
+    .replace(/\\"/g, '"');
+}
+
+function looksLikeUsefulTikTokImageUrl(url: string): boolean {
+  const lower = url.toLowerCase();
+
+  if (!/^https?:\/\//i.test(lower)) return false;
+
+  if (lower.includes(".mp4") || lower.includes("/aweme/v1/play") || lower.includes("playwm")) {
+    return false;
+  }
+
+  if (lower.includes("avatar") || lower.includes("aweme-avatar") || lower.includes("im/user")) {
+    return false;
+  }
+
+  if (/\.(jpg|jpeg|png|webp|gif)(\?|$)/i.test(lower)) {
+    return true;
+  }
+
+  return lower.includes("tiktokcdn.com") && (lower.includes("/obj/") || lower.includes("/tos-"));
+}
+
+function extractCdnImageUrlsFromHtml(html: string, mediaUrls: string[]) {
+  const regexes = [
+    new RegExp("https:\\\\/\\\\/[^\\\"'\\s<>]+", "g"),
+    /https:\/\/[^"'\s<>]+/g,
+    /https?:\/\/[^"'\s<>]+/g,
+  ];
+
+  for (const regex of regexes) {
+    const matches = html.match(regex);
+    if (!matches) continue;
+
+    for (const match of matches) {
+      const normalized = normalizeEscapedUrl(match);
+      if (!looksLikeUsefulTikTokImageUrl(normalized)) continue;
+      if (!mediaUrls.includes(normalized)) {
+        mediaUrls.push(normalized);
+      }
+    }
+  }
+}
+
 /**
  * Extract TikTok video ID from URL
  */
@@ -146,7 +197,7 @@ function extractTikTokDataFromHTML(html: string): TikTokPostData {
           }
         }
       }
-    } catch (e) {
+    } catch {
       console.log("Failed to parse SIGI_STATE");
     }
   }
@@ -177,9 +228,14 @@ function extractTikTokDataFromHTML(html: string): TikTokPostData {
           mediaUrls.push(itemInfo.video.originCover);
         }
       }
-    } catch (e) {
+    } catch {
       console.log("Failed to parse __UNIVERSAL_DATA_FOR_REHYDRATION__");
     }
+  }
+
+  // Last-resort fallback: scan HTML for direct tiktokcdn image asset URLs.
+  if (mediaUrls.length === 0) {
+    extractCdnImageUrlsFromHtml(html, mediaUrls);
   }
 
   // Fallback to meta tags

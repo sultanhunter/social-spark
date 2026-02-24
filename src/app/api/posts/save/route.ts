@@ -63,8 +63,34 @@ type SavedPostInsertRow = {
 
 function dedupeHttpUrls(urls: string[]): string[] {
   return Array.from(
-    new Set(urls.filter((url) => typeof url === "string" && /^https?:\/\//i.test(url.trim())))
+    new Set(
+      urls
+        .filter((url) => typeof url === "string" && /^https?:\/\//i.test(url.trim()))
+        .map((url) => url.trim())
+    )
   );
+}
+
+function isLikelyDirectMediaUrl(url: string, platform: string): boolean {
+  try {
+    const parsed = new URL(url);
+    const host = parsed.hostname.toLowerCase();
+    const path = parsed.pathname.toLowerCase();
+
+    if (platform === "tiktok") {
+      if (host === "www.tiktok.com" || host === "m.tiktok.com" || host === "tiktok.com") {
+        return false;
+      }
+
+      if (path.includes("/photo/") || path.includes("/video/") || path.startsWith("/t/")) {
+        return false;
+      }
+    }
+  } catch {
+    return false;
+  }
+
+  return true;
 }
 
 export async function POST(request: NextRequest) {
@@ -104,7 +130,7 @@ export async function POST(request: NextRequest) {
     // Use manually provided image URLs if available
     if (manualImageUrls && Array.isArray(manualImageUrls) && manualImageUrls.length > 0) {
       console.log(`[posts-save] req=${requestId} using_manual_images count=${manualImageUrls.length}`);
-      originalImageUrls = manualImageUrls;
+      originalImageUrls = dedupeHttpUrls(manualImageUrls);
       metadata = {
         source: "manual",
         fetchedAt: new Date().toISOString(),
@@ -131,7 +157,8 @@ export async function POST(request: NextRequest) {
 
           const extracted = await extractSocialPost(url, platform, sessionId);
 
-          originalImageUrls = dedupeHttpUrls(extracted.mediaUrls);
+          const remoteUrls = dedupeHttpUrls(extracted.mediaUrls);
+          originalImageUrls = remoteUrls.filter((item) => isLikelyDirectMediaUrl(item, platform));
           postTitle = postTitle || extracted.title;
           postDescription = postDescription || extracted.description;
 
@@ -141,14 +168,30 @@ export async function POST(request: NextRequest) {
             extractionAttempt: attempt,
             sessionId,
             originalMediaUrls: extracted.mediaUrls,
+            filteredRemoteMediaCount: remoteUrls.length - originalImageUrls.length,
             fetchedAt: new Date().toISOString(),
           };
 
-          if (originalImageUrls.length > 0) {
-            if (platform === "tiktok" && postType === "image_slides") {
-              try {
-                const tiktokFallback = await fetchTikTokPost(url);
-                const merged = dedupeHttpUrls([...originalImageUrls, ...tiktokFallback.mediaUrls]);
+          if (platform === "tiktok" && postType === "image_slides") {
+            try {
+              const tiktokFallback = await fetchTikTokPost(url);
+              const fallbackUrls = dedupeHttpUrls(tiktokFallback.mediaUrls).filter((item) =>
+                isLikelyDirectMediaUrl(item, platform)
+              );
+
+              if (originalImageUrls.length === 0 && fallbackUrls.length > 0) {
+                originalImageUrls = fallbackUrls;
+                metadata = {
+                  ...metadata,
+                  tiktokFallbackExtractor: "local-html-parser",
+                  fallbackMediaCount: fallbackUrls.length,
+                  fallbackMode: "replace",
+                };
+                console.log(
+                  `[posts-save] req=${requestId} tiktok_fallback_used media=${fallbackUrls.length}`
+                );
+              } else {
+                const merged = dedupeHttpUrls([...originalImageUrls, ...fallbackUrls]);
 
                 if (merged.length > originalImageUrls.length) {
                   originalImageUrls = merged;
@@ -156,18 +199,21 @@ export async function POST(request: NextRequest) {
                     ...metadata,
                     tiktokFallbackExtractor: "local-html-parser",
                     mergedMediaCount: merged.length,
+                    fallbackMode: "merge",
                   };
                   console.log(
                     `[posts-save] req=${requestId} tiktok_fallback_merged media=${merged.length}`
                   );
                 }
-              } catch (fallbackError) {
-                console.warn(
-                  `[posts-save] req=${requestId} tiktok_fallback_failed message=${asErrorMessage(fallbackError)}`
-                );
               }
+            } catch (fallbackError) {
+              console.warn(
+                `[posts-save] req=${requestId} tiktok_fallback_failed message=${asErrorMessage(fallbackError)}`
+              );
             }
+          }
 
+          if (originalImageUrls.length > 0) {
             console.log(
               `[posts-save] req=${requestId} extraction_success platform=${platform} attempt=${attempt} media=${originalImageUrls.length} extractor=${extracted.extractor}`
             );
@@ -256,10 +302,26 @@ export async function POST(request: NextRequest) {
         console.log(`[posts-save] req=${requestId} r2_upload_success count=${mediaUrls.length}`);
       } catch (error) {
         console.error(`[posts-save] req=${requestId} r2_upload_failed`, error);
+
+        const message = asErrorMessage(error);
+        const htmlPayloadError = message.includes("did not return image bytes") || message.includes("content-type=text/html");
+
+        if (htmlPayloadError) {
+          return NextResponse.json(
+            {
+              error:
+                "TikTok extractor returned non-image URLs (HTML page links). Try a different TikTok URL variant or add image URLs manually.",
+              details: message,
+              requestId,
+            },
+            { status: 422 }
+          );
+        }
+
         return NextResponse.json(
           {
             error: "Media extraction worked, but upload to R2 failed.",
-            details: error instanceof Error ? error.message : "Unknown R2 upload error",
+            details: message,
             requestId,
           },
           { status: 502 }
