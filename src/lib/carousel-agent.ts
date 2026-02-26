@@ -602,20 +602,117 @@ Additional guidance:
 ${slide.imagePrompt}`;
 }
 
-function escapeSvgText(value: string): string {
-  return value
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&apos;");
-}
-
 function sanitizeOverlayCopy(value: string): string {
   return value
     .replace(/[^\x20-\x7E]/g, " ")
     .replace(/\s+/g, " ")
     .trim();
+}
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.max(min, Math.min(max, value));
+}
+
+const BITMAP_FONT: Record<string, string[]> = {
+  " ": ["00000", "00000", "00000", "00000", "00000", "00000", "00000"],
+  A: ["01110", "10001", "10001", "11111", "10001", "10001", "10001"],
+  B: ["11110", "10001", "10001", "11110", "10001", "10001", "11110"],
+  C: ["01111", "10000", "10000", "10000", "10000", "10000", "01111"],
+  D: ["11110", "10001", "10001", "10001", "10001", "10001", "11110"],
+  E: ["11111", "10000", "10000", "11110", "10000", "10000", "11111"],
+  F: ["11111", "10000", "10000", "11110", "10000", "10000", "10000"],
+  G: ["01111", "10000", "10000", "10111", "10001", "10001", "01110"],
+  H: ["10001", "10001", "10001", "11111", "10001", "10001", "10001"],
+  I: ["11111", "00100", "00100", "00100", "00100", "00100", "11111"],
+  J: ["00001", "00001", "00001", "00001", "10001", "10001", "01110"],
+  K: ["10001", "10010", "10100", "11000", "10100", "10010", "10001"],
+  L: ["10000", "10000", "10000", "10000", "10000", "10000", "11111"],
+  M: ["10001", "11011", "10101", "10101", "10001", "10001", "10001"],
+  N: ["10001", "11001", "10101", "10011", "10001", "10001", "10001"],
+  O: ["01110", "10001", "10001", "10001", "10001", "10001", "01110"],
+  P: ["11110", "10001", "10001", "11110", "10000", "10000", "10000"],
+  Q: ["01110", "10001", "10001", "10001", "10101", "10010", "01101"],
+  R: ["11110", "10001", "10001", "11110", "10100", "10010", "10001"],
+  S: ["01111", "10000", "10000", "01110", "00001", "00001", "11110"],
+  T: ["11111", "00100", "00100", "00100", "00100", "00100", "00100"],
+  U: ["10001", "10001", "10001", "10001", "10001", "10001", "01110"],
+  V: ["10001", "10001", "10001", "10001", "10001", "01010", "00100"],
+  W: ["10001", "10001", "10001", "10101", "10101", "11011", "10001"],
+  X: ["10001", "10001", "01010", "00100", "01010", "10001", "10001"],
+  Y: ["10001", "10001", "01010", "00100", "00100", "00100", "00100"],
+  Z: ["11111", "00001", "00010", "00100", "01000", "10000", "11111"],
+  "0": ["01110", "10001", "10011", "10101", "11001", "10001", "01110"],
+  "1": ["00100", "01100", "00100", "00100", "00100", "00100", "01110"],
+  "2": ["01110", "10001", "00001", "00010", "00100", "01000", "11111"],
+  "3": ["11110", "00001", "00001", "01110", "00001", "00001", "11110"],
+  "4": ["00010", "00110", "01010", "10010", "11111", "00010", "00010"],
+  "5": ["11111", "10000", "10000", "11110", "00001", "00001", "11110"],
+  "6": ["01110", "10000", "10000", "11110", "10001", "10001", "01110"],
+  "7": ["11111", "00001", "00010", "00100", "01000", "01000", "01000"],
+  "8": ["01110", "10001", "10001", "01110", "10001", "10001", "01110"],
+  "9": ["01110", "10001", "10001", "01111", "00001", "00010", "11100"],
+  "-": ["00000", "00000", "00000", "11111", "00000", "00000", "00000"],
+  "&": ["01100", "10010", "10100", "01000", "10101", "10010", "01101"],
+  "?": ["01110", "10001", "00001", "00010", "00100", "00000", "00100"],
+  "!": ["00100", "00100", "00100", "00100", "00100", "00000", "00100"],
+  ".": ["00000", "00000", "00000", "00000", "00000", "01100", "01100"],
+  ",": ["00000", "00000", "00000", "00000", "01100", "00100", "01000"],
+  ":": ["00000", "01100", "01100", "00000", "01100", "01100", "00000"],
+  "'": ["00100", "00100", "00000", "00000", "00000", "00000", "00000"],
+  "/": ["00001", "00010", "00100", "01000", "10000", "00000", "00000"],
+};
+
+function normalizeBitmapText(text: string): string {
+  return sanitizeOverlayCopy(text)
+    .toUpperCase()
+    .replace(/[^A-Z0-9\-&?!.,:'/ ]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function renderBitmapLine({
+  text,
+  x,
+  y,
+  maxWidth,
+  fill,
+  minScale,
+  maxScale,
+}: {
+  text: string;
+  x: number;
+  y: number;
+  maxWidth: number;
+  fill: string;
+  minScale: number;
+  maxScale: number;
+}): { markup: string; height: number; bottom: number } {
+  const normalized = normalizeBitmapText(text) || "SLIDE";
+  const chars = [...normalized];
+  const unitsPerChar = 6;
+  const suggestedScale = Math.floor(maxWidth / Math.max(chars.length * unitsPerChar, 1));
+  const scale = clamp(suggestedScale, minScale, maxScale);
+  const radius = Math.max(1, Math.floor(scale / 4));
+
+  let markup = "";
+
+  chars.forEach((char, index) => {
+    const glyph = BITMAP_FONT[char] || BITMAP_FONT[" "];
+    const baseX = x + index * unitsPerChar * scale;
+
+    for (let row = 0; row < glyph.length; row += 1) {
+      const rowPattern = glyph[row];
+      for (let col = 0; col < rowPattern.length; col += 1) {
+        if (rowPattern[col] !== "1") continue;
+        const rectX = baseX + col * scale;
+        const rectY = y + row * scale;
+        markup += `<rect x="${rectX}" y="${rectY}" width="${scale}" height="${scale}" rx="${radius}" fill="${fill}"/>`;
+      }
+    }
+  });
+
+  const height = 7 * scale;
+  return { markup, height, bottom: y + height };
 }
 
 function buildTextOverlaySvg(slide: CarouselSlide): Buffer {
@@ -624,16 +721,54 @@ function buildTextOverlaySvg(slide: CarouselSlide): Buffer {
     sanitizeOverlayCopy((slide.headline || "").trim()) ||
     `Slide ${slide.slideNumber}`;
   const rawLine = sanitizeOverlayCopy((slide.overlayLines[0] || "").trim());
-  const title = escapeSvgText(rawTitle.toUpperCase());
-  const line = escapeSvgText(rawLine);
-  const hasLine = line.length > 0;
-  const panelHeight = hasLine ? 300 : 230;
-  const titleFontSize = title.length > 24 ? 62 : title.length > 16 ? 72 : 82;
-  const lineFontSize = line.length > 28 ? 44 : 54;
 
-  const lineMarkup = hasLine
-    ? `<text x="96" y="290" fill="#F8FAFC" stroke="#0F172A" stroke-opacity="0.45" stroke-width="2" paint-order="stroke fill" font-family="sans-serif" font-size="${lineFontSize}" font-weight="700">${line}</text>`
-    : "";
+  const titleShadow = renderBitmapLine({
+    text: rawTitle,
+    x: 98,
+    y: 120,
+    maxWidth: 840,
+    fill: "#0F172A",
+    minScale: 6,
+    maxScale: 16,
+  });
+  const titleMain = renderBitmapLine({
+    text: rawTitle,
+    x: 96,
+    y: 118,
+    maxWidth: 840,
+    fill: "#FFFFFF",
+    minScale: 6,
+    maxScale: 16,
+  });
+
+  const hasLine = normalizeBitmapText(rawLine).length > 0;
+  const lineY = titleMain.bottom + 28;
+
+  const lineShadow = hasLine
+    ? renderBitmapLine({
+      text: rawLine,
+      x: 98,
+      y: lineY + 2,
+      maxWidth: 840,
+      fill: "#0F172A",
+      minScale: 4,
+      maxScale: 10,
+    })
+    : null;
+  const lineMain = hasLine
+    ? renderBitmapLine({
+      text: rawLine,
+      x: 96,
+      y: lineY,
+      maxWidth: 840,
+      fill: "#E2E8F0",
+      minScale: 4,
+      maxScale: 10,
+    })
+    : null;
+
+  const contentBottom = lineMain ? lineMain.bottom : titleMain.bottom;
+  const panelHeight = clamp(Math.round(contentBottom - 64 + 56), 230, 390);
 
   const svg = `<svg width="1080" height="1350" viewBox="0 0 1080 1350" xmlns="http://www.w3.org/2000/svg">
   <defs>
@@ -644,8 +779,10 @@ function buildTextOverlaySvg(slide: CarouselSlide): Buffer {
   </defs>
   <rect x="64" y="64" width="952" height="${panelHeight}" rx="34" fill="#0F172A" fill-opacity="0.72"/>
   <rect x="64" y="64" width="952" height="${panelHeight}" rx="34" fill="url(#overlayGradient)"/>
-  <text x="96" y="190" fill="#FFFFFF" stroke="#0F172A" stroke-opacity="0.45" stroke-width="2" paint-order="stroke fill" font-family="sans-serif" font-size="${titleFontSize}" font-weight="900">${title}</text>
-  ${lineMarkup}
+  ${titleShadow.markup}
+  ${titleMain.markup}
+  ${lineShadow ? lineShadow.markup : ""}
+  ${lineMain ? lineMain.markup : ""}
 </svg>`;
 
   return Buffer.from(svg);
