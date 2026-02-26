@@ -155,6 +155,36 @@ function normalizeSentenceCase(text: string): string {
   return clean.charAt(0).toUpperCase() + clean.slice(1);
 }
 
+function deriveBodyLinesFromVoiceScript(
+  voiceScript: string,
+  { maxLines = 2, maxWordsPerLine = 8 }: { maxLines?: number; maxWordsPerLine?: number } = {}
+): string[] {
+  const normalized = stripArabic(voiceScript)
+    .replace(/[\r\n]+/g, " ")
+    .replace(/[•|]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  if (!normalized) return [];
+
+  const sentenceChunks = normalized
+    .split(/[.!?;:]+/)
+    .map((chunk) => chunk.trim())
+    .filter((chunk) => chunk.length > 0);
+
+  const sourceChunks = sentenceChunks.length > 0 ? sentenceChunks : [normalized];
+  const lines: string[] = [];
+
+  for (const chunk of sourceChunks) {
+    const line = normalizeSentenceCase(truncateWords(chunk, maxWordsPerLine));
+    if (!line) continue;
+    lines.push(line);
+    if (lines.length >= maxLines) break;
+  }
+
+  return lines;
+}
+
 function enforceOverlayTextConstraints(title: string, lines: string[]): { overlayTitle: string; overlayLines: string[] } {
   const safeTitle = truncateWords(stripArabic(title), 5).slice(0, 34) || "Swipe for this";
 
@@ -218,17 +248,23 @@ function sanitizeSlides(value: unknown, topic: string): CarouselSlide[] {
         sanitizeEnglishText(row.headline, `Slide ${index + 1}: ${topic}`),
         9
       );
-      const bodyBullets = sanitizeStringArray(row.bodyBullets, 3)
+      const fallbackBodyBullets = sanitizeStringArray(row.bodyBullets, 3)
         .map((bullet) => normalizeSentenceCase(truncateWords(stripArabic(bullet), 8)))
         .slice(0, 2);
-      const voiceScript = sanitizeEnglishText(
+      const voiceScriptRaw = sanitizeEnglishText(
         row.voiceScript,
-        `${headline}${bodyBullets.length > 0 ? ` - ${bodyBullets.join(" ")}` : ""}`
+        `${headline}${fallbackBodyBullets.length > 0 ? ` - ${fallbackBodyBullets.join(" ")}` : ""}`
       );
+      const voiceScript = truncateWords(voiceScriptRaw, 20);
+      const bodyBulletsFromVoice = deriveBodyLinesFromVoiceScript(voiceScript, {
+        maxLines: 2,
+        maxWordsPerLine: 8,
+      });
+      const bodyBullets = bodyBulletsFromVoice.length > 0 ? bodyBulletsFromVoice : fallbackBodyBullets;
       const overlaySeedLines = sanitizeStringArray(row.overlayLines, 2).map((line) => stripArabic(line));
       const overlay = enforceOverlayTextConstraints(
         sanitizeEnglishText(row.overlayTitle, headline),
-        overlaySeedLines.length > 0 ? overlaySeedLines : bodyBullets.slice(0, 2)
+        overlaySeedLines.length > 0 ? overlaySeedLines : bodyBullets.slice(0, 1)
       );
 
       return {
@@ -239,7 +275,7 @@ function sanitizeSlides(value: unknown, topic: string): CarouselSlide[] {
         overlayLines: overlay.overlayLines,
         headline,
         bodyBullets,
-        voiceScript: truncateWords(voiceScript, 20),
+        voiceScript,
         hookPurpose: truncateWords(
           sanitizeEnglishText(row.hookPurpose, "Drive curiosity and encourage the next swipe."),
           14
@@ -670,6 +706,25 @@ function normalizeBitmapText(text: string): string {
     .trim();
 }
 
+function fitBitmapTextToWidth(text: string, maxWidth: number, minScale: number, unitsPerChar = 6): string {
+  const normalized = normalizeBitmapText(text);
+  if (!normalized) return "";
+
+  const maxChars = Math.max(1, Math.floor(maxWidth / Math.max(minScale * unitsPerChar, 1)));
+  if (normalized.length <= maxChars) return normalized;
+
+  if (maxChars <= 3) {
+    return normalized.slice(0, maxChars);
+  }
+
+  const hardLimit = maxChars - 3;
+  const sliced = normalized.slice(0, hardLimit);
+  const lastSpace = sliced.lastIndexOf(" ");
+  const base = lastSpace >= Math.floor(hardLimit * 0.6) ? sliced.slice(0, lastSpace) : sliced;
+
+  return `${base.trim()}...`;
+}
+
 function renderBitmapLine({
   text,
   x,
@@ -687,7 +742,7 @@ function renderBitmapLine({
   minScale: number;
   maxScale: number;
 }): { markup: string; height: number; bottom: number } {
-  const normalized = normalizeBitmapText(text) || "SLIDE";
+  const normalized = fitBitmapTextToWidth(text, maxWidth, minScale) || "SLIDE";
   const chars = [...normalized];
   const unitsPerChar = 6;
   const suggestedScale = Math.floor(maxWidth / Math.max(chars.length * unitsPerChar, 1));
