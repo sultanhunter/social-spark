@@ -78,6 +78,104 @@ type CarouselHistoryResponse = {
   error?: string;
 };
 
+function truncateWords(text: string, maxWords: number): string {
+  const tokens = text.split(/\s+/).filter(Boolean);
+  if (tokens.length <= maxWords) return tokens.join(" ");
+  return tokens.slice(0, maxWords).join(" ");
+}
+
+function sanitizePromptPreviewLine(value: string, maxWords: number, maxChars: number): string {
+  const cleaned = value
+    .replace(/[\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF]+/g, "")
+    .replace(/[^\x20-\x7E]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!cleaned) return "";
+  return truncateWords(cleaned, maxWords).slice(0, maxChars).trim();
+}
+
+function deriveBodyLinesFromVoiceScriptPreview(
+  voiceScript: string,
+  { maxLines = 2, maxWordsPerLine = 11 }: { maxLines?: number; maxWordsPerLine?: number } = {}
+): string[] {
+  const normalized = voiceScript
+    .replace(/[\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF]+/g, "")
+    .replace(/[\r\n]+/g, " ")
+    .replace(/[•|]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  if (!normalized) return [];
+
+  const sentenceChunks = normalized
+    .split(/[.!?;:]+/)
+    .map((chunk) => chunk.trim())
+    .filter((chunk) => chunk.length > 0);
+
+  const source = sentenceChunks.length > 0 ? sentenceChunks : [normalized];
+  const lines: string[] = [];
+
+  for (const chunk of source) {
+    const line = sanitizePromptPreviewLine(chunk, maxWordsPerLine, 56);
+    if (!line) continue;
+    lines.push(line);
+    if (lines.length >= maxLines) break;
+  }
+
+  return lines;
+}
+
+function buildInImageTextSpecPreview(slide: CarouselSlide): { title: string; bodyLines: string[] } {
+  const title =
+    sanitizePromptPreviewLine(slide.overlayTitle || slide.headline || `Slide ${slide.slideNumber}`, 7, 46) ||
+    `Slide ${slide.slideNumber}`;
+
+  const voiceDerived = deriveBodyLinesFromVoiceScriptPreview(slide.voiceScript, {
+    maxLines: 2,
+    maxWordsPerLine: 11,
+  });
+
+  const fallback = [...slide.bodyBullets, ...slide.overlayLines]
+    .map((line) => sanitizePromptPreviewLine(line, 11, 56))
+    .filter((line) => line.length > 0)
+    .slice(0, 2);
+
+  return {
+    title,
+    bodyLines: (voiceDerived.length > 0 ? voiceDerived : fallback).slice(0, 2),
+  };
+}
+
+function buildImagePromptPreview(slide: CarouselSlide, topic: string, totalSlides: number): string {
+  const textSpec = buildInImageTextSpecPreview(slide);
+  const bodyLines = textSpec.bodyLines.length > 0 ? textSpec.bodyLines : ["Simple practical steps"];
+
+  return `Create a fully finished Instagram carousel slide image (${slide.slideNumber}/${totalSlides}) for Muslimah Pro.
+
+TOPIC: ${topic}
+ROLE: ${slide.role}
+DENSITY: ${slide.density}
+
+EXACT TEXT TO RENDER (ENGLISH ONLY):
+- TITLE: ${textSpec.title}
+${bodyLines.map((line, index) => `- BODY ${index + 1}: ${line}`).join("\n")}
+
+TEXT BOX SPEC (MANDATORY):
+- Place ALL text inside one rounded text panel in the top portion of the image.
+- Text panel bounds: top 8% to bottom 40% of image height.
+- Keep at least 8% left/right margins and 6% top margin.
+
+TEXT QUALITY + LAYOUT RULES:
+- Text must be sharp, legible, and correctly spelled.
+- Keep full title + body lines visible; no clipping, no crop, no overlap with subject.
+
+Slide direction:
+${slide.visualDirection}
+
+Additional guidance:
+${slide.imagePrompt}`;
+}
+
 export function CarouselAgentView({ collectionId }: { collectionId: string }) {
   const router = useRouter();
   const { activeCollection } = useAppStore();
@@ -538,7 +636,10 @@ export function CarouselAgentView({ collectionId }: { collectionId: string }) {
 
                       <div className="mt-3 grid gap-3 md:grid-cols-2">
                         <MetaCard label="Voice Script" value={slide.voiceScript} />
-                        <MetaCard label="Image Prompt" value={slide.imagePrompt} />
+                        <MetaCard
+                          label="Image Prompt"
+                          value={buildImagePromptPreview(slide, result.pack.topic, result.pack.slides.length)}
+                        />
                       </div>
 
                       <p className="mt-2 text-xs text-slate-500">Hook purpose: {slide.hookPurpose}</p>

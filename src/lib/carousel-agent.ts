@@ -24,6 +24,9 @@ const CAROUSEL_STYLE_REFERENCE_PATHS = [
   "/Users/sultanibneusman/Downloads/TikVideo.App_7609400601004363030_6.jpeg",
 ] as const;
 
+const IN_IMAGE_TEXT_MAX_ATTEMPTS = 3;
+const IN_IMAGE_TEXT_MIN_READABILITY_SCORE = 0.72;
+
 const genAI = new GoogleGenerativeAI(process.env.GOOGLE_GEMINI_API_KEY!);
 
 type GenerateContentResult = Awaited<
@@ -603,6 +606,8 @@ function buildFallbackSlides(topic: string): CarouselSlide[] {
 function buildImageGenerationPrompt(slide: CarouselSlide, topic: string, totalSlides: number): string {
   const textSpec = buildInImageTextSpec(slide);
   const bodyLines = textSpec.bodyLines.length > 0 ? textSpec.bodyLines : ["Simple practical steps"];
+  const textBoxTopPct = 8;
+  const textBoxBottomPct = 40;
 
   return `Create a fully finished Instagram carousel slide image (${slide.slideNumber}/${totalSlides}) for Muslimah Pro.
 
@@ -622,6 +627,12 @@ EXACT TEXT TO RENDER (ENGLISH ONLY):
 - TITLE: ${textSpec.title}
 ${bodyLines.map((line, index) => `- BODY ${index + 1}: ${line}`).join("\n")}
 
+TEXT BOX SPEC (MANDATORY):
+- Place ALL text inside one rounded text panel in the top portion of the image.
+- Text panel bounds: top ${textBoxTopPct}% to bottom ${textBoxBottomPct}% of image height.
+- Keep at least 8% left/right margins and 6% top margin.
+- Keep woman/subject and key visual elements below the text panel.
+
 TEXT QUALITY + LAYOUT RULES:
 - Text must be sharp, legible, and correctly spelled; no gibberish, no placeholder squares, no corrupted glyphs.
 - Use a clean bold sans-serif style with strong contrast.
@@ -629,6 +640,7 @@ TEXT QUALITY + LAYOUT RULES:
 - Keep the full title and body lines visible; no clipping, no cropped words, no overlap with subject.
 - Keep line count tight (title + up to 2 short body lines).
 - Avoid decorative fonts, handwritten fonts, or ultra-condensed fonts.
+- If there is any conflict, prioritize text readability and complete rendering over decorative styling.
 
 CRITICAL RULES:
 - Use ENGLISH text only.
@@ -676,6 +688,116 @@ function buildInImageTextSpec(slide: CarouselSlide): { title: string; bodyLines:
   };
 }
 
+function normalizeComparableText(value: string): string {
+  return stripArabic(value)
+    .toUpperCase()
+    .replace(/[^A-Z0-9\s]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function comparableTokens(value: string): string[] {
+  const stopWords = new Set([
+    "THE", "AND", "FOR", "WITH", "YOUR", "THIS", "THAT", "FROM", "INTO", "ABOUT", "JUST", "THEN",
+    "IN", "ON", "OF", "TO", "A", "AN",
+  ]);
+
+  return normalizeComparableText(value)
+    .split(" ")
+    .filter((token) => token.length >= 3 && !stopWords.has(token));
+}
+
+function getExpectedImageTextTokens(slide: CarouselSlide): string[] {
+  const spec = buildInImageTextSpec(slide);
+  const tokens = [...comparableTokens(spec.title), ...spec.bodyLines.flatMap((line) => comparableTokens(line))];
+  return Array.from(new Set(tokens));
+}
+
+function tokenRecallScore(expectedTokens: string[], observedText: string): number {
+  if (expectedTokens.length === 0) return 1;
+  const observed = new Set(comparableTokens(observedText));
+  if (observed.size === 0) return 0;
+
+  let matches = 0;
+  for (const token of expectedTokens) {
+    if (observed.has(token)) {
+      matches += 1;
+      continue;
+    }
+
+    const nearMatch = Array.from(observed).some((candidate) => {
+      if (candidate === token) return true;
+      if (candidate.startsWith(token) || token.startsWith(candidate)) return true;
+      return false;
+    });
+
+    if (nearMatch) matches += 1;
+  }
+
+  return matches / expectedTokens.length;
+}
+
+async function extractVisibleTextFromImage(imageBuffer: Buffer): Promise<string | null> {
+  try {
+    const model = genAI.getGenerativeModel({ model: DEFAULT_REASONING_MODEL });
+    const response = await model.generateContent({
+      contents: [
+        {
+          role: "user",
+          parts: [
+            {
+              text:
+                "Read all visible text in this image. Return JSON only with schema {\"lines\":[\"...\"]}. Keep exact spellings.",
+            },
+            {
+              inlineData: {
+                data: imageBuffer.toString("base64"),
+                mimeType: "image/png",
+              },
+            },
+          ],
+        },
+      ],
+      generationConfig: {
+        temperature: 0,
+      },
+    });
+
+    const text = response.response.text();
+    const parsed = parseJsonFromModel<{ lines?: string[]; text?: string }>(text);
+
+    if (parsed?.lines && Array.isArray(parsed.lines)) {
+      const joined = parsed.lines
+        .filter((line): line is string => typeof line === "string")
+        .join(" ")
+        .trim();
+      return joined || null;
+    }
+
+    if (typeof parsed?.text === "string" && parsed.text.trim().length > 0) {
+      return parsed.text.trim();
+    }
+
+    return text.trim() || null;
+  } catch {
+    return null;
+  }
+}
+
+async function scoreGeneratedTextReadability(imageBuffer: Buffer, slide: CarouselSlide): Promise<number | null> {
+  const expectedTokens = getExpectedImageTextTokens(slide);
+  if (expectedTokens.length === 0) return 1;
+
+  const observedText = await extractVisibleTextFromImage(imageBuffer);
+  if (!observedText) return null;
+
+  if (/\u25a1|\[\s*\]|\bNONE\b/i.test(observedText)) {
+    return 0;
+  }
+
+  return tokenRecallScore(expectedTokens, observedText);
+}
+
 function mimeTypeFromPath(filePath: string): string {
   const extension = path.extname(filePath).toLowerCase();
   if (extension === ".png") return "image/png";
@@ -705,10 +827,12 @@ async function getStyleReferenceImageParts(): Promise<GeminiInlineImagePart[]> {
 }
 
 async function generateSlideImage({
+  slide,
   prompt,
   key,
   imageModel,
 }: {
+  slide: CarouselSlide;
   prompt: string;
   key: string;
   imageModel: ImageGenerationModel;
@@ -719,28 +843,68 @@ async function generateSlideImage({
 
   const styleReferenceParts = await getStyleReferenceImageParts();
   const model = genAI.getGenerativeModel({ model: imageModel });
-  const result = await model.generateContent({
-    contents: [{ role: "user", parts: [{ text: prompt }, ...styleReferenceParts] }],
-    generationConfig: {
-      // @ts-expect-error responseModalities supported by API
-      responseModalities: ["IMAGE", "TEXT"],
-    },
-  });
 
-  const parts = ((result.response.candidates?.[0]?.content?.parts ?? []) as unknown) as Array<Record<string, unknown>>;
-  const imagePart = parts.find((part) => "inlineData" in part) as PartWithInlineData | undefined;
+  let bestImage: Buffer | null = null;
+  let bestScore = -1;
+  let hadReadableTextCheck = false;
 
-  if (!imagePart?.inlineData?.data) {
-    throw new Error("Image model returned no image bytes.");
+  for (let attempt = 1; attempt <= IN_IMAGE_TEXT_MAX_ATTEMPTS; attempt += 1) {
+    const attemptPrompt = `${prompt}\n\nRENDER ATTEMPT: ${attempt}. Ensure text is crisp and fully readable.`;
+
+    const result = await model.generateContent({
+      contents: [{ role: "user", parts: [{ text: attemptPrompt }, ...styleReferenceParts] }],
+      generationConfig: {
+        // @ts-expect-error responseModalities supported by API
+        responseModalities: ["IMAGE", "TEXT"],
+      },
+    });
+
+    const parts = ((result.response.candidates?.[0]?.content?.parts ?? []) as unknown) as Array<Record<string, unknown>>;
+    const imagePart = parts.find((part) => "inlineData" in part) as PartWithInlineData | undefined;
+
+    if (!imagePart?.inlineData?.data) {
+      if (attempt === IN_IMAGE_TEXT_MAX_ATTEMPTS && !bestImage) {
+        throw new Error("Image model returned no image bytes.");
+      }
+      continue;
+    }
+
+    const inputBuffer = Buffer.from(imagePart.inlineData.data, "base64");
+    const normalized = await sharp(inputBuffer)
+      .resize(CAROUSEL_CANVAS.width, CAROUSEL_CANVAS.height, { fit: "cover", position: "center" })
+      .png()
+      .toBuffer();
+
+    if (!bestImage) {
+      bestImage = normalized;
+    }
+
+    const readabilityScore = await scoreGeneratedTextReadability(normalized, slide);
+
+    if (readabilityScore === null) {
+      if (!hadReadableTextCheck) {
+        return uploadToR2(key, normalized, "image/png");
+      }
+      continue;
+    }
+
+    hadReadableTextCheck = true;
+
+    if (readabilityScore > bestScore) {
+      bestScore = readabilityScore;
+      bestImage = normalized;
+    }
+
+    if (readabilityScore >= IN_IMAGE_TEXT_MIN_READABILITY_SCORE) {
+      return uploadToR2(key, normalized, "image/png");
+    }
   }
 
-  const inputBuffer = Buffer.from(imagePart.inlineData.data, "base64");
-  const normalized = await sharp(inputBuffer)
-    .resize(CAROUSEL_CANVAS.width, CAROUSEL_CANVAS.height, { fit: "cover", position: "center" })
-    .png()
-    .toBuffer();
+  if (!bestImage) {
+    throw new Error("Failed to generate a carousel image.");
+  }
 
-  return uploadToR2(key, normalized, "image/png");
+  return uploadToR2(key, bestImage, "image/png");
 }
 
 export async function generateCarouselImages({
@@ -801,6 +965,7 @@ export async function generateSingleCarouselSlideImage({
   const key = `carousel-agent/${collectionId}/${topicSlug}/${generationId}/slide-${slide.slideNumber}-${Date.now()}.png`;
 
   return generateSlideImage({
+    slide,
     prompt,
     key,
     imageModel: resolvedImageModel,
