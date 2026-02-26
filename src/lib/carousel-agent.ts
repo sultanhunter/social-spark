@@ -146,7 +146,7 @@ function sanitizeStringArray(value: unknown, max = 12): string[] {
 function truncateWords(text: string, maxWords: number): string {
   const tokens = text.split(/\s+/).filter(Boolean);
   if (tokens.length <= maxWords) return tokens.join(" ");
-  return `${tokens.slice(0, maxWords).join(" ")}...`;
+  return tokens.slice(0, maxWords).join(" ");
 }
 
 function normalizeSentenceCase(text: string): string {
@@ -156,17 +156,18 @@ function normalizeSentenceCase(text: string): string {
 }
 
 function enforceOverlayTextConstraints(title: string, lines: string[]): { overlayTitle: string; overlayLines: string[] } {
-  const safeTitle = truncateWords(stripArabic(title), 8) || "Swipe for this";
+  const safeTitle = truncateWords(stripArabic(title), 5).slice(0, 34) || "Swipe for this";
 
   const safeLines = lines
-    .map((line) => truncateWords(stripArabic(line), 10))
+    .map((line) => truncateWords(stripArabic(line), 6))
+    .map((line) => line.slice(0, 38))
     .map((line) => normalizeSentenceCase(line))
     .filter((line) => line.length > 0)
-    .slice(0, 2);
+    .slice(0, 1);
 
   return {
     overlayTitle: safeTitle,
-    overlayLines: safeLines.length > 0 ? safeLines : ["Simple, practical steps"],
+    overlayLines: safeLines.length > 0 ? safeLines : ["Simple practical steps"],
   };
 }
 
@@ -213,8 +214,13 @@ function sanitizeSlides(value: unknown, topic: string): CarouselSlide[] {
       if (typeof item !== "object" || item === null) return null;
       const row = item as Record<string, unknown>;
 
-      const headline = sanitizeEnglishText(row.headline, `Slide ${index + 1}: ${topic}`);
-      const bodyBullets = sanitizeStringArray(row.bodyBullets, 5).map((bullet) => stripArabic(bullet));
+      const headline = truncateWords(
+        sanitizeEnglishText(row.headline, `Slide ${index + 1}: ${topic}`),
+        9
+      );
+      const bodyBullets = sanitizeStringArray(row.bodyBullets, 3)
+        .map((bullet) => normalizeSentenceCase(truncateWords(stripArabic(bullet), 8)))
+        .slice(0, 2);
       const voiceScript = sanitizeEnglishText(
         row.voiceScript,
         `${headline}${bodyBullets.length > 0 ? ` - ${bodyBullets.join(" ")}` : ""}`
@@ -233,15 +239,33 @@ function sanitizeSlides(value: unknown, topic: string): CarouselSlide[] {
         overlayLines: overlay.overlayLines,
         headline,
         bodyBullets,
-        voiceScript,
-        hookPurpose: sanitizeEnglishText(row.hookPurpose, "Drive curiosity and encourage the next swipe."),
-        capsWords: sanitizeStringArray(row.capsWords, 4).map((word) => stripArabic(word.toUpperCase())),
+        voiceScript: truncateWords(voiceScript, 20),
+        hookPurpose: truncateWords(
+          sanitizeEnglishText(row.hookPurpose, "Drive curiosity and encourage the next swipe."),
+          14
+        ),
+        capsWords: sanitizeStringArray(row.capsWords, 2)
+          .map((word) => stripArabic(word.toUpperCase()))
+          .map((word) => word.split(/\s+/)[0])
+          .filter(Boolean),
         visualDirection: sanitizeEnglishText(
-          row.visualDirection,
+          truncateWords(
+            sanitizeEnglishText(
+              row.visualDirection,
+              "Clean editorial layout with generous negative space and high readability."
+            ),
+            18
+          ),
           "Clean editorial layout with generous negative space and high readability."
         ),
         imagePrompt: sanitizeEnglishText(
-          row.imagePrompt,
+          truncateWords(
+            sanitizeEnglishText(
+              row.imagePrompt,
+              `Instagram carousel slide about ${topic}, premium editorial style, English text only.`
+            ),
+            48
+          ),
           `Instagram carousel slide about ${topic}, premium editorial style, English text only.`
         ),
         altText: sanitizeEnglishText(row.altText, `Carousel slide ${index + 1} for ${topic}`),
@@ -414,8 +438,8 @@ MANDATORY REQUIREMENTS:
 - All writing must be English only.
 - Never include Arabic script or non-Latin text in any slide copy or image prompt.
 - Keep on-image text minimal and readable:
-  - overlayTitle: max 8 words
-  - overlayLines: 0-2 lines, each max 10 words
+  - overlayTitle: max 5 words
+  - overlayLines: 0-1 line, each max 6 words
   - Avoid long paragraphs on image.
 - Image prompts must describe BACKGROUND ONLY (no rendered text) for each slide.
 - Visual style: hyperrealistic modest hijabi woman, premium editorial, text block area at top with negative space.
@@ -555,16 +579,15 @@ DESIGN GOAL:
 - Modern editorial social style, natural lighting, realistic skin and fabric textures.
 - 4:5 portrait composition.
 - Match the framing language and realism quality of the attached reference examples.
+- Reserve clean negative space in top area for later text overlay.
 
-TEXT TO RENDER IN IMAGE (ENGLISH ONLY):
+TEXT CONTEXT FOR PLANNING ONLY (DO NOT RENDER THIS TEXT):
 ${textLines.map((line) => `- ${line}`).join("\n") || "- Keep text minimal"}
 
-TEXT LAYOUT RULES:
-- Render text as part of the image design (NOT separate overlay).
-- Keep all text fully visible with safe margins (no clipping on edges).
-- Keep text in upper half where readability is strongest.
-- Use clean bold sans-serif style with strong contrast.
-- No more than 3 short lines total.
+SAFE AREA RULES:
+- Do not render any words, letters, numbers, typographic glyphs, labels, logos, or signs.
+- Keep the top 42% visually simpler so text can be added later.
+- Keep subject and key objects away from 10% page margins on all sides.
 
 CRITICAL RULES:
 - Use ENGLISH text only.
@@ -577,6 +600,42 @@ ${slide.visualDirection}
 
 Additional guidance:
 ${slide.imagePrompt}`;
+}
+
+function escapeSvgText(value: string): string {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&apos;");
+}
+
+function buildTextOverlaySvg(slide: CarouselSlide): Buffer {
+  const title = escapeSvgText(slide.overlayTitle.toUpperCase());
+  const line = escapeSvgText((slide.overlayLines[0] || "").trim());
+  const hasLine = line.length > 0;
+  const panelHeight = hasLine ? 300 : 230;
+  const titleFontSize = title.length > 24 ? 62 : title.length > 16 ? 72 : 82;
+  const lineFontSize = line.length > 28 ? 44 : 54;
+
+  const lineMarkup = hasLine
+    ? `<text x="96" y="290" fill="#F8FAFC" font-family="Inter, Arial, sans-serif" font-size="${lineFontSize}" font-weight="600">${line}</text>`
+    : "";
+
+  const svg = `<svg width="1080" height="1350" viewBox="0 0 1080 1350" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="overlayGradient" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="rgba(15, 23, 42, 0.86)"/>
+      <stop offset="100%" stop-color="rgba(30, 41, 59, 0.62)"/>
+    </linearGradient>
+  </defs>
+  <rect x="64" y="64" width="952" height="${panelHeight}" rx="34" fill="url(#overlayGradient)"/>
+  <text x="96" y="190" fill="#FFFFFF" font-family="Inter, Arial, sans-serif" font-size="${titleFontSize}" font-weight="800">${title}</text>
+  ${lineMarkup}
+</svg>`;
+
+  return Buffer.from(svg);
 }
 
 function mimeTypeFromPath(filePath: string): string {
@@ -608,10 +667,12 @@ async function getStyleReferenceImageParts(): Promise<GeminiInlineImagePart[]> {
 }
 
 async function generateSlideImage({
+  slide,
   prompt,
   key,
   imageModel,
 }: {
+  slide: CarouselSlide;
   prompt: string;
   key: string;
   imageModel: ImageGenerationModel;
@@ -643,7 +704,12 @@ async function generateSlideImage({
     .png()
     .toBuffer();
 
-  return uploadToR2(key, normalized, "image/png");
+  const overlaid = await sharp(normalized)
+    .composite([{ input: buildTextOverlaySvg(slide), top: 0, left: 0 }])
+    .png()
+    .toBuffer();
+
+  return uploadToR2(key, overlaid, "image/png");
 }
 
 export async function generateCarouselImages({
@@ -666,6 +732,7 @@ export async function generateCarouselImages({
     const prompt = buildImageGenerationPrompt(slide, pack.topic, pack.slides.length);
     const key = `carousel-agent/${collectionId}/${topicSlug}/${generationId}/slide-${slide.slideNumber}.png`;
     const imageUrl = await generateSlideImage({
+      slide,
       prompt,
       key,
       imageModel: resolvedImageModel,

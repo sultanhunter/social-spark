@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   AlertCircle,
   ArrowLeft,
@@ -64,6 +64,20 @@ type CarouselAgentResponse = {
   error?: string;
 };
 
+type CarouselHistoryEntry = {
+  generationId: string;
+  createdAt: string;
+  model: string;
+  imageModel: string;
+  generatedImages: boolean;
+  pack: CarouselPack;
+};
+
+type CarouselHistoryResponse = {
+  generations?: CarouselHistoryEntry[];
+  error?: string;
+};
+
 export function CarouselAgentView({ collectionId }: { collectionId: string }) {
   const router = useRouter();
   const { activeCollection } = useAppStore();
@@ -74,6 +88,8 @@ export function CarouselAgentView({ collectionId }: { collectionId: string }) {
   const [generateImages, setGenerateImages] = useState(true);
   const [result, setResult] = useState<CarouselAgentResponse | null>(null);
   const [isGenerating, setIsGenerating] = useState(false);
+  const [isLoadingHistory, setIsLoadingHistory] = useState(false);
+  const [history, setHistory] = useState<CarouselHistoryEntry[]>([]);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
 
@@ -81,6 +97,44 @@ export function CarouselAgentView({ collectionId }: { collectionId: string }) {
     () => IMAGE_GENERATION_MODELS.filter((model) => model.id.startsWith("gemini-")),
     []
   );
+
+  const loadHistory = useCallback(async (hydrateLatest: boolean = true) => {
+    setIsLoadingHistory(true);
+
+    try {
+      const response = await fetch(`/api/carousel-agent/history?collectionId=${encodeURIComponent(collectionId)}`, {
+        method: "GET",
+        cache: "no-store",
+      });
+      const data = (await response.json()) as CarouselHistoryResponse;
+
+      if (!response.ok) {
+        throw new Error(data.error || "Failed to load saved carousel packs.");
+      }
+
+      const generations = Array.isArray(data.generations) ? data.generations : [];
+      setHistory(generations);
+
+      if (hydrateLatest && generations.length > 0) {
+        const latest = generations[0];
+        setResult({
+          generationId: latest.generationId,
+          model: latest.model,
+          imageModel: latest.imageModel,
+          generatedImages: latest.generatedImages,
+          pack: latest.pack,
+        });
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to load saved carousel packs.");
+    } finally {
+      setIsLoadingHistory(false);
+    }
+  }, [collectionId]);
+
+  useEffect(() => {
+    void loadHistory(true);
+  }, [loadHistory]);
 
   const handleGenerate = async () => {
     setIsGenerating(true);
@@ -115,11 +169,25 @@ export function CarouselAgentView({ collectionId }: { collectionId: string }) {
       }
 
       setResult(data);
+      setHistory((prev) => {
+        const nextEntry: CarouselHistoryEntry = {
+          generationId: data.generationId || `${Date.now()}`,
+          createdAt: new Date().toISOString(),
+          model: data.model,
+          imageModel: data.imageModel,
+          generatedImages: data.generatedImages,
+          pack: data.pack,
+        };
+        const existing = prev.filter((entry) => entry.generationId !== nextEntry.generationId);
+        return [nextEntry, ...existing].slice(0, 12);
+      });
       setSuccess(
         data.generatedImages
           ? `Generated ${data.pack.slides.length} slides and saved pack${data.generationId ? ` (${data.generationId.slice(0, 8)})` : ""}.`
           : `Generated ${data.pack.slides.length} slides and saved strategy${data.generationId ? ` (${data.generationId.slice(0, 8)})` : ""}.`
       );
+
+      void loadHistory(false);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Carousel generation failed.");
     } finally {
@@ -175,6 +243,43 @@ export function CarouselAgentView({ collectionId }: { collectionId: string }) {
               <p>
                 The agent prioritizes Islam + women + period/pregnancy/lifestyle angles and applies a high-retention hook strategy.
               </p>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">Saved Carousel Packs</CardTitle>
+              <CardDescription>Latest generated packs for this collection</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-2 text-sm text-slate-600">
+              {isLoadingHistory ? (
+                <p>Loading saved packs...</p>
+              ) : history.length === 0 ? (
+                <p>No saved carousel packs yet.</p>
+              ) : (
+                history.slice(0, 5).map((entry) => (
+                  <button
+                    key={entry.generationId}
+                    type="button"
+                    onClick={() => {
+                      setResult({
+                        generationId: entry.generationId,
+                        model: entry.model,
+                        imageModel: entry.imageModel,
+                        generatedImages: entry.generatedImages,
+                        pack: entry.pack,
+                      });
+                      setSuccess(`Loaded saved pack (${entry.generationId.slice(0, 8)}).`);
+                    }}
+                    className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-left text-xs text-slate-700 transition hover:border-slate-300"
+                  >
+                    <p className="font-semibold text-slate-800">{entry.pack.topic || "Untitled topic"}</p>
+                    <p className="mt-0.5 text-slate-500">
+                      {entry.pack.slides.length} slides • {entry.generatedImages ? "images rendered" : "prompts only"}
+                    </p>
+                  </button>
+                ))
+              )}
             </CardContent>
           </Card>
         </div>
