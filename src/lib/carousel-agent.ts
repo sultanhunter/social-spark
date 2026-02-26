@@ -594,14 +594,15 @@ function buildFallbackSlides(topic: string): CarouselSlide[] {
       visualDirection: "Editorial layout with clear hierarchy and generous negative space.",
       imagePrompt:
         `Instagram carousel slide in a premium editorial style about ${topic}. ` +
-        `Hyperrealistic modest hijabi woman scene, no rendered text, warm blush and neutral tones, clear negative space.`,
+        `Hyperrealistic modest hijabi woman scene, warm blush and neutral tones, clean top area for readable headline text.`,
       altText: `Slide ${index + 1} about ${topic}`,
     };
   });
 }
 
 function buildImageGenerationPrompt(slide: CarouselSlide, topic: string, totalSlides: number): string {
-  const textLines = [slide.overlayTitle, ...slide.overlayLines].filter((line) => line.trim().length > 0);
+  const textSpec = buildInImageTextSpec(slide);
+  const bodyLines = textSpec.bodyLines.length > 0 ? textSpec.bodyLines : ["Simple practical steps"];
 
   return `Create a fully finished Instagram carousel slide image (${slide.slideNumber}/${totalSlides}) for Muslimah Pro.
 
@@ -615,20 +616,24 @@ DESIGN GOAL:
 - Modern editorial social style, natural lighting, realistic skin and fabric textures.
 - 4:5 portrait composition.
 - Match the framing language and realism quality of the attached reference examples.
-- Reserve clean negative space in top area for later text overlay.
+- Render the provided text directly inside the image as clean typography.
 
-TEXT CONTEXT FOR PLANNING ONLY (DO NOT RENDER THIS TEXT):
-${textLines.map((line) => `- ${line}`).join("\n") || "- Keep text minimal"}
+EXACT TEXT TO RENDER (ENGLISH ONLY):
+- TITLE: ${textSpec.title}
+${bodyLines.map((line, index) => `- BODY ${index + 1}: ${line}`).join("\n")}
 
-SAFE AREA RULES:
-- Do not render any words, letters, numbers, typographic glyphs, labels, logos, or signs.
-- Keep the top 42% visually simpler so text can be added later.
-- Keep subject and key objects away from 10% page margins on all sides.
+TEXT QUALITY + LAYOUT RULES:
+- Text must be sharp, legible, and correctly spelled; no gibberish, no placeholder squares, no corrupted glyphs.
+- Use a clean bold sans-serif style with strong contrast.
+- Keep all text inside a safe text box in the top area with generous margins (at least 8% from left/right edges and 6% from top).
+- Keep the full title and body lines visible; no clipping, no cropped words, no overlap with subject.
+- Keep line count tight (title + up to 2 short body lines).
+- Avoid decorative fonts, handwritten fonts, or ultra-condensed fonts.
 
 CRITICAL RULES:
 - Use ENGLISH text only.
 - DO NOT include Arabic letters or other non-Latin scripts.
-- No gibberish text, no logos, no watermark, no UI chrome.
+- No logos, no watermark, no UI chrome.
 - Keep subject respectful and faith-aligned.
 
 Slide direction:
@@ -638,318 +643,37 @@ Additional guidance:
 ${slide.imagePrompt}`;
 }
 
-function sanitizeOverlayCopy(value: string): string {
-  return value
-    .replace(/[^\x20-\x7E]/g, " ")
+function sanitizePromptTextLine(value: string, maxWords: number, maxChars: number): string {
+  const cleaned = stripArabic(value)
     .replace(/\s+/g, " ")
     .trim();
+  if (!cleaned) return "";
+  return truncateWords(cleaned, maxWords).slice(0, maxChars).trim();
 }
 
-function clamp(value: number, min: number, max: number): number {
-  return Math.max(min, Math.min(max, value));
-}
-
-const BITMAP_FONT: Record<string, string[]> = {
-  " ": ["00000", "00000", "00000", "00000", "00000", "00000", "00000"],
-  A: ["01110", "10001", "10001", "11111", "10001", "10001", "10001"],
-  B: ["11110", "10001", "10001", "11110", "10001", "10001", "11110"],
-  C: ["01111", "10000", "10000", "10000", "10000", "10000", "01111"],
-  D: ["11110", "10001", "10001", "10001", "10001", "10001", "11110"],
-  E: ["11111", "10000", "10000", "11110", "10000", "10000", "11111"],
-  F: ["11111", "10000", "10000", "11110", "10000", "10000", "10000"],
-  G: ["01111", "10000", "10000", "10111", "10001", "10001", "01110"],
-  H: ["10001", "10001", "10001", "11111", "10001", "10001", "10001"],
-  I: ["11111", "00100", "00100", "00100", "00100", "00100", "11111"],
-  J: ["00001", "00001", "00001", "00001", "10001", "10001", "01110"],
-  K: ["10001", "10010", "10100", "11000", "10100", "10010", "10001"],
-  L: ["10000", "10000", "10000", "10000", "10000", "10000", "11111"],
-  M: ["10001", "11011", "10101", "10101", "10001", "10001", "10001"],
-  N: ["10001", "11001", "10101", "10011", "10001", "10001", "10001"],
-  O: ["01110", "10001", "10001", "10001", "10001", "10001", "01110"],
-  P: ["11110", "10001", "10001", "11110", "10000", "10000", "10000"],
-  Q: ["01110", "10001", "10001", "10001", "10101", "10010", "01101"],
-  R: ["11110", "10001", "10001", "11110", "10100", "10010", "10001"],
-  S: ["01111", "10000", "10000", "01110", "00001", "00001", "11110"],
-  T: ["11111", "00100", "00100", "00100", "00100", "00100", "00100"],
-  U: ["10001", "10001", "10001", "10001", "10001", "10001", "01110"],
-  V: ["10001", "10001", "10001", "10001", "10001", "01010", "00100"],
-  W: ["10001", "10001", "10001", "10101", "10101", "11011", "10001"],
-  X: ["10001", "10001", "01010", "00100", "01010", "10001", "10001"],
-  Y: ["10001", "10001", "01010", "00100", "00100", "00100", "00100"],
-  Z: ["11111", "00001", "00010", "00100", "01000", "10000", "11111"],
-  "0": ["01110", "10001", "10011", "10101", "11001", "10001", "01110"],
-  "1": ["00100", "01100", "00100", "00100", "00100", "00100", "01110"],
-  "2": ["01110", "10001", "00001", "00010", "00100", "01000", "11111"],
-  "3": ["11110", "00001", "00001", "01110", "00001", "00001", "11110"],
-  "4": ["00010", "00110", "01010", "10010", "11111", "00010", "00010"],
-  "5": ["11111", "10000", "10000", "11110", "00001", "00001", "11110"],
-  "6": ["01110", "10000", "10000", "11110", "10001", "10001", "01110"],
-  "7": ["11111", "00001", "00010", "00100", "01000", "01000", "01000"],
-  "8": ["01110", "10001", "10001", "01110", "10001", "10001", "01110"],
-  "9": ["01110", "10001", "10001", "01111", "00001", "00010", "11100"],
-  "-": ["00000", "00000", "00000", "11111", "00000", "00000", "00000"],
-  "&": ["01100", "10010", "10100", "01000", "10101", "10010", "01101"],
-  "?": ["01110", "10001", "00001", "00010", "00100", "00000", "00100"],
-  "!": ["00100", "00100", "00100", "00100", "00100", "00000", "00100"],
-  ".": ["00000", "00000", "00000", "00000", "00000", "01100", "01100"],
-  ",": ["00000", "00000", "00000", "00000", "01100", "00100", "01000"],
-  ":": ["00000", "01100", "01100", "00000", "01100", "01100", "00000"],
-  "'": ["00100", "00100", "00000", "00000", "00000", "00000", "00000"],
-  "/": ["00001", "00010", "00100", "01000", "10000", "00000", "00000"],
-};
-
-function normalizeBitmapText(text: string): string {
-  return sanitizeOverlayCopy(text)
-    .toUpperCase()
-    .replace(/[^A-Z0-9\-&?!.,:'/ ]/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-}
-
-function splitTokenToChunks(token: string, maxChars: number): string[] {
-  if (token.length <= maxChars) return [token];
-
-  const chunks: string[] = [];
-  let cursor = 0;
-  while (cursor < token.length) {
-    chunks.push(token.slice(cursor, cursor + maxChars));
-    cursor += maxChars;
-  }
-  return chunks;
-}
-
-function wrapBitmapTextToLines(
-  text: string,
-  maxCharsPerLine: number,
-  maxLines?: number
-): { lines: string[]; truncated: boolean } {
-  const normalized = normalizeBitmapText(text);
-  if (!normalized) return { lines: [], truncated: false };
-
-  const tokens = normalized
-    .split(" ")
-    .filter(Boolean)
-    .flatMap((token) => splitTokenToChunks(token, Math.max(1, maxCharsPerLine)));
-
-  const lines: string[] = [];
-  let current = "";
-  let truncated = false;
-  const hasLineLimit = typeof maxLines === "number" && maxLines > 0;
-
-  for (const token of tokens) {
-    const candidate = current ? `${current} ${token}` : token;
-    if (candidate.length <= maxCharsPerLine) {
-      current = candidate;
-      continue;
-    }
-
-    if (current) {
-      lines.push(current);
-      if (hasLineLimit && lines.length >= maxLines) {
-        truncated = true;
-        break;
-      }
-      current = token;
-      if (current.length > maxCharsPerLine) {
-        current = current.slice(0, maxCharsPerLine);
-      }
-      continue;
-    }
-
-    lines.push(token.slice(0, maxCharsPerLine));
-    if (hasLineLimit && lines.length >= maxLines) {
-      truncated = true;
-      break;
-    }
-    current = "";
-  }
-
-  if (!truncated && current) {
-    lines.push(current);
-  }
-
-  if (hasLineLimit && lines.length > maxLines) {
-    lines.splice(maxLines);
-    truncated = true;
-  }
-
-  return { lines, truncated };
-}
-
-type BitmapLayout = {
-  lines: string[];
-  scale: number;
-  lineHeight: number;
-  lineGap: number;
-  height: number;
-};
-
-function createBitmapLayout({
-  text,
-  maxWidth,
-  minScale,
-  maxScale,
-  maxLines,
-  maxHeight,
-}: {
-  text: string;
-  maxWidth: number;
-  minScale: number;
-  maxScale: number;
-  maxLines?: number;
-  maxHeight?: number;
-}): BitmapLayout {
-  const unitsPerChar = 6;
-  const fallbackLine = "SLIDE";
-
-  for (let scale = maxScale; scale >= minScale; scale -= 1) {
-    const maxCharsPerLine = Math.max(1, Math.floor(maxWidth / (unitsPerChar * scale)));
-    const wrapped = wrapBitmapTextToLines(text, maxCharsPerLine, maxLines);
-    if (wrapped.lines.length === 0 || wrapped.truncated) continue;
-
-    const lineHeight = 7 * scale;
-    const lineGap = Math.max(4, Math.floor(scale * 1.6));
-    const height = wrapped.lines.length * lineHeight + (wrapped.lines.length - 1) * lineGap;
-    if (typeof maxHeight === "number" && height > maxHeight) continue;
-    return { lines: wrapped.lines, scale, lineHeight, lineGap, height };
-  }
-
-  const safeScale = minScale;
-  const maxCharsPerLine = Math.max(1, Math.floor(maxWidth / (unitsPerChar * safeScale)));
-  const wrapped = wrapBitmapTextToLines(text || fallbackLine, maxCharsPerLine, maxLines);
-  const lines = wrapped.lines.length > 0 ? wrapped.lines : [fallbackLine];
-  const lineHeight = 7 * safeScale;
-  const lineGap = Math.max(4, Math.floor(safeScale * 1.6));
-  const height = lines.length * lineHeight + (lines.length - 1) * lineGap;
-
-  return { lines, scale: safeScale, lineHeight, lineGap, height };
-}
-
-function renderBitmapLayout({
-  layout,
-  x,
-  y,
-  fill,
-}: {
-  layout: BitmapLayout;
-  x: number;
-  y: number;
-  fill: string;
-}): { markup: string; bottom: number } {
-  const radius = Math.max(1, Math.floor(layout.scale / 4));
-  let markup = "";
-
-  layout.lines.forEach((line, lineIndex) => {
-    const lineY = y + lineIndex * (layout.lineHeight + layout.lineGap);
-    [...line].forEach((char, index) => {
-      const glyph = BITMAP_FONT[char] || BITMAP_FONT[" "];
-      const baseX = x + index * 6 * layout.scale;
-
-      for (let row = 0; row < glyph.length; row += 1) {
-        const rowPattern = glyph[row];
-        for (let col = 0; col < rowPattern.length; col += 1) {
-          if (rowPattern[col] !== "1") continue;
-          const rectX = baseX + col * layout.scale;
-          const rectY = lineY + row * layout.scale;
-          markup += `<rect x="${rectX}" y="${rectY}" width="${layout.scale}" height="${layout.scale}" rx="${radius}" fill="${fill}"/>`;
-        }
-      }
-    });
-  });
-
-  return { markup, bottom: y + layout.height };
-}
-
-function buildTextOverlaySvg(slide: CarouselSlide): Buffer {
-  const panelTop = 64;
-  const panelBottomMargin = 64;
-  const panelInnerBottomPadding = 40;
-
-  const rawTitle =
-    sanitizeOverlayCopy((slide.overlayTitle || "").trim()) ||
-    sanitizeOverlayCopy((slide.headline || "").trim()) ||
+function buildInImageTextSpec(slide: CarouselSlide): { title: string; bodyLines: string[] } {
+  const title =
+    sanitizePromptTextLine(slide.overlayTitle || slide.headline || `Slide ${slide.slideNumber}`, 7, 46) ||
     `Slide ${slide.slideNumber}`;
-  const rawBodyText =
-    sanitizeOverlayCopy(slide.voiceScript) ||
-    sanitizeOverlayCopy(slide.bodyBullets.join(" ")) ||
-    sanitizeOverlayCopy(slide.overlayLines.join(" "));
 
-  const titleLayout = createBitmapLayout({
-    text: rawTitle,
-    maxWidth: 840,
-    minScale: 6,
-    maxScale: 16,
+  const voiceDerived = deriveBodyLinesFromVoiceScript(slide.voiceScript, {
     maxLines: 2,
-  });
+    maxWordsPerLine: 11,
+  })
+    .map((line) => sanitizePromptTextLine(line, 11, 56))
+    .filter((line) => line.length > 0);
 
-  const titleShadow = renderBitmapLayout({
-    layout: titleLayout,
-    x: 98,
-    y: 114,
-    fill: "#0F172A",
-  });
-  const titleMain = renderBitmapLayout({
-    layout: titleLayout,
-    x: 96,
-    y: 112,
-    fill: "#FFFFFF",
-  });
+  const fallback = [...slide.bodyBullets, ...slide.overlayLines]
+    .map((line) => sanitizePromptTextLine(line, 11, 56))
+    .filter((line) => line.length > 0)
+    .slice(0, 2);
 
-  const hasBody = normalizeBitmapText(rawBodyText).length > 0;
-  const bodyY = titleMain.bottom + 24;
-  const maxPanelHeight = CAROUSEL_CANVAS.height - panelTop - panelBottomMargin;
-  const availableBodyHeight = Math.max(0, maxPanelHeight - (bodyY - panelTop) - panelInnerBottomPadding);
+  const bodyLines = (voiceDerived.length > 0 ? voiceDerived : fallback).slice(0, 2);
 
-  const bodyLayout = hasBody && availableBodyHeight > 0
-    ? createBitmapLayout({
-      text: rawBodyText,
-      maxWidth: 840,
-      minScale: 4,
-      maxScale: 10,
-      maxHeight: availableBodyHeight,
-    })
-    : null;
-
-  const bodyShadow = bodyLayout
-    ? renderBitmapLayout({
-      layout: bodyLayout,
-      x: 98,
-      y: bodyY + 2,
-      fill: "#0F172A",
-    })
-    : null;
-  const bodyMain = bodyLayout
-    ? renderBitmapLayout({
-      layout: bodyLayout,
-      x: 96,
-      y: bodyY,
-      fill: "#E2E8F0",
-    })
-    : null;
-
-  const contentBottom = bodyMain ? bodyMain.bottom : titleMain.bottom;
-  const panelHeight = clamp(
-    Math.round(contentBottom - panelTop + panelInnerBottomPadding),
-    220,
-    maxPanelHeight
-  );
-
-  const svg = `<svg width="1080" height="1350" viewBox="0 0 1080 1350" xmlns="http://www.w3.org/2000/svg">
-  <defs>
-    <linearGradient id="overlayGradient" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0%" stop-color="#0F172A" stop-opacity="0.92"/>
-      <stop offset="100%" stop-color="#1E293B" stop-opacity="0.72"/>
-    </linearGradient>
-  </defs>
-  <rect x="64" y="${panelTop}" width="952" height="${panelHeight}" rx="34" fill="#0F172A" fill-opacity="0.72"/>
-  <rect x="64" y="${panelTop}" width="952" height="${panelHeight}" rx="34" fill="url(#overlayGradient)"/>
-  ${titleShadow.markup}
-  ${titleMain.markup}
-  ${bodyShadow ? bodyShadow.markup : ""}
-  ${bodyMain ? bodyMain.markup : ""}
-</svg>`;
-
-  return Buffer.from(svg);
+  return {
+    title,
+    bodyLines,
+  };
 }
 
 function mimeTypeFromPath(filePath: string): string {
@@ -981,12 +705,10 @@ async function getStyleReferenceImageParts(): Promise<GeminiInlineImagePart[]> {
 }
 
 async function generateSlideImage({
-  slide,
   prompt,
   key,
   imageModel,
 }: {
-  slide: CarouselSlide;
   prompt: string;
   key: string;
   imageModel: ImageGenerationModel;
@@ -1018,12 +740,7 @@ async function generateSlideImage({
     .png()
     .toBuffer();
 
-  const overlaid = await sharp(normalized)
-    .composite([{ input: buildTextOverlaySvg(slide), top: 0, left: 0 }])
-    .png()
-    .toBuffer();
-
-  return uploadToR2(key, overlaid, "image/png");
+  return uploadToR2(key, normalized, "image/png");
 }
 
 export async function generateCarouselImages({
@@ -1084,7 +801,6 @@ export async function generateSingleCarouselSlideImage({
   const key = `carousel-agent/${collectionId}/${topicSlug}/${generationId}/slide-${slide.slideNumber}-${Date.now()}.png`;
 
   return generateSlideImage({
-    slide,
     prompt,
     key,
     imageModel: resolvedImageModel,
