@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import {
   DEFAULT_CAROUSEL_IMAGE_MODEL,
-  generateCarouselImages,
   generateCarouselPack,
 } from "@/lib/carousel-agent";
 import {
@@ -130,7 +129,7 @@ export async function POST(request: NextRequest) {
     const imageGenerationModel = isImageGenerationModel(body.imageGenerationModel)
       ? body.imageGenerationModel
       : DEFAULT_CAROUSEL_IMAGE_MODEL || DEFAULT_IMAGE_GENERATION_MODEL;
-    const shouldGenerateImages = body.generateImages !== false;
+    const shouldGenerateImages = false;
 
     if (!collectionId) {
       return NextResponse.json({ error: "Collection ID is required." }, { status: 400 });
@@ -156,13 +155,7 @@ export async function POST(request: NextRequest) {
       reasoningModel,
     });
 
-    const finalPack = shouldGenerateImages
-      ? await generateCarouselImages({
-        pack,
-        collectionId,
-        imageModel: imageGenerationModel,
-      })
-      : pack;
+    const finalPack = pack;
 
     const generationId = await persistCarouselPack({
       collectionId,

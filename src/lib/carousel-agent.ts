@@ -722,19 +722,18 @@ export async function generateCarouselImages({
   imageModel?: ImageGenerationModel;
 }): Promise<CarouselPack> {
   const resolvedImageModel = imageModel || DEFAULT_CAROUSEL_IMAGE_MODEL || DEFAULT_IMAGE_GENERATION_MODEL;
-  const topicSlug = slugify(pack.topic);
   const generationId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
   const slidesWithImages: CarouselSlide[] = [];
 
   for (let i = 0; i < pack.slides.length; i += 1) {
     const slide = pack.slides[i];
-    const prompt = buildImageGenerationPrompt(slide, pack.topic, pack.slides.length);
-    const key = `carousel-agent/${collectionId}/${topicSlug}/${generationId}/slide-${slide.slideNumber}.png`;
-    const imageUrl = await generateSlideImage({
+    const imageUrl = await generateSingleCarouselSlideImage({
+      collectionId,
+      generationId,
+      topic: pack.topic,
+      totalSlides: pack.slides.length,
       slide,
-      prompt,
-      key,
       imageModel: resolvedImageModel,
     });
 
@@ -748,4 +747,32 @@ export async function generateCarouselImages({
     ...pack,
     slides: slidesWithImages,
   };
+}
+
+export async function generateSingleCarouselSlideImage({
+  collectionId,
+  generationId,
+  topic,
+  totalSlides,
+  slide,
+  imageModel,
+}: {
+  collectionId: string;
+  generationId: string;
+  topic: string;
+  totalSlides: number;
+  slide: CarouselSlide;
+  imageModel?: ImageGenerationModel;
+}): Promise<string> {
+  const resolvedImageModel = imageModel || DEFAULT_CAROUSEL_IMAGE_MODEL || DEFAULT_IMAGE_GENERATION_MODEL;
+  const topicSlug = slugify(topic);
+  const prompt = buildImageGenerationPrompt(slide, topic, totalSlides);
+  const key = `carousel-agent/${collectionId}/${topicSlug}/${generationId}/slide-${slide.slideNumber}-${Date.now()}.png`;
+
+  return generateSlideImage({
+    slide,
+    prompt,
+    key,
+    imageModel: resolvedImageModel,
+  });
 }

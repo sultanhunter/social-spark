@@ -85,9 +85,9 @@ export function CarouselAgentView({ collectionId }: { collectionId: string }) {
   const [focus, setFocus] = useState("");
   const [reasoningModel, setReasoningModel] = useState(DEFAULT_REASONING_MODEL);
   const [imageModel, setImageModel] = useState(DEFAULT_IMAGE_GENERATION_MODEL);
-  const [generateImages, setGenerateImages] = useState(true);
   const [result, setResult] = useState<CarouselAgentResponse | null>(null);
   const [isGenerating, setIsGenerating] = useState(false);
+  const [generatingSlideByNumber, setGeneratingSlideByNumber] = useState<Record<number, boolean>>({});
   const [isLoadingHistory, setIsLoadingHistory] = useState(false);
   const [history, setHistory] = useState<CarouselHistoryEntry[]>([]);
   const [error, setError] = useState("");
@@ -117,6 +117,12 @@ export function CarouselAgentView({ collectionId }: { collectionId: string }) {
 
       if (hydrateLatest && generations.length > 0) {
         const latest = generations[0];
+        if (isReasoningModel(latest.model)) {
+          setReasoningModel(latest.model);
+        }
+        if (isImageGenerationModel(latest.imageModel)) {
+          setImageModel(latest.imageModel);
+        }
         setResult({
           generationId: latest.generationId,
           model: latest.model,
@@ -138,6 +144,7 @@ export function CarouselAgentView({ collectionId }: { collectionId: string }) {
 
   const handleGenerate = async () => {
     setIsGenerating(true);
+    setGeneratingSlideByNumber({});
     setError("");
     setSuccess("");
 
@@ -150,7 +157,6 @@ export function CarouselAgentView({ collectionId }: { collectionId: string }) {
           focus: focus.trim(),
           reasoningModel,
           imageGenerationModel: imageModel,
-          generateImages,
         }),
       });
 
@@ -182,9 +188,7 @@ export function CarouselAgentView({ collectionId }: { collectionId: string }) {
         return [nextEntry, ...existing].slice(0, 12);
       });
       setSuccess(
-        data.generatedImages
-          ? `Generated ${data.pack.slides.length} slides and saved pack${data.generationId ? ` (${data.generationId.slice(0, 8)})` : ""}.`
-          : `Generated ${data.pack.slides.length} slides and saved strategy${data.generationId ? ` (${data.generationId.slice(0, 8)})` : ""}.`
+        `Generated ${data.pack.slides.length} slide prompts and saved pack${data.generationId ? ` (${data.generationId.slice(0, 8)})` : ""}.`
       );
 
       void loadHistory(false);
@@ -192,6 +196,92 @@ export function CarouselAgentView({ collectionId }: { collectionId: string }) {
       setError(err instanceof Error ? err.message : "Carousel generation failed.");
     } finally {
       setIsGenerating(false);
+    }
+  };
+
+  const handleGenerateSlideImage = async (slideNumber: number) => {
+    if (!result?.generationId) {
+      setError("This pack has no saved generation ID yet. Regenerate the pack first.");
+      return;
+    }
+
+    setGeneratingSlideByNumber((prev) => ({ ...prev, [slideNumber]: true }));
+    setError("");
+
+    try {
+      const response = await fetch("/api/carousel-agent/generate-slide", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          collectionId,
+          generationId: result.generationId,
+          slideNumber,
+          imageGenerationModel: imageModel,
+        }),
+      });
+
+      const data = (await response.json()) as {
+        error?: string;
+        generationId?: string;
+        slideNumber?: number;
+        imageUrl?: string;
+        imageModel?: string;
+      };
+
+      if (!response.ok) {
+        throw new Error(data.error || `Failed to generate image for slide ${slideNumber}.`);
+      }
+
+      if (isImageGenerationModel(data.imageModel)) {
+        setImageModel(data.imageModel);
+      }
+
+      const nextImageUrl = typeof data.imageUrl === "string" ? data.imageUrl : "";
+      const nextGenerationId = data.generationId || result.generationId;
+
+      setResult((prev) => {
+        if (!prev) return prev;
+
+        const slides = prev.pack.slides.map((slide) =>
+          slide.slideNumber === slideNumber ? { ...slide, imageUrl: nextImageUrl || slide.imageUrl } : slide
+        );
+
+        return {
+          ...prev,
+          generationId: nextGenerationId,
+          generatedImages: slides.some((slide) => Boolean(slide.imageUrl)),
+          pack: {
+            ...prev.pack,
+            slides,
+          },
+        };
+      });
+
+      setHistory((prev) =>
+        prev.map((entry) => {
+          if (entry.generationId !== nextGenerationId) return entry;
+
+          const slides = entry.pack.slides.map((slide) =>
+            slide.slideNumber === slideNumber ? { ...slide, imageUrl: nextImageUrl || slide.imageUrl } : slide
+          );
+
+          return {
+            ...entry,
+            generatedImages: slides.some((slide) => Boolean(slide.imageUrl)),
+            imageModel: isImageGenerationModel(data.imageModel) ? data.imageModel : entry.imageModel,
+            pack: {
+              ...entry.pack,
+              slides,
+            },
+          };
+        })
+      );
+
+      setSuccess(`Generated image for slide ${slideNumber}.`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : `Failed to generate image for slide ${slideNumber}.`);
+    } finally {
+      setGeneratingSlideByNumber((prev) => ({ ...prev, [slideNumber]: false }));
     }
   };
 
@@ -225,11 +315,14 @@ export function CarouselAgentView({ collectionId }: { collectionId: string }) {
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-2 text-sm text-slate-600">
-              <StatusRow label="1. Trend angle selected" done={Boolean(result?.pack.topic)} />
-              <StatusRow label="2. Script + prompts generated" done={Boolean(result?.pack.slides.length)} />
-              <StatusRow label="3. Slide visuals rendered" done={Boolean(result?.generatedImages)} />
-            </CardContent>
-          </Card>
+                <StatusRow label="1. Trend angle selected" done={Boolean(result?.pack.topic)} />
+                <StatusRow label="2. Script + prompts generated" done={Boolean(result?.pack.slides.length)} />
+                <StatusRow
+                  label="3. Slide visuals rendered"
+                  done={Boolean(result?.pack.slides.some((slide) => Boolean(slide.imageUrl)))}
+                />
+              </CardContent>
+            </Card>
 
           <Card>
             <CardHeader>
@@ -342,16 +435,6 @@ export function CarouselAgentView({ collectionId }: { collectionId: string }) {
                 </div>
               </div>
 
-              <label className="flex items-center gap-2 text-sm text-slate-700">
-                <input
-                  type="checkbox"
-                  checked={generateImages}
-                  onChange={(event) => setGenerateImages(event.target.checked)}
-                  className="h-4 w-4 rounded border-slate-300 text-rose-500 focus:ring-rose-400"
-                />
-                Render images now (can take longer)
-              </label>
-
               <div className="flex flex-wrap gap-3">
                 <Button variant="primary" onClick={handleGenerate} isLoading={isGenerating}>
                   <Sparkles className="mr-2 h-4 w-4" />
@@ -367,7 +450,7 @@ export function CarouselAgentView({ collectionId }: { collectionId: string }) {
               </div>
 
               <p className="rounded-lg border border-sky-200 bg-sky-50 px-3 py-2 text-xs text-sky-700">
-                English-only safeguard is enforced. Text is intentionally short per slide so in-image typography stays readable and less glitchy.
+                First generate the full strategy + prompts, then render each slide image individually for tighter quality control.
               </p>
 
               {error ? (
@@ -478,11 +561,37 @@ export function CarouselAgentView({ collectionId }: { collectionId: string }) {
                             <ExternalLink className="h-3.5 w-3.5" />
                             Open image
                           </a>
+                          <div className="mt-2">
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              isLoading={Boolean(generatingSlideByNumber[slide.slideNumber])}
+                              onClick={() => {
+                                void handleGenerateSlideImage(slide.slideNumber);
+                              }}
+                            >
+                              <Sparkles className="mr-2 h-3.5 w-3.5" />
+                              Regenerate this slide image
+                            </Button>
+                          </div>
                         </div>
                       ) : (
-                        <div className="mt-3 flex items-center gap-2 rounded-lg border border-dashed border-slate-300 bg-slate-50 px-3 py-2 text-xs text-slate-500">
-                          <ImageIcon className="h-4 w-4" />
-                          No rendered image (prompts only mode).
+                        <div className="mt-3 rounded-lg border border-dashed border-slate-300 bg-slate-50 px-3 py-2 text-xs text-slate-500">
+                          <div className="mb-2 flex items-center gap-2">
+                            <ImageIcon className="h-4 w-4" />
+                            No image rendered yet for this slide.
+                          </div>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            isLoading={Boolean(generatingSlideByNumber[slide.slideNumber])}
+                            onClick={() => {
+                              void handleGenerateSlideImage(slide.slideNumber);
+                            }}
+                          >
+                            <Sparkles className="mr-2 h-3.5 w-3.5" />
+                            Generate this slide image
+                          </Button>
                         </div>
                       )}
                     </div>
