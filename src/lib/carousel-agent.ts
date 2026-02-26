@@ -611,9 +611,19 @@ function escapeSvgText(value: string): string {
     .replace(/'/g, "&apos;");
 }
 
+function sanitizeOverlayCopy(value: string): string {
+  return value
+    .replace(/[^\x20-\x7E]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 function buildTextOverlaySvg(slide: CarouselSlide): Buffer {
-  const rawTitle = (slide.overlayTitle || "").trim() || `Slide ${slide.slideNumber}`;
-  const rawLine = (slide.overlayLines[0] || "").trim();
+  const rawTitle =
+    sanitizeOverlayCopy((slide.overlayTitle || "").trim()) ||
+    sanitizeOverlayCopy((slide.headline || "").trim()) ||
+    `Slide ${slide.slideNumber}`;
+  const rawLine = sanitizeOverlayCopy((slide.overlayLines[0] || "").trim());
   const title = escapeSvgText(rawTitle.toUpperCase());
   const line = escapeSvgText(rawLine);
   const hasLine = line.length > 0;
@@ -622,7 +632,7 @@ function buildTextOverlaySvg(slide: CarouselSlide): Buffer {
   const lineFontSize = line.length > 28 ? 44 : 54;
 
   const lineMarkup = hasLine
-    ? `<text x="96" y="290" fill="#F8FAFC" stroke="#0F172A" stroke-opacity="0.45" stroke-width="2" paint-order="stroke fill" font-family="Arial, Helvetica, sans-serif" font-size="${lineFontSize}" font-weight="700">${line}</text>`
+    ? `<text x="96" y="290" fill="#F8FAFC" stroke="#0F172A" stroke-opacity="0.45" stroke-width="2" paint-order="stroke fill" font-family="sans-serif" font-size="${lineFontSize}" font-weight="700">${line}</text>`
     : "";
 
   const svg = `<svg width="1080" height="1350" viewBox="0 0 1080 1350" xmlns="http://www.w3.org/2000/svg">
@@ -634,7 +644,7 @@ function buildTextOverlaySvg(slide: CarouselSlide): Buffer {
   </defs>
   <rect x="64" y="64" width="952" height="${panelHeight}" rx="34" fill="#0F172A" fill-opacity="0.72"/>
   <rect x="64" y="64" width="952" height="${panelHeight}" rx="34" fill="url(#overlayGradient)"/>
-  <text x="96" y="190" fill="#FFFFFF" stroke="#0F172A" stroke-opacity="0.45" stroke-width="2" paint-order="stroke fill" font-family="Arial, Helvetica, sans-serif" font-size="${titleFontSize}" font-weight="900">${title}</text>
+  <text x="96" y="190" fill="#FFFFFF" stroke="#0F172A" stroke-opacity="0.45" stroke-width="2" paint-order="stroke fill" font-family="sans-serif" font-size="${titleFontSize}" font-weight="900">${title}</text>
   ${lineMarkup}
 </svg>`;
 
