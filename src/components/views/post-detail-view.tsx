@@ -111,6 +111,14 @@ type RecreatedHistoryItem = {
   slide_plans?: SlidePlan[] | null;
 };
 
+type FlattenedAsset = {
+  name: string;
+  prompt: string;
+};
+
+const DEFAULT_FALLBACK_ASSET_PROMPT =
+  "Clean abstract background with soft pink-to-blush gradients, suitable as a design asset for a social slide.";
+
 function isAdaptationMode(value: unknown): value is "app_context" | "variant_only" {
   return value === "app_context" || value === "variant_only";
 }
@@ -172,6 +180,38 @@ function extractSlideScriptSections(script: string | null | undefined): string[]
   if (!matches) return [];
 
   return matches.map((section) => section.trim()).filter((section) => section.length > 0);
+}
+
+function flattenAssetPrompts(slidePlans: SlidePlan[] | null | undefined): FlattenedAsset[] {
+  if (!Array.isArray(slidePlans)) return [];
+
+  const flattened: FlattenedAsset[] = [];
+
+  for (const plan of slidePlans) {
+    const headline = typeof plan.headline === "string" ? plan.headline.trim() : "";
+    const safeHeadline = headline || "Untitled slide";
+    const prompts = Array.isArray(plan.assetPrompts) ? plan.assetPrompts : [];
+
+    if (prompts.length === 0) {
+      flattened.push({
+        name: `Slide: ${safeHeadline}`,
+        prompt: DEFAULT_FALLBACK_ASSET_PROMPT,
+      });
+      continue;
+    }
+
+    for (const asset of prompts) {
+      const prompt = typeof asset.prompt === "string" ? asset.prompt.trim() : "";
+      const description = typeof asset.description === "string" ? asset.description.trim() : "";
+
+      flattened.push({
+        name: description || prompt.slice(0, 60) || `Slide: ${safeHeadline}`,
+        prompt: prompt || DEFAULT_FALLBACK_ASSET_PROMPT,
+      });
+    }
+  }
+
+  return flattened;
 }
 
 function HistorySlidePlans({ plans, itemId, script }: { plans: SlidePlan[]; itemId: string; script?: string | null }) {
@@ -245,7 +285,10 @@ function HistorySlidePlans({ plans, itemId, script }: { plans: SlidePlan[]; item
                   <div className="mt-1.5 border-t border-slate-100 pt-1.5">
                     <p className="text-[10px] font-medium uppercase tracking-wide text-slate-400">Assets</p>
                     {plan.assetPrompts.map((asset, k) => (
-                      <p key={k} className="text-[11px] text-slate-500">• {asset.description || asset.prompt}</p>
+                      <div key={k} className="mt-1 rounded border border-slate-100 bg-white p-2">
+                        <p className="text-[10px] font-semibold text-slate-500">{asset.description || `Asset ${k + 1}`}</p>
+                        <p className="mt-0.5 whitespace-pre-wrap text-[11px] leading-relaxed text-slate-600">{asset.prompt}</p>
+                      </div>
                     ))}
                   </div>
                 )}
@@ -338,6 +381,7 @@ export function PostDetailView({ postId }: PostDetailViewProps) {
   const [downloadingSetIds, setDownloadingSetIds] = useState<Record<string, boolean>>({});
   const [downloadingImageIds, setDownloadingImageIds] = useState<Record<string, boolean>>({});
   const [removeBgLoading, setRemoveBgLoading] = useState<Record<string, boolean>>({});
+  const [regeneratingHistoryAssetIds, setRegeneratingHistoryAssetIds] = useState<Record<string, boolean>>({});
 
   const handleRemoveBg = async (imageKey: string, imageUrl: string, versionId?: string, historyItemId?: string) => {
     setRemoveBgLoading((prev) => ({ ...prev, [imageKey]: true }));
@@ -655,6 +699,104 @@ export function PostDetailView({ postId }: PostDetailViewProps) {
     }
   };
 
+  const handleRegenerateHistoryAsset = async ({
+    item,
+    assetIndex,
+    assetPrompt,
+  }: {
+    item: RecreatedHistoryItem;
+    assetIndex: number;
+    assetPrompt: string;
+  }) => {
+    if (!activeCollection || !selectedPost) return;
+
+    const trimmedPrompt = assetPrompt.trim();
+    if (!trimmedPrompt) {
+      setError("Cannot regenerate this asset because its prompt is missing.");
+      return;
+    }
+
+    const regenerationKey = `${item.id}-${assetIndex}`;
+    setRegeneratingHistoryAssetIds((prev) => ({ ...prev, [regenerationKey]: true }));
+    setError("");
+
+    try {
+      const response = await fetch("/api/recreate/regenerate-asset", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          collectionId: activeCollection.id,
+          postId: selectedPost.id,
+          appName: activeCollection.app_name,
+          recreatedPostId: item.id,
+          assetIndex,
+          assetPrompt: trimmedPrompt,
+          imageGenerationModel,
+          reasoningModel,
+        }),
+      });
+
+      const data = (await response.json()) as {
+        error?: string;
+        imageUrl?: string;
+        generatedMediaUrls?: string[];
+        imageGenerationModel?: string;
+        reasoningModel?: string;
+      };
+
+      if (!response.ok) {
+        throw new Error(data.error || "Failed to regenerate this asset");
+      }
+
+      if (isReasoningModel(data.reasoningModel)) {
+        setReasoningModel(data.reasoningModel);
+      }
+
+      if (isImageGenerationModel(data.imageGenerationModel)) {
+        setImageGenerationModel(data.imageGenerationModel);
+      }
+
+      if (Array.isArray(data.generatedMediaUrls)) {
+        const updatedUrls = data.generatedMediaUrls.filter(
+          (url): url is string => typeof url === "string" && url.trim().length > 0
+        );
+        setHistory((prev) =>
+          prev.map((historyItem) =>
+            historyItem.id === item.id
+              ? {
+                ...historyItem,
+                status: "completed",
+                generated_media_urls: updatedUrls,
+              }
+              : historyItem
+          )
+        );
+      } else if (typeof data.imageUrl === "string") {
+        const regeneratedUrl = data.imageUrl;
+        setHistory((prev) =>
+          prev.map((historyItem) => {
+            if (historyItem.id !== item.id) return historyItem;
+
+            const nextUrls = Array.isArray(historyItem.generated_media_urls)
+              ? [...historyItem.generated_media_urls]
+              : [];
+            nextUrls[assetIndex] = regeneratedUrl;
+
+            return {
+              ...historyItem,
+              status: "completed",
+              generated_media_urls: nextUrls,
+            };
+          })
+        );
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to regenerate this asset");
+    } finally {
+      setRegeneratingHistoryAssetIds((prev) => ({ ...prev, [regenerationKey]: false }));
+    }
+  };
+
   const loadHistory = useCallback(async (options?: { silent?: boolean }) => {
     if (!activeCollection) return;
     const silent = Boolean(options?.silent);
@@ -697,6 +839,7 @@ export function PostDetailView({ postId }: PostDetailViewProps) {
     setPostingInstagramBySetId({});
     setInstagramResultBySetId({});
     setGeneratingHistoryBySetId({});
+    setRegeneratingHistoryAssetIds({});
 
     if (selectedPost.media_urls?.length) {
       setSelectedReferenceImages(selectedPost.media_urls);
@@ -928,6 +1071,7 @@ export function PostDetailView({ postId }: PostDetailViewProps) {
     setPostingInstagramBySetId({});
     setInstagramResultBySetId({});
     setGeneratingHistoryBySetId({});
+    setRegeneratingHistoryAssetIds({});
   };
 
   const isRecreationBlocked = Boolean(nicheState && !nicheState.canRecreate);
@@ -1596,22 +1740,13 @@ export function PostDetailView({ postId }: PostDetailViewProps) {
                         {Array.isArray(item.generated_media_urls) && item.generated_media_urls.length > 0 ? (
                           <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
                             {(() => {
-                              // Build flat list of asset descriptions from slide plans
-                              const assetNames: string[] = [];
-                              if (Array.isArray(item.slide_plans)) {
-                                for (const plan of item.slide_plans) {
-                                  if (plan.assetPrompts.length === 0) {
-                                    assetNames.push(`Slide: ${plan.headline}`);
-                                  } else {
-                                    for (const asset of plan.assetPrompts) {
-                                      assetNames.push(asset.description || asset.prompt.slice(0, 60));
-                                    }
-                                  }
-                                }
-                              }
+                              const flattenedAssets = flattenAssetPrompts(item.slide_plans);
                               return item.generated_media_urls.map((url, index) => {
                                 const imageId = `history-${item.id}-${index}`;
-                                const assetName = assetNames[index] || `Asset ${index + 1}`;
+                                const assetMeta = flattenedAssets[index];
+                                const assetName = assetMeta?.name || `Asset ${index + 1}`;
+                                const assetPrompt = assetMeta?.prompt || DEFAULT_FALLBACK_ASSET_PROMPT;
+                                const regenerationKey = `${item.id}-${index}`;
 
                                 return (
                                   <div
@@ -1626,6 +1761,15 @@ export function PostDetailView({ postId }: PostDetailViewProps) {
                                     <p className="truncate border-t border-slate-100 bg-slate-50 px-2 py-1 text-[10px] font-medium text-slate-500" title={assetName}>
                                       {assetName}
                                     </p>
+                                    <div className="border-t border-slate-100 bg-white px-2 py-1.5">
+                                      <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">Asset Prompt</p>
+                                      <p
+                                        className="mt-0.5 line-clamp-4 whitespace-pre-wrap text-[10px] leading-relaxed text-slate-600"
+                                        title={assetPrompt}
+                                      >
+                                        {assetPrompt}
+                                      </p>
+                                    </div>
                                     <div className="flex gap-1 border-t border-slate-200 bg-white p-1.5">
                                       <Button
                                         variant="ghost"
@@ -1652,6 +1796,23 @@ export function PostDetailView({ postId }: PostDetailViewProps) {
                                           <Eraser className="mr-1 h-3 w-3" />
                                         )}
                                         {removeBgLoading[imageId] ? "Removing..." : "Remove BG"}
+                                      </Button>
+                                      <Button
+                                        variant="ghost"
+                                        size="sm"
+                                        className="h-7 flex-1 justify-center p-0 text-[11px]"
+                                        disabled={item.status === "generating"}
+                                        isLoading={Boolean(regeneratingHistoryAssetIds[regenerationKey])}
+                                        onClick={() => {
+                                          void handleRegenerateHistoryAsset({
+                                            item,
+                                            assetIndex: index,
+                                            assetPrompt,
+                                          });
+                                        }}
+                                      >
+                                        <Sparkles className="mr-1 h-3 w-3" />
+                                        Regenerate
                                       </Button>
                                     </div>
                                   </div>
