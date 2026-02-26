@@ -258,7 +258,7 @@ function sanitizeSlides(value: unknown, topic: string): CarouselSlide[] {
         row.voiceScript,
         `${headline}${fallbackBodyBullets.length > 0 ? ` - ${fallbackBodyBullets.join(" ")}` : ""}`
       );
-      const voiceScript = truncateWords(voiceScriptRaw, 40);
+      const voiceScript = truncateWords(voiceScriptRaw, 120);
       const bodyBulletsFromVoice = deriveBodyLinesFromVoiceScript(voiceScript, {
         maxLines: 3,
         maxWordsPerLine: 12,
@@ -606,6 +606,7 @@ function buildFallbackSlides(topic: string): CarouselSlide[] {
 function buildImageGenerationPrompt(slide: CarouselSlide, topic: string, totalSlides: number): string {
   const textSpec = buildInImageTextSpec(slide);
   const bodyLines = textSpec.bodyLines.length > 0 ? textSpec.bodyLines : ["Simple practical steps"];
+  const fullVoiceScript = sanitizePromptTextLine(slide.voiceScript, undefined, 420);
   const textBoxTopPct = 8;
   const textBoxBottomPct = 40;
 
@@ -627,6 +628,9 @@ EXACT TEXT TO RENDER (ENGLISH ONLY):
 - TITLE: ${textSpec.title}
 ${bodyLines.map((line, index) => `- BODY ${index + 1}: ${line}`).join("\n")}
 
+FULL VOICE SCRIPT CONTEXT (DO NOT IGNORE):
+- ${fullVoiceScript || "N/A"}
+
 TEXT BOX SPEC (MANDATORY):
 - Place ALL text inside one rounded text panel in the top portion of the image.
 - Text panel bounds: top ${textBoxTopPct}% to bottom ${textBoxBottomPct}% of image height.
@@ -638,7 +642,8 @@ TEXT QUALITY + LAYOUT RULES:
 - Use a clean bold sans-serif style with strong contrast.
 - Keep all text inside a safe text box in the top area with generous margins (at least 8% from left/right edges and 6% from top).
 - Keep the full title and body lines visible; no clipping, no cropped words, no overlap with subject.
-- Keep line count tight (title + up to 2 short body lines).
+- If text is long, wrap naturally into additional lines inside the same text box instead of dropping or shortening words.
+- Preserve wording from EXACT TEXT TO RENDER; do not replace with shorter paraphrases.
 - Avoid decorative fonts, handwritten fonts, or ultra-condensed fonts.
 - If there is any conflict, prioritize text readability and complete rendering over decorative styling.
 
@@ -655,28 +660,37 @@ Additional guidance:
 ${slide.imagePrompt}`;
 }
 
-function sanitizePromptTextLine(value: string, maxWords: number, maxChars: number): string {
+function sanitizePromptTextLine(value: string, maxWords?: number, maxChars?: number): string {
   const cleaned = stripArabic(value)
     .replace(/\s+/g, " ")
     .trim();
   if (!cleaned) return "";
-  return truncateWords(cleaned, maxWords).slice(0, maxChars).trim();
+
+  const wordLimited = typeof maxWords === "number" && maxWords > 0
+    ? truncateWords(cleaned, maxWords)
+    : cleaned;
+
+  const charLimited = typeof maxChars === "number" && maxChars > 0
+    ? wordLimited.slice(0, maxChars)
+    : wordLimited;
+
+  return charLimited.trim();
 }
 
 function buildInImageTextSpec(slide: CarouselSlide): { title: string; bodyLines: string[] } {
   const title =
-    sanitizePromptTextLine(slide.overlayTitle || slide.headline || `Slide ${slide.slideNumber}`, 7, 46) ||
+    sanitizePromptTextLine(slide.overlayTitle || slide.headline || `Slide ${slide.slideNumber}`, 10, 72) ||
     `Slide ${slide.slideNumber}`;
 
   const voiceDerived = deriveBodyLinesFromVoiceScript(slide.voiceScript, {
     maxLines: 2,
-    maxWordsPerLine: 11,
+    maxWordsPerLine: 999,
   })
-    .map((line) => sanitizePromptTextLine(line, 11, 56))
+    .map((line) => sanitizePromptTextLine(line, undefined, 180))
     .filter((line) => line.length > 0);
 
   const fallback = [...slide.bodyBullets, ...slide.overlayLines]
-    .map((line) => sanitizePromptTextLine(line, 11, 56))
+    .map((line) => sanitizePromptTextLine(line, 26, 180))
     .filter((line) => line.length > 0)
     .slice(0, 2);
 
@@ -710,7 +724,7 @@ function comparableTokens(value: string): string[] {
 function getExpectedImageTextTokens(slide: CarouselSlide): string[] {
   const spec = buildInImageTextSpec(slide);
   const tokens = [...comparableTokens(spec.title), ...spec.bodyLines.flatMap((line) => comparableTokens(line))];
-  return Array.from(new Set(tokens));
+  return Array.from(new Set(tokens)).slice(0, 24);
 }
 
 function tokenRecallScore(expectedTokens: string[], observedText: string): number {

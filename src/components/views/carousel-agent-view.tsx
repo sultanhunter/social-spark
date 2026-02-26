@@ -84,19 +84,28 @@ function truncateWords(text: string, maxWords: number): string {
   return tokens.slice(0, maxWords).join(" ");
 }
 
-function sanitizePromptPreviewLine(value: string, maxWords: number, maxChars: number): string {
+function sanitizePromptPreviewLine(value: string, maxWords?: number, maxChars?: number): string {
   const cleaned = value
     .replace(/[\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF]+/g, "")
     .replace(/[^\x20-\x7E]/g, " ")
     .replace(/\s+/g, " ")
     .trim();
   if (!cleaned) return "";
-  return truncateWords(cleaned, maxWords).slice(0, maxChars).trim();
+
+  const wordLimited = typeof maxWords === "number" && maxWords > 0
+    ? truncateWords(cleaned, maxWords)
+    : cleaned;
+
+  const charLimited = typeof maxChars === "number" && maxChars > 0
+    ? wordLimited.slice(0, maxChars)
+    : wordLimited;
+
+  return charLimited.trim();
 }
 
 function deriveBodyLinesFromVoiceScriptPreview(
   voiceScript: string,
-  { maxLines = 2, maxWordsPerLine = 11 }: { maxLines?: number; maxWordsPerLine?: number } = {}
+  { maxLines = 2, maxWordsPerLine = 8 }: { maxLines?: number; maxWordsPerLine?: number } = {}
 ): string[] {
   const normalized = voiceScript
     .replace(/[\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF]+/g, "")
@@ -116,7 +125,7 @@ function deriveBodyLinesFromVoiceScriptPreview(
   const lines: string[] = [];
 
   for (const chunk of source) {
-    const line = sanitizePromptPreviewLine(chunk, maxWordsPerLine, 56);
+    const line = sanitizePromptPreviewLine(chunk, maxWordsPerLine, undefined);
     if (!line) continue;
     lines.push(line);
     if (lines.length >= maxLines) break;
@@ -127,16 +136,18 @@ function deriveBodyLinesFromVoiceScriptPreview(
 
 function buildInImageTextSpecPreview(slide: CarouselSlide): { title: string; bodyLines: string[] } {
   const title =
-    sanitizePromptPreviewLine(slide.overlayTitle || slide.headline || `Slide ${slide.slideNumber}`, 7, 46) ||
+    sanitizePromptPreviewLine(slide.overlayTitle || slide.headline || `Slide ${slide.slideNumber}`, 10, 72) ||
     `Slide ${slide.slideNumber}`;
 
   const voiceDerived = deriveBodyLinesFromVoiceScriptPreview(slide.voiceScript, {
     maxLines: 2,
-    maxWordsPerLine: 11,
-  });
+    maxWordsPerLine: 999,
+  })
+    .map((line) => sanitizePromptPreviewLine(line, undefined, 180))
+    .filter((line) => line.length > 0);
 
   const fallback = [...slide.bodyBullets, ...slide.overlayLines]
-    .map((line) => sanitizePromptPreviewLine(line, 11, 56))
+    .map((line) => sanitizePromptPreviewLine(line, 26, 180))
     .filter((line) => line.length > 0)
     .slice(0, 2);
 
@@ -149,6 +160,7 @@ function buildInImageTextSpecPreview(slide: CarouselSlide): { title: string; bod
 function buildImagePromptPreview(slide: CarouselSlide, topic: string, totalSlides: number): string {
   const textSpec = buildInImageTextSpecPreview(slide);
   const bodyLines = textSpec.bodyLines.length > 0 ? textSpec.bodyLines : ["Simple practical steps"];
+  const fullVoiceScript = sanitizePromptPreviewLine(slide.voiceScript, undefined, 420);
 
   return `Create a fully finished Instagram carousel slide image (${slide.slideNumber}/${totalSlides}) for Muslimah Pro.
 
@@ -160,14 +172,24 @@ EXACT TEXT TO RENDER (ENGLISH ONLY):
 - TITLE: ${textSpec.title}
 ${bodyLines.map((line, index) => `- BODY ${index + 1}: ${line}`).join("\n")}
 
+FULL VOICE SCRIPT CONTEXT (DO NOT IGNORE):
+- ${fullVoiceScript || "N/A"}
+
 TEXT BOX SPEC (MANDATORY):
 - Place ALL text inside one rounded text panel in the top portion of the image.
 - Text panel bounds: top 8% to bottom 40% of image height.
 - Keep at least 8% left/right margins and 6% top margin.
+- Keep woman/subject and key visual elements below the text panel.
 
 TEXT QUALITY + LAYOUT RULES:
-- Text must be sharp, legible, and correctly spelled.
-- Keep full title + body lines visible; no clipping, no crop, no overlap with subject.
+- Text must be sharp, legible, and correctly spelled; no gibberish, no placeholder squares, no corrupted glyphs.
+- Use a clean bold sans-serif style with strong contrast.
+- Keep all text inside a safe text box in the top area with generous margins (at least 8% from left/right edges and 6% from top).
+- Keep the full title and body lines visible; no clipping, no cropped words, no overlap with subject.
+- If text is long, wrap naturally into additional lines inside the same text box instead of dropping or shortening words.
+- Preserve wording from EXACT TEXT TO RENDER; do not replace with shorter paraphrases.
+- Avoid decorative fonts, handwritten fonts, or ultra-condensed fonts.
+- If there is any conflict, prioritize text readability and complete rendering over decorative styling.
 
 Slide direction:
 ${slide.visualDirection}
