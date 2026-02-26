@@ -279,16 +279,90 @@ function inferCategoryFromContext(topic: string, research: BlogResearchBrief): B
   return inferCategoryFromText(context);
 }
 
+function normalizeTopicFingerprint(topic: string): string {
+  return topic
+    .toLowerCase()
+    .replace(/\b20\d{2}\b/g, "")
+    .replace(/[^a-z0-9\s]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function tokenizeTopic(topic: string): Set<string> {
+  const stopWords = new Set([
+    "the", "and", "for", "with", "your", "from", "into", "about", "that", "this", "what", "how", "why", "guide",
+    "tips", "best", "women", "muslim", "muslimah", "pro", "to", "of", "in", "on", "a", "an",
+  ]);
+
+  const tokens = normalizeTopicFingerprint(topic)
+    .split(" ")
+    .filter((token) => token.length >= 3 && !stopWords.has(token));
+
+  return new Set(tokens);
+}
+
+function overlapScore(topicA: string, topicB: string): number {
+  const a = tokenizeTopic(topicA);
+  const b = tokenizeTopic(topicB);
+  if (a.size === 0 || b.size === 0) return 0;
+
+  let matches = 0;
+  for (const token of a) {
+    if (b.has(token)) matches += 1;
+  }
+
+  return matches / Math.max(a.size, b.size);
+}
+
+function isTopicTooSimilar(topic: string, blockedTopics: string[]): boolean {
+  const normalizedTopic = normalizeTopicFingerprint(topic);
+  if (!normalizedTopic) return false;
+
+  return blockedTopics.some((blocked) => {
+    const normalizedBlocked = normalizeTopicFingerprint(blocked);
+    if (!normalizedBlocked) return false;
+    if (normalizedTopic === normalizedBlocked) return true;
+    return overlapScore(normalizedTopic, normalizedBlocked) >= 0.58;
+  });
+}
+
+function pickDistinctTopic(
+  selectedTopic: string,
+  candidates: TrendingTopicCandidate[],
+  blockedTopics: string[]
+): string {
+  if (!isTopicTooSimilar(selectedTopic, blockedTopics)) return selectedTopic;
+
+  for (const candidate of candidates) {
+    if (!isTopicTooSimilar(candidate.title, blockedTopics)) {
+      return candidate.title;
+    }
+  }
+
+  return selectedTopic;
+}
+
 export async function discoverTrendingBlogTopic({
   appName,
   appContext,
   reasoningModel,
+  recentTopics,
 }: {
   appName: string;
   appContext: string;
   reasoningModel?: ReasoningModel;
+  recentTopics?: string[];
 }): Promise<TrendingTopicPlan> {
   const now = new Date().toISOString().slice(0, 10);
+  const blockedTopics = sanitizeStringArray(recentTopics, 18);
+  const blockedTopicPrompt = blockedTopics.length > 0
+    ? `
+TOPIC DIVERSITY CONSTRAINTS
+- Do not repeat or closely paraphrase these recent topics:
+${blockedTopics.map((topic) => `  - ${topic}`).join("\n")}
+- If many recent topics are Ramadan-focused, choose a different high-demand angle unless explicitly requested.
+- Prefer a fresh user intent (new pain point, stage, or question cluster).`
+    : "";
 
   const prompt = `You are a Muslimah-focused SEO strategist.
 
@@ -300,6 +374,7 @@ APP CONTEXT
 
 TASK
 Find trending and timely blog opportunities for Muslim women at the intersection of Islam + women + period/pregnancy/lifestyle guidance.
+${blockedTopicPrompt}
 
 Return only valid JSON with this exact schema:
 {
@@ -321,6 +396,7 @@ Rules:
 - Prioritize topics with clear demand and practical value.
 - Favor service-style topics and questions people actually search for.
 - Keep relevance strictly to Muslim women.
+- Do not default to Ramadan topics if a non-seasonal topic currently has strong demand.
 - Do not output markdown or explanations outside JSON.`;
 
   const requestPayload = {
@@ -334,10 +410,11 @@ Rules:
 
   const parsed = parseJsonFromModel<Partial<TrendingTopicPlan>>(result.response.text()) || {};
   const candidateTopics = sanitizeTopicCandidates(parsed.candidateTopics, 6);
-  const selectedTopic =
+  const selectedTopicRaw =
     asNonEmptyString(parsed.selectedTopic) ||
     candidateTopics[0]?.title ||
     "How Muslim Women Can Manage Period and Worship with Confidence";
+  const selectedTopic = pickDistinctTopic(selectedTopicRaw, candidateTopics, blockedTopics);
   const trendSignals = sanitizeStringArray(parsed.trendSignals, 8);
   const derivedCategory = inferCategoryFromText(
     `${selectedTopic} ${trendSignals.join(" ")} ${candidateTopics.map((item) => item.title).join(" ")}`

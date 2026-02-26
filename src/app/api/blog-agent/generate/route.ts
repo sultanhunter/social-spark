@@ -1,10 +1,101 @@
 import { NextRequest, NextResponse } from "next/server";
 import { BLOG_REASONING_MODEL } from "@/lib/blog-agent";
 import { isReasoningModel } from "@/lib/reasoning-model";
+import { hasBlogApiKey, listBlogPosts } from "@/lib/muslimah-blog-api";
 import { supabase } from "@/lib/supabase";
 
 function asNonEmptyString(value: unknown): string | null {
   return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
+}
+
+function normalizeTopicHint(value: string): string {
+  return value
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function pushUniqueTopic(target: string[], value: string) {
+  const clean = normalizeTopicHint(value);
+  if (!clean) return;
+  const normalized = clean.toLowerCase();
+  if (target.some((existing) => existing.toLowerCase() === normalized)) return;
+  target.push(clean);
+}
+
+async function collectRecentTopicHints(collectionId: string): Promise<string[]> {
+  const topicHints: string[] = [];
+
+  try {
+    const publishedResult = await listBlogPosts({
+      status: "published",
+      limit: 50,
+      authMode: "optional",
+    });
+
+    for (const post of publishedResult.posts) {
+      if (typeof post.title === "string") {
+        pushUniqueTopic(topicHints, post.title);
+      }
+    }
+
+    if (hasBlogApiKey()) {
+      try {
+        const draftResult = await listBlogPosts({
+          status: "draft",
+          limit: 50,
+          authMode: "required",
+        });
+
+        for (const post of draftResult.posts) {
+          if (typeof post.title === "string") {
+            pushUniqueTopic(topicHints, post.title);
+          }
+        }
+      } catch {
+      }
+    }
+  } catch {
+  }
+
+  try {
+    const { data: jobs } = await supabase
+      .from("blog_generation_jobs")
+      .select("generation_state")
+      .eq("collection_id", collectionId)
+      .order("created_at", { ascending: false })
+      .limit(24);
+
+    if (Array.isArray(jobs)) {
+      for (const job of jobs) {
+        const generationState =
+          typeof job.generation_state === "object" && job.generation_state !== null
+            ? (job.generation_state as Record<string, unknown>)
+            : null;
+
+        const topicFromState = asNonEmptyString(generationState?.topic);
+        if (topicFromState) {
+          pushUniqueTopic(topicHints, topicFromState);
+        }
+
+        const result =
+          generationState && typeof generationState.result === "object" && generationState.result !== null
+            ? (generationState.result as Record<string, unknown>)
+            : null;
+        const topicPlan =
+          result && typeof result.topicPlan === "object" && result.topicPlan !== null
+            ? (result.topicPlan as Record<string, unknown>)
+            : null;
+        const selectedTopic = asNonEmptyString(topicPlan?.selectedTopic);
+
+        if (selectedTopic) {
+          pushUniqueTopic(topicHints, selectedTopic);
+        }
+      }
+    }
+  } catch {
+  }
+
+  return topicHints.slice(0, 18);
 }
 
 async function markJobFailed(jobId: string, error: string) {
@@ -30,6 +121,7 @@ export async function POST(request: NextRequest) {
     const reasoningModel = isReasoningModel(body.reasoningModel)
       ? body.reasoningModel
       : BLOG_REASONING_MODEL;
+    const focus = asNonEmptyString(body.focus) || "";
 
     if (!collectionId) {
       return NextResponse.json({ error: "Collection ID is required." }, { status: 400 });
@@ -45,6 +137,17 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Collection not found." }, { status: 404 });
     }
 
+    const recentTopics = await collectRecentTopicHints(collectionId);
+    const ramadanHeavyHistory = recentTopics.filter((topic) => /\bramadan\b/i.test(topic)).length >= 2;
+    const effectiveFocus =
+      focus ||
+      (ramadanHeavyHistory
+        ? "Choose a non-Ramadan topic with high current demand for Muslim women (period health, pregnancy, worship routines, mindset, or lifestyle implementation)."
+        : "");
+    const topicDiversityBrief = recentTopics.length > 0
+      ? `Avoid repeating these recent topics: ${recentTopics.join(" | ")}`
+      : "Prefer a fresh topic angle with non-repetitive search intent.";
+
     const { data: job, error: insertError } = await supabase
       .from("blog_generation_jobs")
       .insert({
@@ -54,6 +157,9 @@ export async function POST(request: NextRequest) {
           kind: "blog_agent",
           status: "generating",
           reasoningModel,
+          focus: effectiveFocus,
+          recentTopics,
+          topicDiversityBrief,
           created_at: new Date().toISOString(),
         },
       })
@@ -91,6 +197,9 @@ export async function POST(request: NextRequest) {
           jobId: job.id,
           collectionId,
           reasoningModel,
+          focus: effectiveFocus,
+          recentTopics,
+          topicDiversityBrief,
         }),
       });
 
