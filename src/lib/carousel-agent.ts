@@ -45,6 +45,35 @@ const HOOK_STRATEGY_SUMMARY = [
   "Multiply winning angles into follow-up ideas.",
 ] as const;
 
+const ISLAMIC_AUTHENTICITY_GUARDRAILS = [
+  "Only include guidance aligned with Qur'an and authentic Sunnah in mainstream Sunni understanding.",
+  "Do not fabricate ayat, hadith, scholars, or fatwa claims.",
+  "Do not issue absolute fiqh rulings for personal edge-cases; advise consulting a qualified scholar where needed.",
+  "Avoid New Age framing (manifestation, universe guidance, energy healing, law of attraction).",
+  "Avoid empty motivational slogans that are not grounded in Islamic principles.",
+  "Keep language respectful, practical, and faith-anchored.",
+] as const;
+
+const NON_AUTHENTIC_PATTERNS: RegExp[] = [
+  /\bmanifest(ing|ation)?\b/i,
+  /\blaw of attraction\b/i,
+  /\btrust the universe\b/i,
+  /\buniverse has your back\b/i,
+  /\balign your energy\b/i,
+  /\bhigh[-\s]?vib(e|es)\b/i,
+  /\byour truth\b/i,
+];
+
+const GENERIC_MOTIVATION_PATTERNS: RegExp[] = [
+  /^\s*you got this\s*[!.]*\s*$/i,
+  /^\s*you are enough\s*[!.]*\s*$/i,
+  /^\s*just believe in yourself\s*[!.]*\s*$/i,
+  /^\s*anything is possible\s*[!.]*\s*$/i,
+  /^\s*never give up\s*[!.]*\s*$/i,
+];
+
+const ISLAMIC_ANCHOR_PATTERN = /\b(allah|quran|sunnah|dua|dhikr|salah|prayer|taqwa|sabr|istighfar|tawakkul)\b/i;
+
 export interface CarouselSlide {
   slideNumber: number;
   role:
@@ -216,6 +245,61 @@ function sanitizeEnglishText(value: unknown, fallback: string): string {
   const raw = asNonEmptyString(value) || fallback;
   const clean = stripArabic(raw);
   return clean || fallback;
+}
+
+function sanitizeFaithAlignedText(value: string, fallback = ""): string {
+  const clean = sanitizeEnglishText(value, fallback);
+  if (!clean) return "";
+
+  if (NON_AUTHENTIC_PATTERNS.some((pattern) => pattern.test(clean))) {
+    return "Rely on Allah, make dua, and take one practical step today.";
+  }
+
+  if (GENERIC_MOTIVATION_PATTERNS.some((pattern) => pattern.test(clean)) && !ISLAMIC_ANCHOR_PATTERN.test(clean)) {
+    return "Rely on Allah and follow practical, Sunnah-aligned steps.";
+  }
+
+  return clean;
+}
+
+function applyIslamicSafetyFallback(pack: CarouselPack): CarouselPack {
+  const safeSlides = ensureSlideRhythm(
+    pack.slides.map((slide) => {
+      const safeHeadline = sanitizeFaithAlignedText(slide.headline, slide.headline);
+      const safeBodyBullets = slide.bodyBullets
+        .map((line) => sanitizeFaithAlignedText(line, ""))
+        .filter((line) => line.length > 0)
+        .slice(0, 3);
+      const safeVoiceScript = sanitizeFaithAlignedText(slide.voiceScript, slide.voiceScript);
+      const safeOverlay = enforceOverlayTextConstraints(
+        sanitizeFaithAlignedText(slide.overlayTitle, safeHeadline),
+        slide.overlayLines
+          .map((line) => sanitizeFaithAlignedText(line, ""))
+          .filter((line) => line.length > 0)
+      );
+
+      return {
+        ...slide,
+        overlayTitle: safeOverlay.overlayTitle,
+        overlayLines: safeOverlay.overlayLines,
+        headline: safeHeadline,
+        bodyBullets: safeBodyBullets.length > 0 ? safeBodyBullets : slide.bodyBullets,
+        voiceScript: safeVoiceScript,
+        hookPurpose: sanitizeFaithAlignedText(slide.hookPurpose, slide.hookPurpose),
+      };
+    })
+  );
+
+  return {
+    ...pack,
+    caption: sanitizeFaithAlignedText(pack.caption, pack.caption),
+    cta: sanitizeFaithAlignedText(pack.cta, pack.cta),
+    spinOffAngles: pack.spinOffAngles
+      .map((line) => sanitizeFaithAlignedText(line, ""))
+      .filter((line) => line.length > 0)
+      .slice(0, 8),
+    slides: safeSlides,
+  };
 }
 
 function sanitizeSlideDensity(value: unknown): "dense" | "light" {
@@ -405,6 +489,8 @@ Return only valid JSON:
 Rules:
 - Keep it practical and faith-aligned.
 - Avoid unsafe or offensive phrasing.
+- Avoid New Age or secular spiritual framing.
+- Prioritize guidance consistent with Qur'an and authentic Sunnah in mainstream Sunni understanding.
 - No markdown outside JSON.`;
 
   const result = await generateWithSearchFallback(
@@ -431,6 +517,69 @@ Rules:
       "If slide one did not convince you, this one will: your current routine may be increasing your brain fog."
     ),
   };
+}
+
+async function reviewCarouselPackForIslamicAuthenticity({
+  pack,
+  appName,
+  reasoningModel,
+}: {
+  pack: CarouselPack;
+  appName: string;
+  reasoningModel?: ReasoningModel;
+}): Promise<CarouselPack> {
+  try {
+    const model = genAI.getGenerativeModel({ model: reasoningModel || DEFAULT_REASONING_MODEL });
+    const prompt = `You are a strict Islamic authenticity editor for ${appName} social content.
+
+Your task:
+- Review the carousel JSON and revise any copy that conflicts with authentic Islam.
+- Keep copy practical, clear, and faithful to Qur'an and authentic Sunnah.
+
+Islamic authenticity guardrails:
+${ISLAMIC_AUTHENTICITY_GUARDRAILS.map((rule) => `- ${rule}`).join("\n")}
+
+Output constraints:
+- Preserve the same JSON schema.
+- Keep slide count unchanged.
+- Keep role/density/imagePrompt/visualDirection structure intact.
+- Keep English-only text.
+- Keep overlayTitle <= 5 words and overlayLines <= 1 short line.
+
+Return ONLY valid JSON with this same schema:
+${JSON.stringify(pack, null, 2)}`;
+
+    const result = await model.generateContent({
+      contents: [{ role: "user", parts: [{ text: prompt }] }],
+      generationConfig: { temperature: 0.2 },
+    });
+
+    const parsed = parseJsonFromModel<Partial<CarouselPack>>(result.response.text()) || {};
+    const reviewedSlides = sanitizeSlides(parsed.slides, pack.topic).slice(0, pack.slides.length);
+
+    const safeReviewedSlides = reviewedSlides.length === pack.slides.length
+      ? ensureSlideRhythm(reviewedSlides)
+      : pack.slides;
+
+    return {
+      topic: sanitizeEnglishText(parsed.topic, pack.topic),
+      angleRationale: sanitizeEnglishText(parsed.angleRationale, pack.angleRationale),
+      caption: sanitizeEnglishText(parsed.caption, pack.caption),
+      cta: sanitizeEnglishText(parsed.cta, pack.cta),
+      hashtags: sanitizeStringArray(parsed.hashtags, 15).length > 0
+        ? sanitizeStringArray(parsed.hashtags, 15)
+        : pack.hashtags,
+      strategyChecklist: sanitizeStringArray(parsed.strategyChecklist, 12).length > 0
+        ? sanitizeStringArray(parsed.strategyChecklist, 12)
+        : pack.strategyChecklist,
+      spinOffAngles: sanitizeStringArray(parsed.spinOffAngles, 8).length > 0
+        ? sanitizeStringArray(parsed.spinOffAngles, 8)
+        : pack.spinOffAngles,
+      slides: safeReviewedSlides,
+    };
+  } catch {
+    return pack;
+  }
 }
 
 export async function generateCarouselPack({
@@ -483,6 +632,8 @@ MANDATORY REQUIREMENTS:
 - Image prompts must describe BACKGROUND ONLY (no rendered text) for each slide.
 - Visual style: hyperrealistic modest hijabi woman, premium editorial, text block area at top with negative space.
 - Each slide must include script text (voice-over or written narration).
+- Apply Islamic authenticity guardrails:
+${ISLAMIC_AUTHENTICITY_GUARDRAILS.map((rule) => `  - ${rule}`).join("\n")}
 
 Return JSON only with this exact schema:
 {
@@ -537,7 +688,7 @@ ${topicData.secondaryHook}`;
         [...slides, ...buildFallbackSlides(topicData.selectedTopic)].slice(0, 9)
       );
 
-  return {
+  const initialPack: CarouselPack = {
     topic: sanitizeEnglishText(parsed.topic, topicData.selectedTopic),
     angleRationale: sanitizeEnglishText(parsed.angleRationale, topicData.angleRationale),
     caption: sanitizeEnglishText(
@@ -553,6 +704,14 @@ ${topicData.secondaryHook}`;
     spinOffAngles: sanitizeStringArray(parsed.spinOffAngles, 8),
     slides: finalSlides,
   };
+
+  const reviewedPack = await reviewCarouselPackForIslamicAuthenticity({
+    pack: initialPack,
+    appName,
+    reasoningModel,
+  });
+
+  return applyIslamicSafetyFallback(reviewedPack);
 }
 
 function buildFallbackSlides(topic: string): CarouselSlide[] {
