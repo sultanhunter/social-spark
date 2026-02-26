@@ -255,10 +255,10 @@ function sanitizeSlides(value: unknown, topic: string): CarouselSlide[] {
         row.voiceScript,
         `${headline}${fallbackBodyBullets.length > 0 ? ` - ${fallbackBodyBullets.join(" ")}` : ""}`
       );
-      const voiceScript = truncateWords(voiceScriptRaw, 20);
+      const voiceScript = truncateWords(voiceScriptRaw, 40);
       const bodyBulletsFromVoice = deriveBodyLinesFromVoiceScript(voiceScript, {
-        maxLines: 2,
-        maxWordsPerLine: 8,
+        maxLines: 3,
+        maxWordsPerLine: 12,
       });
       const bodyBullets = bodyBulletsFromVoice.length > 0 ? bodyBulletsFromVoice : fallbackBodyBullets;
       const overlaySeedLines = sanitizeStringArray(row.overlayLines, 2).map((line) => stripArabic(line));
@@ -718,16 +718,10 @@ function splitTokenToChunks(token: string, maxChars: number): string[] {
   return chunks;
 }
 
-function appendEllipsis(line: string, maxChars: number): string {
-  if (maxChars <= 3) return line.slice(0, maxChars);
-  if (line.length + 3 <= maxChars) return `${line}...`;
-  return `${line.slice(0, Math.max(0, maxChars - 3)).trimEnd()}...`;
-}
-
 function wrapBitmapTextToLines(
   text: string,
   maxCharsPerLine: number,
-  maxLines: number
+  maxLines?: number
 ): { lines: string[]; truncated: boolean } {
   const normalized = normalizeBitmapText(text);
   if (!normalized) return { lines: [], truncated: false };
@@ -740,6 +734,7 @@ function wrapBitmapTextToLines(
   const lines: string[] = [];
   let current = "";
   let truncated = false;
+  const hasLineLimit = typeof maxLines === "number" && maxLines > 0;
 
   for (const token of tokens) {
     const candidate = current ? `${current} ${token}` : token;
@@ -750,7 +745,7 @@ function wrapBitmapTextToLines(
 
     if (current) {
       lines.push(current);
-      if (lines.length >= maxLines) {
+      if (hasLineLimit && lines.length >= maxLines) {
         truncated = true;
         break;
       }
@@ -762,7 +757,7 @@ function wrapBitmapTextToLines(
     }
 
     lines.push(token.slice(0, maxCharsPerLine));
-    if (lines.length >= maxLines) {
+    if (hasLineLimit && lines.length >= maxLines) {
       truncated = true;
       break;
     }
@@ -773,13 +768,9 @@ function wrapBitmapTextToLines(
     lines.push(current);
   }
 
-  if (lines.length > maxLines) {
+  if (hasLineLimit && lines.length > maxLines) {
     lines.splice(maxLines);
     truncated = true;
-  }
-
-  if (truncated && lines.length > 0) {
-    lines[lines.length - 1] = appendEllipsis(lines[lines.length - 1], maxCharsPerLine);
   }
 
   return { lines, truncated };
@@ -799,12 +790,14 @@ function createBitmapLayout({
   minScale,
   maxScale,
   maxLines,
+  maxHeight,
 }: {
   text: string;
   maxWidth: number;
   minScale: number;
   maxScale: number;
-  maxLines: number;
+  maxLines?: number;
+  maxHeight?: number;
 }): BitmapLayout {
   const unitsPerChar = 6;
   const fallbackLine = "SLIDE";
@@ -812,12 +805,13 @@ function createBitmapLayout({
   for (let scale = maxScale; scale >= minScale; scale -= 1) {
     const maxCharsPerLine = Math.max(1, Math.floor(maxWidth / (unitsPerChar * scale)));
     const wrapped = wrapBitmapTextToLines(text, maxCharsPerLine, maxLines);
-    if (!wrapped.truncated && wrapped.lines.length > 0) {
-      const lineHeight = 7 * scale;
-      const lineGap = Math.max(4, Math.floor(scale * 1.6));
-      const height = wrapped.lines.length * lineHeight + (wrapped.lines.length - 1) * lineGap;
-      return { lines: wrapped.lines, scale, lineHeight, lineGap, height };
-    }
+    if (wrapped.lines.length === 0 || wrapped.truncated) continue;
+
+    const lineHeight = 7 * scale;
+    const lineGap = Math.max(4, Math.floor(scale * 1.6));
+    const height = wrapped.lines.length * lineHeight + (wrapped.lines.length - 1) * lineGap;
+    if (typeof maxHeight === "number" && height > maxHeight) continue;
+    return { lines: wrapped.lines, scale, lineHeight, lineGap, height };
   }
 
   const safeScale = minScale;
@@ -867,18 +861,18 @@ function renderBitmapLayout({
 }
 
 function buildTextOverlaySvg(slide: CarouselSlide): Buffer {
+  const panelTop = 64;
+  const panelBottomMargin = 64;
+  const panelInnerBottomPadding = 40;
+
   const rawTitle =
     sanitizeOverlayCopy((slide.overlayTitle || "").trim()) ||
     sanitizeOverlayCopy((slide.headline || "").trim()) ||
     `Slide ${slide.slideNumber}`;
-  const voiceBodyLines = deriveBodyLinesFromVoiceScript(slide.voiceScript, {
-    maxLines: 2,
-    maxWordsPerLine: 10,
-  });
   const rawBodyText =
-    voiceBodyLines.join(" ") ||
-    sanitizeOverlayCopy((slide.bodyBullets[0] || "").trim()) ||
-    sanitizeOverlayCopy((slide.overlayLines[0] || "").trim());
+    sanitizeOverlayCopy(slide.voiceScript) ||
+    sanitizeOverlayCopy(slide.bodyBullets.join(" ")) ||
+    sanitizeOverlayCopy(slide.overlayLines.join(" "));
 
   const titleLayout = createBitmapLayout({
     text: rawTitle,
@@ -903,14 +897,16 @@ function buildTextOverlaySvg(slide: CarouselSlide): Buffer {
 
   const hasBody = normalizeBitmapText(rawBodyText).length > 0;
   const bodyY = titleMain.bottom + 24;
+  const maxPanelHeight = CAROUSEL_CANVAS.height - panelTop - panelBottomMargin;
+  const availableBodyHeight = Math.max(0, maxPanelHeight - (bodyY - panelTop) - panelInnerBottomPadding);
 
-  const bodyLayout = hasBody
+  const bodyLayout = hasBody && availableBodyHeight > 0
     ? createBitmapLayout({
       text: rawBodyText,
       maxWidth: 840,
       minScale: 4,
       maxScale: 10,
-      maxLines: 2,
+      maxHeight: availableBodyHeight,
     })
     : null;
 
@@ -932,7 +928,11 @@ function buildTextOverlaySvg(slide: CarouselSlide): Buffer {
     : null;
 
   const contentBottom = bodyMain ? bodyMain.bottom : titleMain.bottom;
-  const panelHeight = clamp(Math.round(contentBottom - 64 + 52), 250, 430);
+  const panelHeight = clamp(
+    Math.round(contentBottom - panelTop + panelInnerBottomPadding),
+    220,
+    maxPanelHeight
+  );
 
   const svg = `<svg width="1080" height="1350" viewBox="0 0 1080 1350" xmlns="http://www.w3.org/2000/svg">
   <defs>
@@ -941,8 +941,8 @@ function buildTextOverlaySvg(slide: CarouselSlide): Buffer {
       <stop offset="100%" stop-color="#1E293B" stop-opacity="0.72"/>
     </linearGradient>
   </defs>
-  <rect x="64" y="64" width="952" height="${panelHeight}" rx="34" fill="#0F172A" fill-opacity="0.72"/>
-  <rect x="64" y="64" width="952" height="${panelHeight}" rx="34" fill="url(#overlayGradient)"/>
+  <rect x="64" y="${panelTop}" width="952" height="${panelHeight}" rx="34" fill="#0F172A" fill-opacity="0.72"/>
+  <rect x="64" y="${panelTop}" width="952" height="${panelHeight}" rx="34" fill="url(#overlayGradient)"/>
   ${titleShadow.markup}
   ${titleMain.markup}
   ${bodyShadow ? bodyShadow.markup : ""}
