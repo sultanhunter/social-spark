@@ -53,7 +53,7 @@ export async function GET(request: NextRequest) {
       )
       .eq("collection_id", collectionId)
       .order("created_at", { ascending: false })
-      .limit(12);
+      .limit(100);
 
     if (generationsQuery.error) {
       if (tableMissing(generationsQuery.error.message)) {

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   AlertCircle,
   ArrowLeft,
@@ -210,8 +210,34 @@ export function CarouselAgentView({ collectionId }: { collectionId: string }) {
   const [generatingSlideByNumber, setGeneratingSlideByNumber] = useState<Record<number, boolean>>({});
   const [isLoadingHistory, setIsLoadingHistory] = useState(false);
   const [history, setHistory] = useState<CarouselHistoryEntry[]>([]);
+  const [selectedGenerationId, setSelectedGenerationId] = useState<string | null>(null);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
+  const selectedGenerationIdRef = useRef<string | null>(null);
+
+  const applySelectedEntry = useCallback((entry: CarouselHistoryEntry, announce: boolean = false) => {
+    selectedGenerationIdRef.current = entry.generationId;
+    setSelectedGenerationId(entry.generationId);
+
+    if (isReasoningModel(entry.model)) {
+      setReasoningModel(entry.model);
+    }
+    if (isImageGenerationModel(entry.imageModel)) {
+      setImageModel(entry.imageModel);
+    }
+
+    setResult({
+      generationId: entry.generationId,
+      model: entry.model,
+      imageModel: entry.imageModel,
+      generatedImages: entry.generatedImages,
+      pack: entry.pack,
+    });
+
+    if (announce) {
+      setSuccess(`Loaded saved pack (${entry.generationId.slice(0, 8)}).`);
+    }
+  }, []);
 
   const geminiImageModels = useMemo(
     () => IMAGE_GENERATION_MODELS.filter((model) => model.id.startsWith("gemini-")),
@@ -235,28 +261,24 @@ export function CarouselAgentView({ collectionId }: { collectionId: string }) {
       const generations = Array.isArray(data.generations) ? data.generations : [];
       setHistory(generations);
 
+      const preferredGenerationId = selectedGenerationIdRef.current;
+      if (preferredGenerationId) {
+        const selectedEntry = generations.find((entry) => entry.generationId === preferredGenerationId);
+        if (selectedEntry) {
+          applySelectedEntry(selectedEntry);
+          return;
+        }
+      }
+
       if (hydrateLatest && generations.length > 0) {
-        const latest = generations[0];
-        if (isReasoningModel(latest.model)) {
-          setReasoningModel(latest.model);
-        }
-        if (isImageGenerationModel(latest.imageModel)) {
-          setImageModel(latest.imageModel);
-        }
-        setResult({
-          generationId: latest.generationId,
-          model: latest.model,
-          imageModel: latest.imageModel,
-          generatedImages: latest.generatedImages,
-          pack: latest.pack,
-        });
+        applySelectedEntry(generations[0]);
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load saved carousel packs.");
     } finally {
       setIsLoadingHistory(false);
     }
-  }, [collectionId]);
+  }, [applySelectedEntry, collectionId]);
 
   useEffect(() => {
     void loadHistory(true);
@@ -294,10 +316,16 @@ export function CarouselAgentView({ collectionId }: { collectionId: string }) {
         setImageModel(data.imageModel);
       }
 
-      setResult(data);
+      const nextGenerationId = data.generationId || `${Date.now()}`;
+      selectedGenerationIdRef.current = nextGenerationId;
+      setSelectedGenerationId(nextGenerationId);
+      setResult({
+        ...data,
+        generationId: nextGenerationId,
+      });
       setHistory((prev) => {
         const nextEntry: CarouselHistoryEntry = {
-          generationId: data.generationId || `${Date.now()}`,
+          generationId: nextGenerationId,
           createdAt: new Date().toISOString(),
           model: data.model,
           imageModel: data.imageModel,
@@ -305,7 +333,7 @@ export function CarouselAgentView({ collectionId }: { collectionId: string }) {
           pack: data.pack,
         };
         const existing = prev.filter((entry) => entry.generationId !== nextEntry.generationId);
-        return [nextEntry, ...existing].slice(0, 12);
+        return [nextEntry, ...existing].slice(0, 100);
       });
       setSuccess(
         `Generated ${data.pack.slides.length} slide prompts and saved pack${data.generationId ? ` (${data.generationId.slice(0, 8)})` : ""}.`
@@ -358,6 +386,8 @@ export function CarouselAgentView({ collectionId }: { collectionId: string }) {
 
       const nextImageUrl = typeof data.imageUrl === "string" ? data.imageUrl : "";
       const nextGenerationId = data.generationId || result.generationId;
+      selectedGenerationIdRef.current = nextGenerationId;
+      setSelectedGenerationId(nextGenerationId);
 
       setResult((prev) => {
         if (!prev) return prev;
@@ -470,24 +500,23 @@ export function CarouselAgentView({ collectionId }: { collectionId: string }) {
               ) : history.length === 0 ? (
                 <p>No saved carousel packs yet.</p>
               ) : (
-                history.slice(0, 5).map((entry) => (
+                history.map((entry) => (
                   <button
                     key={entry.generationId}
                     type="button"
                     onClick={() => {
-                      setResult({
-                        generationId: entry.generationId,
-                        model: entry.model,
-                        imageModel: entry.imageModel,
-                        generatedImages: entry.generatedImages,
-                        pack: entry.pack,
-                      });
-                      setSuccess(`Loaded saved pack (${entry.generationId.slice(0, 8)}).`);
+                      applySelectedEntry(entry, true);
                     }}
-                    className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-left text-xs text-slate-700 transition hover:border-slate-300"
+                    className={`w-full rounded-lg border px-3 py-2 text-left text-xs transition ${
+                      selectedGenerationId === entry.generationId
+                        ? "border-rose-300 bg-rose-50 text-rose-700"
+                        : "border-slate-200 bg-white text-slate-700 hover:border-slate-300"
+                    }`}
                   >
-                    <p className="font-semibold text-slate-800">{entry.pack.topic || "Untitled topic"}</p>
-                    <p className="mt-0.5 text-slate-500">
+                    <p className={`font-semibold ${selectedGenerationId === entry.generationId ? "text-rose-800" : "text-slate-800"}`}>
+                      {entry.pack.topic || "Untitled topic"}
+                    </p>
+                    <p className={`mt-0.5 ${selectedGenerationId === entry.generationId ? "text-rose-600" : "text-slate-500"}`}>
                       {entry.pack.slides.length} slides • {entry.generatedImages ? "images rendered" : "prompts only"}
                     </p>
                   </button>
