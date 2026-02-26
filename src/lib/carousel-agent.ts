@@ -706,68 +706,164 @@ function normalizeBitmapText(text: string): string {
     .trim();
 }
 
-function fitBitmapTextToWidth(text: string, maxWidth: number, minScale: number, unitsPerChar = 6): string {
-  const normalized = normalizeBitmapText(text);
-  if (!normalized) return "";
+function splitTokenToChunks(token: string, maxChars: number): string[] {
+  if (token.length <= maxChars) return [token];
 
-  const maxChars = Math.max(1, Math.floor(maxWidth / Math.max(minScale * unitsPerChar, 1)));
-  if (normalized.length <= maxChars) return normalized;
-
-  if (maxChars <= 3) {
-    return normalized.slice(0, maxChars);
+  const chunks: string[] = [];
+  let cursor = 0;
+  while (cursor < token.length) {
+    chunks.push(token.slice(cursor, cursor + maxChars));
+    cursor += maxChars;
   }
-
-  const hardLimit = maxChars - 3;
-  const sliced = normalized.slice(0, hardLimit);
-  const lastSpace = sliced.lastIndexOf(" ");
-  const base = lastSpace >= Math.floor(hardLimit * 0.6) ? sliced.slice(0, lastSpace) : sliced;
-
-  return `${base.trim()}...`;
+  return chunks;
 }
 
-function renderBitmapLine({
+function appendEllipsis(line: string, maxChars: number): string {
+  if (maxChars <= 3) return line.slice(0, maxChars);
+  if (line.length + 3 <= maxChars) return `${line}...`;
+  return `${line.slice(0, Math.max(0, maxChars - 3)).trimEnd()}...`;
+}
+
+function wrapBitmapTextToLines(
+  text: string,
+  maxCharsPerLine: number,
+  maxLines: number
+): { lines: string[]; truncated: boolean } {
+  const normalized = normalizeBitmapText(text);
+  if (!normalized) return { lines: [], truncated: false };
+
+  const tokens = normalized
+    .split(" ")
+    .filter(Boolean)
+    .flatMap((token) => splitTokenToChunks(token, Math.max(1, maxCharsPerLine)));
+
+  const lines: string[] = [];
+  let current = "";
+  let truncated = false;
+
+  for (const token of tokens) {
+    const candidate = current ? `${current} ${token}` : token;
+    if (candidate.length <= maxCharsPerLine) {
+      current = candidate;
+      continue;
+    }
+
+    if (current) {
+      lines.push(current);
+      if (lines.length >= maxLines) {
+        truncated = true;
+        break;
+      }
+      current = token;
+      if (current.length > maxCharsPerLine) {
+        current = current.slice(0, maxCharsPerLine);
+      }
+      continue;
+    }
+
+    lines.push(token.slice(0, maxCharsPerLine));
+    if (lines.length >= maxLines) {
+      truncated = true;
+      break;
+    }
+    current = "";
+  }
+
+  if (!truncated && current) {
+    lines.push(current);
+  }
+
+  if (lines.length > maxLines) {
+    lines.splice(maxLines);
+    truncated = true;
+  }
+
+  if (truncated && lines.length > 0) {
+    lines[lines.length - 1] = appendEllipsis(lines[lines.length - 1], maxCharsPerLine);
+  }
+
+  return { lines, truncated };
+}
+
+type BitmapLayout = {
+  lines: string[];
+  scale: number;
+  lineHeight: number;
+  lineGap: number;
+  height: number;
+};
+
+function createBitmapLayout({
   text,
-  x,
-  y,
   maxWidth,
-  fill,
   minScale,
   maxScale,
+  maxLines,
 }: {
   text: string;
-  x: number;
-  y: number;
   maxWidth: number;
-  fill: string;
   minScale: number;
   maxScale: number;
-}): { markup: string; height: number; bottom: number } {
-  const normalized = fitBitmapTextToWidth(text, maxWidth, minScale) || "SLIDE";
-  const chars = [...normalized];
+  maxLines: number;
+}): BitmapLayout {
   const unitsPerChar = 6;
-  const suggestedScale = Math.floor(maxWidth / Math.max(chars.length * unitsPerChar, 1));
-  const scale = clamp(suggestedScale, minScale, maxScale);
-  const radius = Math.max(1, Math.floor(scale / 4));
+  const fallbackLine = "SLIDE";
 
+  for (let scale = maxScale; scale >= minScale; scale -= 1) {
+    const maxCharsPerLine = Math.max(1, Math.floor(maxWidth / (unitsPerChar * scale)));
+    const wrapped = wrapBitmapTextToLines(text, maxCharsPerLine, maxLines);
+    if (!wrapped.truncated && wrapped.lines.length > 0) {
+      const lineHeight = 7 * scale;
+      const lineGap = Math.max(4, Math.floor(scale * 1.6));
+      const height = wrapped.lines.length * lineHeight + (wrapped.lines.length - 1) * lineGap;
+      return { lines: wrapped.lines, scale, lineHeight, lineGap, height };
+    }
+  }
+
+  const safeScale = minScale;
+  const maxCharsPerLine = Math.max(1, Math.floor(maxWidth / (unitsPerChar * safeScale)));
+  const wrapped = wrapBitmapTextToLines(text || fallbackLine, maxCharsPerLine, maxLines);
+  const lines = wrapped.lines.length > 0 ? wrapped.lines : [fallbackLine];
+  const lineHeight = 7 * safeScale;
+  const lineGap = Math.max(4, Math.floor(safeScale * 1.6));
+  const height = lines.length * lineHeight + (lines.length - 1) * lineGap;
+
+  return { lines, scale: safeScale, lineHeight, lineGap, height };
+}
+
+function renderBitmapLayout({
+  layout,
+  x,
+  y,
+  fill,
+}: {
+  layout: BitmapLayout;
+  x: number;
+  y: number;
+  fill: string;
+}): { markup: string; bottom: number } {
+  const radius = Math.max(1, Math.floor(layout.scale / 4));
   let markup = "";
 
-  chars.forEach((char, index) => {
-    const glyph = BITMAP_FONT[char] || BITMAP_FONT[" "];
-    const baseX = x + index * unitsPerChar * scale;
+  layout.lines.forEach((line, lineIndex) => {
+    const lineY = y + lineIndex * (layout.lineHeight + layout.lineGap);
+    [...line].forEach((char, index) => {
+      const glyph = BITMAP_FONT[char] || BITMAP_FONT[" "];
+      const baseX = x + index * 6 * layout.scale;
 
-    for (let row = 0; row < glyph.length; row += 1) {
-      const rowPattern = glyph[row];
-      for (let col = 0; col < rowPattern.length; col += 1) {
-        if (rowPattern[col] !== "1") continue;
-        const rectX = baseX + col * scale;
-        const rectY = y + row * scale;
-        markup += `<rect x="${rectX}" y="${rectY}" width="${scale}" height="${scale}" rx="${radius}" fill="${fill}"/>`;
+      for (let row = 0; row < glyph.length; row += 1) {
+        const rowPattern = glyph[row];
+        for (let col = 0; col < rowPattern.length; col += 1) {
+          if (rowPattern[col] !== "1") continue;
+          const rectX = baseX + col * layout.scale;
+          const rectY = lineY + row * layout.scale;
+          markup += `<rect x="${rectX}" y="${rectY}" width="${layout.scale}" height="${layout.scale}" rx="${radius}" fill="${fill}"/>`;
+        }
       }
-    }
+    });
   });
 
-  const height = 7 * scale;
-  return { markup, height, bottom: y + height };
+  return { markup, bottom: y + layout.height };
 }
 
 function buildTextOverlaySvg(slide: CarouselSlide): Buffer {
@@ -775,55 +871,68 @@ function buildTextOverlaySvg(slide: CarouselSlide): Buffer {
     sanitizeOverlayCopy((slide.overlayTitle || "").trim()) ||
     sanitizeOverlayCopy((slide.headline || "").trim()) ||
     `Slide ${slide.slideNumber}`;
-  const rawLine = sanitizeOverlayCopy((slide.overlayLines[0] || "").trim());
+  const voiceBodyLines = deriveBodyLinesFromVoiceScript(slide.voiceScript, {
+    maxLines: 2,
+    maxWordsPerLine: 10,
+  });
+  const rawBodyText =
+    voiceBodyLines.join(" ") ||
+    sanitizeOverlayCopy((slide.bodyBullets[0] || "").trim()) ||
+    sanitizeOverlayCopy((slide.overlayLines[0] || "").trim());
 
-  const titleShadow = renderBitmapLine({
+  const titleLayout = createBitmapLayout({
     text: rawTitle,
+    maxWidth: 840,
+    minScale: 6,
+    maxScale: 16,
+    maxLines: 2,
+  });
+
+  const titleShadow = renderBitmapLayout({
+    layout: titleLayout,
     x: 98,
-    y: 120,
-    maxWidth: 840,
+    y: 114,
     fill: "#0F172A",
-    minScale: 6,
-    maxScale: 16,
   });
-  const titleMain = renderBitmapLine({
-    text: rawTitle,
+  const titleMain = renderBitmapLayout({
+    layout: titleLayout,
     x: 96,
-    y: 118,
-    maxWidth: 840,
+    y: 112,
     fill: "#FFFFFF",
-    minScale: 6,
-    maxScale: 16,
   });
 
-  const hasLine = normalizeBitmapText(rawLine).length > 0;
-  const lineY = titleMain.bottom + 28;
+  const hasBody = normalizeBitmapText(rawBodyText).length > 0;
+  const bodyY = titleMain.bottom + 24;
 
-  const lineShadow = hasLine
-    ? renderBitmapLine({
-      text: rawLine,
+  const bodyLayout = hasBody
+    ? createBitmapLayout({
+      text: rawBodyText,
+      maxWidth: 840,
+      minScale: 4,
+      maxScale: 10,
+      maxLines: 2,
+    })
+    : null;
+
+  const bodyShadow = bodyLayout
+    ? renderBitmapLayout({
+      layout: bodyLayout,
       x: 98,
-      y: lineY + 2,
-      maxWidth: 840,
+      y: bodyY + 2,
       fill: "#0F172A",
-      minScale: 4,
-      maxScale: 10,
     })
     : null;
-  const lineMain = hasLine
-    ? renderBitmapLine({
-      text: rawLine,
+  const bodyMain = bodyLayout
+    ? renderBitmapLayout({
+      layout: bodyLayout,
       x: 96,
-      y: lineY,
-      maxWidth: 840,
+      y: bodyY,
       fill: "#E2E8F0",
-      minScale: 4,
-      maxScale: 10,
     })
     : null;
 
-  const contentBottom = lineMain ? lineMain.bottom : titleMain.bottom;
-  const panelHeight = clamp(Math.round(contentBottom - 64 + 56), 230, 390);
+  const contentBottom = bodyMain ? bodyMain.bottom : titleMain.bottom;
+  const panelHeight = clamp(Math.round(contentBottom - 64 + 52), 250, 430);
 
   const svg = `<svg width="1080" height="1350" viewBox="0 0 1080 1350" xmlns="http://www.w3.org/2000/svg">
   <defs>
@@ -836,8 +945,8 @@ function buildTextOverlaySvg(slide: CarouselSlide): Buffer {
   <rect x="64" y="64" width="952" height="${panelHeight}" rx="34" fill="url(#overlayGradient)"/>
   ${titleShadow.markup}
   ${titleMain.markup}
-  ${lineShadow ? lineShadow.markup : ""}
-  ${lineMain ? lineMain.markup : ""}
+  ${bodyShadow ? bodyShadow.markup : ""}
+  ${bodyMain ? bodyMain.markup : ""}
 </svg>`;
 
   return Buffer.from(svg);
