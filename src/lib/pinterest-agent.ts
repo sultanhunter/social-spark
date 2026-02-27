@@ -297,6 +297,8 @@ Layout guidance:
 - Bottom zone: CTA and footer note.
 - Support visuals: minimal geometric icons and separators with consistent stroke style.
 - Preserve a safe text zone with no visual clutter behind critical text.
+- Keep strict safe margins for text: at least 90px from left/right edges, 120px from top, and 120px from bottom.
+- Never place headline or CTA touching edges; all text must remain fully visible inside canvas.
 
 Quality constraints:
 - Spell all words correctly.
@@ -545,6 +547,7 @@ Rules:
 - Keep final design elegant and feminine while preserving readability.
 - Must keep typography integrated in the generated artwork itself.
 - Do not suggest separate text overlays or external post-processing steps.
+- Include explicit text-safe margins so top and bottom text never gets clipped.
 - No logos, no watermark, no UI chrome.
 - Keep it concrete and image-model-friendly.
 - No markdown, no prose outside JSON.`;
@@ -687,6 +690,8 @@ Final render requirements:
 - Keep one clear focal subject and a readable infographic text hierarchy.
 - Typography must be integrated in-image with clean kerning and line spacing.
 - Use text-safe composition so important words are never occluded by subject or ornament.
+- Keep all text fully inside canvas with safe margins (left/right 90px, top/bottom 120px).
+- Never crop or clip headline at top or CTA/footer at bottom.
 - Output image only, no extra commentary.`;
   const model = genAI.getGenerativeModel({ model: resolvedImageModel });
 
@@ -707,7 +712,11 @@ Final render requirements:
 
   const inputBuffer = Buffer.from(imagePart.inlineData.data, "base64");
   const normalized = await sharp(inputBuffer)
-    .resize(PINTEREST_CANVAS.width, PINTEREST_CANVAS.height, { fit: "cover", position: "center" })
+    .resize(PINTEREST_CANVAS.width, PINTEREST_CANVAS.height, {
+      fit: "contain",
+      background: BRAND_COLOR_PAPER,
+      position: "center",
+    })
     .png()
     .toBuffer();
 

@@ -580,12 +580,13 @@ export function PinterestAgentView({ collectionId }: { collectionId: string }) {
 
                   {imageUrl ? (
                     <div className="rounded-lg border border-slate-200 bg-slate-50 p-2">
-                      <div
-                        className="h-[460px] w-full rounded-md bg-cover bg-center"
-                        style={{ backgroundImage: `url(${imageUrl})` }}
-                        role="img"
-                        aria-label={result.pack.altText}
-                      />
+                      <div className="flex justify-center rounded-md bg-white p-2">
+                        <img
+                          src={imageUrl}
+                          alt={result.pack.altText}
+                          className="h-auto max-h-[640px] w-full max-w-[430px] rounded-md object-contain"
+                        />
+                      </div>
                       <a
                         href={imageUrl}
                         target="_blank"
