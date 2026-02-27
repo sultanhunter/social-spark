@@ -43,15 +43,38 @@ CREATE TABLE recreated_posts (
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
+-- Pinterest agent generations table
+CREATE TABLE pinterest_agent_generations (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  collection_id UUID NOT NULL REFERENCES collections(id) ON DELETE CASCADE,
+  focus TEXT,
+  topic TEXT NOT NULL,
+  angle_rationale TEXT,
+  style_theme TEXT,
+  style_direction TEXT,
+  script JSONB DEFAULT '{}'::jsonb,
+  image_prompt TEXT,
+  alt_text TEXT,
+  image_url TEXT,
+  reasoning_model VARCHAR(120),
+  image_model VARCHAR(120),
+  status TEXT NOT NULL DEFAULT 'completed',
+  payload JSONB DEFAULT '{}'::jsonb,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
 -- Create indexes for better query performance
 CREATE INDEX idx_saved_posts_collection_id ON saved_posts(collection_id);
 CREATE INDEX idx_recreated_posts_collection_id ON recreated_posts(collection_id);
 CREATE INDEX idx_recreated_posts_original_post_id ON recreated_posts(original_post_id);
+CREATE INDEX idx_pinterest_agent_generations_collection_id ON pinterest_agent_generations(collection_id);
 
 -- Enable Row Level Security (RLS)
 ALTER TABLE collections ENABLE ROW LEVEL SECURITY;
 ALTER TABLE saved_posts ENABLE ROW LEVEL SECURITY;
 ALTER TABLE recreated_posts ENABLE ROW LEVEL SECURITY;
+ALTER TABLE pinterest_agent_generations ENABLE ROW LEVEL SECURITY;
 
 -- Create policies (allow all for now - customize based on your auth setup)
 CREATE POLICY "Enable all operations for all users" ON collections
@@ -61,4 +84,7 @@ CREATE POLICY "Enable all operations for all users" ON saved_posts
   FOR ALL USING (true) WITH CHECK (true);
 
 CREATE POLICY "Enable all operations for all users" ON recreated_posts
+  FOR ALL USING (true) WITH CHECK (true);
+
+CREATE POLICY "Enable all operations for all users" ON pinterest_agent_generations
   FOR ALL USING (true) WITH CHECK (true);

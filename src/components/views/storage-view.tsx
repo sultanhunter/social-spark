@@ -12,6 +12,7 @@ import {
   Plus,
   Sparkles,
   Video,
+  Pin,
 } from "lucide-react";
 import { useAppStore } from "@/store/app-store";
 import { Button } from "@/components/ui/button";
@@ -135,6 +136,13 @@ export function StorageView() {
               >
                 <BookMarked className="mr-2 h-4 w-4" />
                 Blog Agent
+              </Button>
+              <Button
+                variant="outline"
+                onClick={() => router.push(`/collections/${activeCollection.id}/pinterest-agent`)}
+              >
+                <Pin className="mr-2 h-4 w-4" />
+                Pinterest Agent
               </Button>
               <Button variant="primary" onClick={() => setAddPostOpen(true)}>
                 <Plus className="mr-2 h-4 w-4" />

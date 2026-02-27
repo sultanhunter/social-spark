@@ -106,6 +106,26 @@ export interface CarouselAgentGenerationSlide {
   created_at: string;
 }
 
+export interface PinterestAgentGeneration {
+  id: string;
+  collection_id: string;
+  focus: string | null;
+  topic: string;
+  angle_rationale: string;
+  style_theme: string;
+  style_direction: string;
+  script: Record<string, unknown>;
+  image_prompt: string;
+  alt_text: string;
+  image_url: string | null;
+  reasoning_model: string;
+  image_model: string;
+  status: "completed" | "failed";
+  payload: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
+}
+
 // SQL Schema for Supabase (run this in Supabase SQL editor)
 export const SCHEMA_SQL = `
 -- Collections table
@@ -203,4 +223,28 @@ CREATE INDEX IF NOT EXISTS idx_carousel_agent_generations_collection
 
 CREATE INDEX IF NOT EXISTS idx_carousel_agent_generation_slides_generation
   ON carousel_agent_generation_slides(generation_id);
+
+-- Pinterest agent generations table
+CREATE TABLE IF NOT EXISTS pinterest_agent_generations (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  collection_id UUID REFERENCES collections(id) ON DELETE CASCADE,
+  focus TEXT,
+  topic TEXT NOT NULL,
+  angle_rationale TEXT,
+  style_theme TEXT,
+  style_direction TEXT,
+  script JSONB DEFAULT '{}'::jsonb,
+  image_prompt TEXT,
+  alt_text TEXT,
+  image_url TEXT,
+  reasoning_model VARCHAR(120),
+  image_model VARCHAR(120),
+  status VARCHAR(50) DEFAULT 'completed',
+  payload JSONB DEFAULT '{}'::jsonb,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+  updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_pinterest_agent_generations_collection
+  ON pinterest_agent_generations(collection_id);
 `;
