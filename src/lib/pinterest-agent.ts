@@ -18,6 +18,8 @@ const BRAND_COLOR_SECONDARY = "#EEB4C3";
 const BRAND_COLOR_TERTIARY = "#F7DFD6";
 const BRAND_COLOR_INK = "#1E2433";
 const BRAND_COLOR_PAPER = "#FFFDFB";
+const REFERENCE_VISUAL_VIBE =
+  "Dreamy feminine editorial look: soft sakura-like floral framing near the top, airy blush background, gentle illustrated Muslimah character in lower area, delicate particles, high polish.";
 
 const genAI = new GoogleGenerativeAI(process.env.GOOGLE_GEMINI_API_KEY!);
 
@@ -178,7 +180,7 @@ function fallbackPinPack(topic = "Faith-aligned wellness routine for busy Muslim
       "This topic gives practical, save-worthy guidance in a format that performs well as Pinterest infographics.",
     styleTheme: "Modern editorial infographic",
     styleDirection:
-      "Premium editorial infographic using brand palette with clean grid, soft depth, and high-contrast typography.",
+      "Premium dreamy editorial infographic using brand palette, layered depth, floral motifs, and polished typography.",
     script: {
       targetAudience: "Muslim women balancing worship, energy, and daily responsibilities",
       objective: "Deliver a quick action checklist readers can save and apply today",
@@ -257,6 +259,10 @@ Canvas and composition:
 - Keep generous margins, crisp alignment, and strict visual hierarchy.
 - Use a 12-column grid feel with balanced whitespace and modular cards.
 
+Reference style vibe:
+- ${REFERENCE_VISUAL_VIBE}
+- Keep this as inspiration only; still prioritize infographic readability and structure.
+
 Brand color lock (MANDATORY):
 - Primary accent: ${BRAND_COLOR_PRIMARY}
 - Secondary accent: ${BRAND_COLOR_SECONDARY}
@@ -270,6 +276,13 @@ Color and typography:
 - Add subtle depth: soft gradients, very light grain texture, and clean shadows.
 - Contrast must be high for readability.
 
+Visual richness requirements (MANDATORY):
+- Avoid flat/plain background. Use layered backdrop with gradient + texture.
+- Add decorative top framing motifs (botanical blossoms, curved branches, or abstract floral ornaments).
+- Include one tasteful hero subject in lower third (modest Muslimah illustration or editorial figure) that supports the topic.
+- Use section cards/chips with rounded corners, soft shadows, and clear separation.
+- Add tiny accent elements (sparkles, dots, petals, subtle dividers) for premium detail density.
+
 EXACT TEXT TO RENDER (ENGLISH ONLY):
 ${buildExactTextSpec(pack.script)}
 
@@ -279,6 +292,7 @@ Layout guidance:
 - Main body: 3-5 section blocks, each with header and concise bullets.
 - Bottom zone: CTA and footer note.
 - Support visuals: minimal geometric icons and separators with consistent stroke style.
+- Preserve a safe text zone with no visual clutter behind critical text.
 
 Quality constraints:
 - Spell all words correctly.
@@ -366,7 +380,8 @@ Rules:
 - Pinterest infographic format, practical and save-worthy.
 - Keep headline short and powerful.
 - Create 3-5 sections with concise points.
-- Style theme should fit premium editorial design and brand-friendly blush/rose aesthetics.
+- Style theme should feel art-directed and emotionally appealing, not generic.
+- Prefer expressive themes like dreamy floral editorial, luxe feminine collage, or clean premium kawaii editorial.
 - Keep claims responsible and aligned with app context.
 - No markdown, no prose outside JSON.`;
 
@@ -455,6 +470,10 @@ Rules:
 - Must enforce brand colors using the provided HEX values.
 - Mention color palette, typography style, spacing, icon treatment, and card hierarchy.
 - Require a highly professional visual outcome: polished, balanced, and premium.
+- Use the reference vibe: ${REFERENCE_VISUAL_VIBE}
+- Prevent blandness: include layered depth, decorative motifs, focal subject, and intentional art direction.
+- Ban generic output: do not describe plain white backgrounds or default template-like layouts.
+- Keep final design elegant and feminine while preserving readability.
 - No logos, no watermark, no UI chrome.
 - Keep it concrete and image-model-friendly.
 - No markdown, no prose outside JSON.`;
@@ -476,7 +495,7 @@ Rules:
     return {
       styleDirection: sanitizeEnglishText(
         parsed.styleDirection,
-        "Premium brand-aligned editorial infographic with clean hierarchy, soft gradients, and high readability"
+        "Premium brand-aligned dreamy editorial infographic with layered depth, decorative motifs, and high readability"
       ),
       imagePrompt: sanitizeEnglishText(parsed.imagePrompt, fallbackPrompt),
       altText: sanitizeEnglishText(
@@ -487,7 +506,7 @@ Rules:
   } catch {
     return {
       styleDirection:
-        "Premium brand-aligned editorial infographic with clean hierarchy, soft gradients, and high readability",
+        "Premium brand-aligned dreamy editorial infographic with layered depth, decorative motifs, and high readability",
       imagePrompt: fallbackPrompt,
       altText: `Pinterest infographic about ${pack.topic}`,
     };
@@ -586,6 +605,8 @@ export async function generatePinterestPinImage({
 Final render requirements:
 - Enforce brand palette: ${BRAND_COLOR_PRIMARY}, ${BRAND_COLOR_SECONDARY}, ${BRAND_COLOR_TERTIARY}, ${BRAND_COLOR_INK}, ${BRAND_COLOR_PAPER}.
 - Keep the design premium, polished, and professionally typeset.
+- Include visual depth and decorative motifs so the output is not flat or template-like.
+- Keep one clear focal subject and a readable infographic text hierarchy.
 - Output image only, no extra commentary.`;
   const model = genAI.getGenerativeModel({ model: resolvedImageModel });
 
