@@ -1,7 +1,7 @@
 export const IMAGE_GENERATION_MODELS = [
   {
-    id: "gemini-2.5-flash-image",
-    label: "gemini-2.5-flash-image (Nano Banana)",
+    id: "gemini-3.1-flash-image-preview",
+    label: "gemini-3.1-flash-image-preview (Nano Banana 2)",
   },
   {
     id: "gemini-3-pro-image-preview",

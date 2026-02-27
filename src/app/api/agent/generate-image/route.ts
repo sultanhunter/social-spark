@@ -39,10 +39,10 @@ export async function POST(request: NextRequest) {
             );
         }
 
-        // Generate image with Gemini 2.5 Flash Image model
+        // Generate image with Gemini 3.1 Flash Image Preview model
         const genAI = new GoogleGenerativeAI(apiKey);
         const model = genAI.getGenerativeModel({
-            model: "gemini-2.5-flash-image",
+            model: "gemini-3.1-flash-image-preview",
         });
 
         const result = await model.generateContent({

@@ -4,7 +4,7 @@ import { uploadToR2 } from "@/lib/r2";
 import type { BlogResearchBrief } from "@/lib/blog-agent";
 import type { ReasoningModel } from "@/lib/reasoning-model";
 
-export const BLOG_IMAGE_MODEL = "gemini-2.5-flash-image";
+export const BLOG_IMAGE_MODEL = "gemini-3.1-flash-image-preview";
 
 interface PartWithInlineData {
   inlineData?: {

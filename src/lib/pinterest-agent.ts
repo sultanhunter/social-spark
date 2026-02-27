@@ -10,7 +10,7 @@ import {
   DEFAULT_REASONING_MODEL,
 } from "@/lib/reasoning-model";
 
-export const DEFAULT_PINTEREST_IMAGE_MODEL: ImageGenerationModel = "gemini-2.5-flash-image";
+export const DEFAULT_PINTEREST_IMAGE_MODEL: ImageGenerationModel = "gemini-3.1-flash-image-preview";
 
 const PINTEREST_CANVAS = { width: 1000, height: 1500 };
 

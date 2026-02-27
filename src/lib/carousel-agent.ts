@@ -12,7 +12,7 @@ import {
   DEFAULT_REASONING_MODEL,
 } from "@/lib/reasoning-model";
 
-export const DEFAULT_CAROUSEL_IMAGE_MODEL: ImageGenerationModel = "gemini-2.5-flash-image";
+export const DEFAULT_CAROUSEL_IMAGE_MODEL: ImageGenerationModel = "gemini-3.1-flash-image-preview";
 
 const CAROUSEL_CANVAS = { width: 1080, height: 1350 };
 const CAROUSEL_STYLE_REFERENCE_PATHS = [
