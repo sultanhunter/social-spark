@@ -13,6 +13,11 @@ import {
 export const DEFAULT_PINTEREST_IMAGE_MODEL: ImageGenerationModel = "gemini-3.1-flash-image-preview";
 
 const PINTEREST_CANVAS = { width: 1000, height: 1500 };
+const BRAND_COLOR_PRIMARY = "#F36F97";
+const BRAND_COLOR_SECONDARY = "#EEB4C3";
+const BRAND_COLOR_TERTIARY = "#F7DFD6";
+const BRAND_COLOR_INK = "#1E2433";
+const BRAND_COLOR_PAPER = "#FFFDFB";
 
 const genAI = new GoogleGenerativeAI(process.env.GOOGLE_GEMINI_API_KEY!);
 
@@ -173,7 +178,7 @@ function fallbackPinPack(topic = "Faith-aligned wellness routine for busy Muslim
       "This topic gives practical, save-worthy guidance in a format that performs well as Pinterest infographics.",
     styleTheme: "Modern editorial infographic",
     styleDirection:
-      "Soft blush and sand palette, high-contrast typography, clean icon row, roomy spacing, premium editorial infographic look.",
+      "Premium editorial infographic using brand palette with clean grid, soft depth, and high-contrast typography.",
     script: {
       targetAudience: "Muslim women balancing worship, energy, and daily responsibilities",
       objective: "Deliver a quick action checklist readers can save and apply today",
@@ -248,12 +253,21 @@ function buildFallbackImagePrompt(pack: PinterestPinPack): string {
 
 Canvas and composition:
 - Vertical 2:3 layout at 1000x1500.
-- Keep generous margins and clear visual hierarchy.
-- Use a clean editorial infographic style with subtle texture, rounded cards, and structured spacing.
+- Use a polished, agency-level visual style (behance/dribbble quality).
+- Keep generous margins, crisp alignment, and strict visual hierarchy.
+- Use a 12-column grid feel with balanced whitespace and modular cards.
+
+Brand color lock (MANDATORY):
+- Primary accent: ${BRAND_COLOR_PRIMARY}
+- Secondary accent: ${BRAND_COLOR_SECONDARY}
+- Soft background tint: ${BRAND_COLOR_TERTIARY}
+- Main text color: ${BRAND_COLOR_INK}
+- Base background: ${BRAND_COLOR_PAPER}
+- Do not switch to random palettes. Keep the final design clearly brand-aligned.
 
 Color and typography:
-- Palette: warm sand, rose clay, deep charcoal, soft cream accents.
-- Typography: bold modern sans-serif headline, readable medium-weight body text.
+- Typography: bold modern sans-serif headline, readable medium-weight body, clear line-height rhythm.
+- Add subtle depth: soft gradients, very light grain texture, and clean shadows.
 - Contrast must be high for readability.
 
 EXACT TEXT TO RENDER (ENGLISH ONLY):
@@ -264,13 +278,15 @@ Layout guidance:
 - Mid zone: value props in short chips/cards.
 - Main body: 3-5 section blocks, each with header and concise bullets.
 - Bottom zone: CTA and footer note.
+- Support visuals: minimal geometric icons and separators with consistent stroke style.
 
 Quality constraints:
 - Spell all words correctly.
 - No gibberish characters.
 - No watermark, no logo, no UI chrome.
+- Keep text fully readable and professionally typeset; no awkward wrapping.
 - Respectful modest visual language for Muslim women audience.
-- Final image must look like a finished, share-worthy Pinterest infographic.`;
+- Final image must look like a finished, conversion-oriented Pinterest infographic from a senior designer.`;
 }
 
 async function generateWithSearchFallback(
@@ -350,6 +366,7 @@ Rules:
 - Pinterest infographic format, practical and save-worthy.
 - Keep headline short and powerful.
 - Create 3-5 sections with concise points.
+- Style theme should fit premium editorial design and brand-friendly blush/rose aesthetics.
 - Keep claims responsible and aligned with app context.
 - No markdown, no prose outside JSON.`;
 
@@ -417,10 +434,17 @@ Task:
 Generate a detailed image prompt for an image model.
 The prompt must preserve the script text structure and produce a polished infographic pin.
 
+Brand palette to enforce:
+- ${BRAND_COLOR_PRIMARY} (primary)
+- ${BRAND_COLOR_SECONDARY} (secondary)
+- ${BRAND_COLOR_TERTIARY} (soft background)
+- ${BRAND_COLOR_INK} (text)
+- ${BRAND_COLOR_PAPER} (base)
+
 Return valid JSON only:
 {
   "styleDirection": "short style direction",
-  "imagePrompt": "detailed prompt, 180-320 words",
+  "imagePrompt": "detailed prompt, 220-420 words",
   "altText": "concise alt text"
 }
 
@@ -428,7 +452,9 @@ Rules:
 - English only.
 - Must explicitly include exact text blocks to render from the script.
 - Mention vertical Pinterest composition and layout zones.
-- Mention color palette, typography style, spacing, and icon treatment.
+- Must enforce brand colors using the provided HEX values.
+- Mention color palette, typography style, spacing, icon treatment, and card hierarchy.
+- Require a highly professional visual outcome: polished, balanced, and premium.
 - No logos, no watermark, no UI chrome.
 - Keep it concrete and image-model-friendly.
 - No markdown, no prose outside JSON.`;
@@ -450,7 +476,7 @@ Rules:
     return {
       styleDirection: sanitizeEnglishText(
         parsed.styleDirection,
-        "Editorial infographic with clean hierarchy, soft gradients, and high readability"
+        "Premium brand-aligned editorial infographic with clean hierarchy, soft gradients, and high readability"
       ),
       imagePrompt: sanitizeEnglishText(parsed.imagePrompt, fallbackPrompt),
       altText: sanitizeEnglishText(
@@ -461,7 +487,7 @@ Rules:
   } catch {
     return {
       styleDirection:
-        "Editorial infographic with clean hierarchy, soft gradients, and high readability",
+        "Premium brand-aligned editorial infographic with clean hierarchy, soft gradients, and high readability",
       imagePrompt: fallbackPrompt,
       altText: `Pinterest infographic about ${pack.topic}`,
     };
@@ -555,7 +581,12 @@ export async function generatePinterestPinImage({
     throw new Error("Pinterest agent currently supports Gemini image models only.");
   }
 
-  const prompt = `${pack.imagePrompt}\n\nRender requirement: output image only, no extra commentary.`;
+  const prompt = `${pack.imagePrompt}
+
+Final render requirements:
+- Enforce brand palette: ${BRAND_COLOR_PRIMARY}, ${BRAND_COLOR_SECONDARY}, ${BRAND_COLOR_TERTIARY}, ${BRAND_COLOR_INK}, ${BRAND_COLOR_PAPER}.
+- Keep the design premium, polished, and professionally typeset.
+- Output image only, no extra commentary.`;
   const model = genAI.getGenerativeModel({ model: resolvedImageModel });
 
   const result = await model.generateContent({
