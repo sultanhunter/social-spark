@@ -20,6 +20,8 @@ const BRAND_COLOR_INK = "#1E2433";
 const BRAND_COLOR_PAPER = "#FFFDFB";
 const REFERENCE_VISUAL_VIBE =
   "Dreamy feminine editorial look: soft sakura-like floral framing near the top, airy blush background, gentle illustrated Muslimah character in lower area, delicate particles, high polish.";
+const REFERENCE_RENDER_QUALITY_VIBE =
+  "High-finish illustration quality similar to premium Pinterest Islamic art: serene environment depth, soft cinematic lighting, clean cel-shaded forms, elegant architecture details, polished edges, intentional composition.";
 
 const genAI = new GoogleGenerativeAI(process.env.GOOGLE_GEMINI_API_KEY!);
 
@@ -261,6 +263,7 @@ Canvas and composition:
 
 Reference style vibe:
 - ${REFERENCE_VISUAL_VIBE}
+- ${REFERENCE_RENDER_QUALITY_VIBE}
 - Keep this as inspiration only; still prioritize infographic readability and structure.
 
 Brand color lock (MANDATORY):
@@ -282,6 +285,7 @@ Visual richness requirements (MANDATORY):
 - Include one tasteful hero subject in lower third (modest Muslimah illustration or editorial figure) that supports the topic.
 - Use section cards/chips with rounded corners, soft shadows, and clear separation.
 - Add tiny accent elements (sparkles, dots, petals, subtle dividers) for premium detail density.
+- Text must be rendered as part of the same final artwork (integrated typography), not as detached overlay blocks.
 
 EXACT TEXT TO RENDER (ENGLISH ONLY):
 ${buildExactTextSpec(pack.script)}
@@ -301,6 +305,69 @@ Quality constraints:
 - Keep text fully readable and professionally typeset; no awkward wrapping.
 - Respectful modest visual language for Muslim women audience.
 - Final image must look like a finished, conversion-oriented Pinterest infographic from a senior designer.`;
+}
+
+async function polishSingleShotPrompt({
+  draftPrompt,
+  pack,
+  reasoningModel,
+}: {
+  draftPrompt: string;
+  pack: PinterestPinPack;
+  reasoningModel?: ReasoningModel;
+}): Promise<string> {
+  const model = genAI.getGenerativeModel({ model: reasoningModel || DEFAULT_REASONING_MODEL });
+
+  const prompt = `You are refining one final image prompt for a single-shot Pinterest generation.
+
+Goal:
+- Maximize professional visual quality in one generation.
+- Keep all text integrated inside the generated artwork.
+- Keep brand palette strict.
+
+Brand colors (must be explicit in final prompt):
+- ${BRAND_COLOR_PRIMARY}
+- ${BRAND_COLOR_SECONDARY}
+- ${BRAND_COLOR_TERTIARY}
+- ${BRAND_COLOR_INK}
+- ${BRAND_COLOR_PAPER}
+
+Topic: ${pack.topic}
+Style theme: ${pack.styleTheme}
+Current style direction: ${pack.styleDirection}
+
+Exact text blocks that must appear:
+${buildExactTextSpec(pack.script)}
+
+Draft prompt:
+${draftPrompt}
+
+Return JSON only:
+{
+  "imagePrompt": "single polished prompt, 260-480 words"
+}
+
+Hard constraints:
+- Single cohesive artwork (no external editing steps, no separate text layer language).
+- Integrated typography with clear hierarchy and text-safe areas.
+- Cinematic but soft lighting, clean edges, refined depth.
+- No flat/template look.
+- No watermarks, no logos, no random symbols, no gibberish text.
+- No markdown, no prose outside JSON.`;
+
+  try {
+    const result = await model.generateContent({
+      contents: [{ role: "user", parts: [{ text: prompt }] }],
+      generationConfig: {
+        temperature: 0.35,
+      },
+    });
+
+    const parsed = parseJsonFromModel<{ imagePrompt?: string }>(result.response.text()) || {};
+    return sanitizeEnglishText(parsed.imagePrompt, draftPrompt);
+  } catch {
+    return draftPrompt;
+  }
 }
 
 async function generateWithSearchFallback(
@@ -382,6 +449,7 @@ Rules:
 - Create 3-5 sections with concise points.
 - Style theme should feel art-directed and emotionally appealing, not generic.
 - Prefer expressive themes like dreamy floral editorial, luxe feminine collage, or clean premium kawaii editorial.
+- Also prefer premium serene illustration direction with cinematic depth when relevant.
 - Keep claims responsible and aligned with app context.
 - No markdown, no prose outside JSON.`;
 
@@ -471,9 +539,12 @@ Rules:
 - Mention color palette, typography style, spacing, icon treatment, and card hierarchy.
 - Require a highly professional visual outcome: polished, balanced, and premium.
 - Use the reference vibe: ${REFERENCE_VISUAL_VIBE}
+- Use render quality vibe: ${REFERENCE_RENDER_QUALITY_VIBE}
 - Prevent blandness: include layered depth, decorative motifs, focal subject, and intentional art direction.
 - Ban generic output: do not describe plain white backgrounds or default template-like layouts.
 - Keep final design elegant and feminine while preserving readability.
+- Must keep typography integrated in the generated artwork itself.
+- Do not suggest separate text overlays or external post-processing steps.
 - No logos, no watermark, no UI chrome.
 - Keep it concrete and image-model-friendly.
 - No markdown, no prose outside JSON.`;
@@ -492,12 +563,19 @@ Rules:
       altText?: string;
     }>(result.response.text()) || {};
 
+    const draftImagePrompt = sanitizeEnglishText(parsed.imagePrompt, fallbackPrompt);
+    const polishedImagePrompt = await polishSingleShotPrompt({
+      draftPrompt: draftImagePrompt,
+      pack,
+      reasoningModel,
+    });
+
     return {
       styleDirection: sanitizeEnglishText(
         parsed.styleDirection,
         "Premium brand-aligned dreamy editorial infographic with layered depth, decorative motifs, and high readability"
       ),
-      imagePrompt: sanitizeEnglishText(parsed.imagePrompt, fallbackPrompt),
+      imagePrompt: polishedImagePrompt,
       altText: sanitizeEnglishText(
         parsed.altText,
         `Pinterest infographic about ${pack.topic}`
@@ -607,6 +685,8 @@ Final render requirements:
 - Keep the design premium, polished, and professionally typeset.
 - Include visual depth and decorative motifs so the output is not flat or template-like.
 - Keep one clear focal subject and a readable infographic text hierarchy.
+- Typography must be integrated in-image with clean kerning and line spacing.
+- Use text-safe composition so important words are never occluded by subject or ornament.
 - Output image only, no extra commentary.`;
   const model = genAI.getGenerativeModel({ model: resolvedImageModel });
 
