@@ -63,6 +63,12 @@ function toFormatAnalysis(row: VideoFormatRow): VideoFormatAnalysis {
         ? row.format_type
         : "hybrid",
     formatSignature: row.format_signature,
+    analysisMethod: "frame_aware",
+    sampledFrameCount: 0,
+    sampledFrameSources: [],
+    directMediaUrl: null,
+    visualSignals: [],
+    onScreenTextPatterns: [],
     summary: row.summary,
     whyItWorks: Array.isArray(row.why_it_works) ? row.why_it_works : [],
     hookPatterns: Array.isArray(row.hook_patterns) ? row.hook_patterns : [],

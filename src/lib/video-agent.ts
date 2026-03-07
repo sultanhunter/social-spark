@@ -1,11 +1,16 @@
+import { randomUUID } from "crypto";
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import { fetchWithProxy } from "@/lib/proxy-fetch";
 import { extractPlatform } from "@/lib/utils";
 import { DEFAULT_REASONING_MODEL, type ReasoningModel } from "@/lib/reasoning-model";
+import { extractVideoFrames } from "@/lib/social-extractor";
 
 const genAI = new GoogleGenerativeAI(process.env.GOOGLE_GEMINI_API_KEY || "");
 
 type NormalizedFormatType = "ugc" | "ai_video" | "hybrid" | "editorial";
+type AnalysisMethod = "frame_aware";
+type InlineImagePart = { inlineData: { data: string; mimeType: string } };
+const FRAME_SAMPLE_TARGET = 6;
 
 export interface VideoSourceMetadata {
   url: string;
@@ -20,6 +25,12 @@ export interface VideoFormatAnalysis {
   formatName: string;
   formatType: NormalizedFormatType;
   formatSignature: string;
+  analysisMethod: AnalysisMethod;
+  sampledFrameCount: number;
+  sampledFrameSources: string[];
+  directMediaUrl: string | null;
+  visualSignals: string[];
+  onScreenTextPatterns: string[];
   summary: string;
   whyItWorks: string[];
   hookPatterns: string[];
@@ -210,6 +221,48 @@ function extractMetaContent(html: string, key: string): string | null {
   return null;
 }
 
+async function buildVisualEvidence(source: VideoSourceMetadata): Promise<{
+  method: AnalysisMethod;
+  parts: InlineImagePart[];
+  sampledFrameSources: string[];
+  directMediaUrl: string | null;
+}> {
+  if (source.platform !== "instagram" && source.platform !== "tiktok") {
+    throw new Error(
+      `Strict frame-aware analysis is currently supported only for Instagram/TikTok links. Received platform: ${source.platform}`
+    );
+  }
+
+  const sessionId = randomUUID().slice(0, 8);
+  const frameExtraction = await extractVideoFrames(source.url, source.platform, {
+    sessionId,
+    frameCount: FRAME_SAMPLE_TARGET,
+    frameWidth: 960,
+  });
+
+  const frameParts = frameExtraction.frames
+    .filter((frame) => typeof frame.data === "string" && frame.data.length > 0)
+    .map((frame) => ({
+      inlineData: {
+        data: frame.data,
+        mimeType: frame.mimeType || "image/jpeg",
+      },
+    }));
+
+  if (frameParts.length === 0) {
+    throw new Error(
+      "No frames were extracted by remote extractor. Strict frame-aware analysis requires at least one sampled frame."
+    );
+  }
+
+  return {
+    method: "frame_aware",
+    parts: frameParts,
+    sampledFrameSources: ["remote_extractor_frames"],
+    directMediaUrl: frameExtraction.videoUrl,
+  };
+}
+
 export async function fetchVideoSourceMetadata(url: string): Promise<VideoSourceMetadata> {
   const platform = extractPlatform(url);
   let title: string | null = null;
@@ -265,6 +318,8 @@ export async function analyzeVideoFormatFromSource(
   requireGeminiKey();
   const model = genAI.getGenerativeModel({ model: reasoningModel });
 
+  const visualEvidence = await buildVisualEvidence(source);
+
   const prompt = `You are a short-form video format analyst.
 
 Task:
@@ -277,17 +332,26 @@ SOURCE VIDEO:
 - Description: ${source.description || "N/A"}
 - User Notes: ${source.userNotes || "N/A"}
 
+VISUAL EVIDENCE:
+- analysisMethod: ${visualEvidence.method}
+- sampledFramesAttached: ${visualEvidence.parts.length}
+- sampledFrameSources: ${visualEvidence.sampledFrameSources.join(", ") || "none"}
+- directMediaUrl: ${visualEvidence.directMediaUrl || "N/A"}
+
 OUTPUT RULES:
 - Return strict JSON only.
 - formatType must be one of: ugc, ai_video, hybrid, editorial.
 - formatSignature must be stable across similar videos, lowercase snake_case, 3-6 words.
 - Focus on structure and repeatable production system (hook type, shot style, edit rhythm), not topic specifics.
+- Extract visible text overlays from attached frames when possible.
 
 JSON SHAPE:
 {
   "formatName": "string",
   "formatType": "ugc|ai_video|hybrid|editorial",
   "formatSignature": "string",
+  "visualSignals": ["string"],
+  "onScreenTextPatterns": ["string"],
   "summary": "string",
   "whyItWorks": ["string"],
   "hookPatterns": ["string"],
@@ -300,7 +364,11 @@ JSON SHAPE:
   "confidence": 0.0
 }`;
 
-  const result = await model.generateContent(prompt);
+  const payload = [{ text: prompt }, ...visualEvidence.parts] as Array<
+    { text: string } | InlineImagePart
+  >;
+
+  const result = await model.generateContent(payload);
   const parsed = parseJsonFromModel(result.response.text());
   const row = isRecord(parsed) ? parsed : {};
 
@@ -313,6 +381,12 @@ JSON SHAPE:
     formatName,
     formatType,
     formatSignature,
+    analysisMethod: visualEvidence.method,
+    sampledFrameCount: visualEvidence.parts.length,
+    sampledFrameSources: visualEvidence.sampledFrameSources,
+    directMediaUrl: visualEvidence.directMediaUrl,
+    visualSignals: sanitizeStringArray(row.visualSignals, 8),
+    onScreenTextPatterns: sanitizeStringArray(row.onScreenTextPatterns, 10),
     summary: sanitizeString(row.summary, "Reusable short-form structure with a strong hook and clear CTA."),
     whyItWorks: sanitizeStringArray(row.whyItWorks, 6),
     hookPatterns: sanitizeStringArray(row.hookPatterns, 6),

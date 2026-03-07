@@ -35,6 +35,7 @@ type LibraryVideo = {
   thumbnail_url: string | null;
   user_notes: string | null;
   analysis_confidence: number | null;
+  analysis_payload?: Record<string, unknown> | null;
   created_at: string;
 };
 
@@ -117,6 +118,28 @@ function formatTypeVariant(type: string): "default" | "video" | "success" {
   if (type === "ugc") return "video";
   if (type === "ai_video") return "success";
   return "default";
+}
+
+function getVideoAnalysisMethod(video: LibraryVideo): string | null {
+  const payload = video.analysis_payload;
+  if (!payload || typeof payload !== "object") return null;
+
+  const formatAnalysis = (payload as Record<string, unknown>).formatAnalysis;
+  if (!formatAnalysis || typeof formatAnalysis !== "object") return null;
+
+  const method = (formatAnalysis as Record<string, unknown>).analysisMethod;
+  return typeof method === "string" ? method : null;
+}
+
+function getVideoFrameCount(video: LibraryVideo): number | null {
+  const payload = video.analysis_payload;
+  if (!payload || typeof payload !== "object") return null;
+
+  const formatAnalysis = (payload as Record<string, unknown>).formatAnalysis;
+  if (!formatAnalysis || typeof formatAnalysis !== "object") return null;
+
+  const frameCount = (formatAnalysis as Record<string, unknown>).sampledFrameCount;
+  return typeof frameCount === "number" && Number.isFinite(frameCount) ? frameCount : null;
 }
 
 export function VideoAgentView({ collectionId }: { collectionId: string }) {
@@ -517,6 +540,8 @@ export function VideoAgentView({ collectionId }: { collectionId: string }) {
                     <div className="grid gap-2 md:grid-cols-2">
                       {selectedFormat.videos.map((video) => {
                         const isActive = selectedVideoId === video.id;
+                        const analysisMethod = getVideoAnalysisMethod(video);
+                        const frameCount = getVideoFrameCount(video);
 
                         return (
                           <button
@@ -541,6 +566,12 @@ export function VideoAgentView({ collectionId }: { collectionId: string }) {
                             </p>
                             <div className="mt-2 flex items-center gap-2">
                               <Badge variant="default">{video.platform}</Badge>
+                              {analysisMethod ? (
+                                <Badge variant="default">
+                                  {analysisMethod.replace(/_/g, " ")}
+                                  {typeof frameCount === "number" ? ` (${frameCount} frames)` : ""}
+                                </Badge>
+                              ) : null}
                               <a
                                 href={video.source_url}
                                 target="_blank"

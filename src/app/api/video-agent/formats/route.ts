@@ -34,6 +34,7 @@ type VideoFormatVideoRow = {
   thumbnail_url: string | null;
   user_notes: string | null;
   analysis_confidence: number | null;
+  analysis_payload: Record<string, unknown> | null;
   created_at: string;
 };
 
@@ -59,7 +60,7 @@ export async function GET(request: NextRequest) {
         .order("updated_at", { ascending: false }),
       supabase
         .from("video_format_videos")
-        .select("id, collection_id, format_id, source_url, platform, title, description, thumbnail_url, user_notes, analysis_confidence, created_at")
+        .select("id, collection_id, format_id, source_url, platform, title, description, thumbnail_url, user_notes, analysis_confidence, analysis_payload, created_at")
         .eq("collection_id", collectionId)
         .order("created_at", { ascending: false }),
     ]);
