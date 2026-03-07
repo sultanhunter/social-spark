@@ -193,6 +193,18 @@ function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
+function limitAppNameMentions(text: string, appName: string, state: { count: number }): string {
+  const normalizedAppName = cleanText(appName);
+  if (!normalizedAppName) return text;
+
+  const pattern = new RegExp(escapeRegExp(normalizedAppName), "gi");
+
+  return text.replace(pattern, (match) => {
+    state.count += 1;
+    return state.count <= 1 ? match : "your tracker";
+  });
+}
+
 function decodeHtmlEntities(value: string): string {
   return value
     .replace(/&amp;/g, "&")
@@ -524,6 +536,12 @@ RESPONSE RULES:
 - Keep output execution-ready, not high-level fluff.
 - Use clear timing beats for 15-35 second vertical video.
 - Include Higgsfield prompts that can be copied directly.
+- Keep this value-first, not ad-first. The video should feel like native educational/lifestyle content.
+- Do NOT force app mention in every script. Mention the app only when naturally relevant.
+- If app insertion is useful, prefer subtle visual integration (screen recording/screenshot overlay, UI callout, or quick proof moment) instead of hard-selling narration.
+- Keep explicit app name mentions to a maximum of 1 in the entire script (hook + beats + CTA).
+- CTA must be soft and non-salesy (example style: save/share/follow/use this method), with optional subtle app reference only if it fits context.
+- For any app overlay moment, specify placement and intent in editNote (for example: "top-right mini overlay of cycle day screen for 2s").
 - Return strict JSON only.
 
 JSON SHAPE:
@@ -595,10 +613,27 @@ JSON SHAPE:
     .filter((item): item is HiggsfieldPrompt => Boolean(item))
     .slice(0, 8);
 
+  const mentionState = { count: 0 };
+  const adjustedHook = limitAppNameMentions(
+    sanitizeString(scriptRow.hook, "Start with a direct pain-point hook in first 2 seconds."),
+    appName,
+    mentionState
+  );
+  const adjustedBeats = beats.map((beat) => ({
+    ...beat,
+    narration: limitAppNameMentions(beat.narration, appName, mentionState),
+    onScreenText: limitAppNameMentions(beat.onScreenText, appName, mentionState),
+  }));
+  const adjustedCta = limitAppNameMentions(
+    sanitizeString(scriptRow.cta, "Save this and try the routine today; use your tracker to stay consistent."),
+    appName,
+    mentionState
+  );
+
   return {
     title: sanitizeString(row.title, `${appName} format recreation plan`),
-    strategy: sanitizeString(row.strategy, "Reuse the selected format skeleton while adapting the message for the app audience."),
-    objective: sanitizeString(row.objective, "Create a high-retention short video and convert viewers into app intent."),
+    strategy: sanitizeString(row.strategy, "Reuse the selected format skeleton as value-first content, with only subtle app integration where naturally relevant."),
+    objective: sanitizeString(row.objective, "Deliver practical guidance with authentic retention flow and optional low-friction app visibility."),
     deliverableSpec: {
       duration: sanitizeString(deliverableSpecRow.duration, "20-30 seconds"),
       aspectRatio: sanitizeString(deliverableSpecRow.aspectRatio, "9:16"),
@@ -606,9 +641,9 @@ JSON SHAPE:
       voiceStyle: sanitizeString(deliverableSpecRow.voiceStyle, "Warm, direct, practical"),
     },
     script: {
-      hook: sanitizeString(scriptRow.hook, "Start with a direct pain-point hook in first 2 seconds."),
-      beats,
-      cta: sanitizeString(scriptRow.cta, "Invite viewers to open the app for the full guided experience."),
+      hook: adjustedHook,
+      beats: adjustedBeats,
+      cta: adjustedCta,
     },
     higgsfieldPrompts,
     productionSteps: sanitizeStringArray(row.productionSteps, 12),
