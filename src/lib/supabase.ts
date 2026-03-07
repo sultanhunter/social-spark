@@ -126,6 +126,53 @@ export interface PinterestAgentGeneration {
   updated_at: string;
 }
 
+export interface VideoFormat {
+  id: string;
+  collection_id: string;
+  format_name: string;
+  format_type: "ugc" | "ai_video" | "hybrid" | "editorial";
+  format_signature: string;
+  summary: string;
+  why_it_works: string[];
+  hook_patterns: string[];
+  shot_pattern: string[];
+  editing_style: string[];
+  script_scaffold: string | null;
+  higgsfield_prompt_template: string | null;
+  recreation_checklist: string[];
+  duration_guidance: string | null;
+  confidence: number | null;
+  source_count: number;
+  latest_source_url: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface VideoFormatVideo {
+  id: string;
+  collection_id: string;
+  format_id: string;
+  source_url: string;
+  platform: string;
+  title: string | null;
+  description: string | null;
+  thumbnail_url: string | null;
+  user_notes: string | null;
+  analysis_confidence: number | null;
+  analysis_payload: Record<string, unknown>;
+  created_at: string;
+}
+
+export interface VideoRecreationPlan {
+  id: string;
+  collection_id: string;
+  format_id: string;
+  source_video_id: string;
+  app_name: string;
+  plan_payload: Record<string, unknown>;
+  created_at: string;
+}
+
 // SQL Schema for Supabase (run this in Supabase SQL editor)
 export const SCHEMA_SQL = `
 -- Collections table
@@ -247,4 +294,67 @@ CREATE TABLE IF NOT EXISTS pinterest_agent_generations (
 
 CREATE INDEX IF NOT EXISTS idx_pinterest_agent_generations_collection
   ON pinterest_agent_generations(collection_id);
+
+-- Video format groups table
+CREATE TABLE IF NOT EXISTS video_formats (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  collection_id UUID REFERENCES collections(id) ON DELETE CASCADE,
+  format_name TEXT NOT NULL,
+  format_type VARCHAR(40) NOT NULL,
+  format_signature TEXT NOT NULL,
+  summary TEXT NOT NULL,
+  why_it_works TEXT[] DEFAULT '{}',
+  hook_patterns TEXT[] DEFAULT '{}',
+  shot_pattern TEXT[] DEFAULT '{}',
+  editing_style TEXT[] DEFAULT '{}',
+  script_scaffold TEXT,
+  higgsfield_prompt_template TEXT,
+  recreation_checklist TEXT[] DEFAULT '{}',
+  duration_guidance TEXT,
+  confidence DOUBLE PRECISION,
+  source_count INT DEFAULT 0,
+  latest_source_url TEXT,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+  updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+  UNIQUE(collection_id, format_signature)
+);
+
+CREATE INDEX IF NOT EXISTS idx_video_formats_collection
+  ON video_formats(collection_id);
+
+-- Video examples table
+CREATE TABLE IF NOT EXISTS video_format_videos (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  collection_id UUID REFERENCES collections(id) ON DELETE CASCADE,
+  format_id UUID REFERENCES video_formats(id) ON DELETE CASCADE,
+  source_url TEXT NOT NULL,
+  platform VARCHAR(50) NOT NULL,
+  title TEXT,
+  description TEXT,
+  thumbnail_url TEXT,
+  user_notes TEXT,
+  analysis_confidence DOUBLE PRECISION,
+  analysis_payload JSONB DEFAULT '{}'::jsonb,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_video_format_videos_collection
+  ON video_format_videos(collection_id);
+
+CREATE INDEX IF NOT EXISTS idx_video_format_videos_format
+  ON video_format_videos(format_id);
+
+-- Generated recreation plans table
+CREATE TABLE IF NOT EXISTS video_recreation_plans (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  collection_id UUID REFERENCES collections(id) ON DELETE CASCADE,
+  format_id UUID REFERENCES video_formats(id) ON DELETE CASCADE,
+  source_video_id UUID REFERENCES video_format_videos(id) ON DELETE CASCADE,
+  app_name TEXT NOT NULL,
+  plan_payload JSONB DEFAULT '{}'::jsonb,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_video_recreation_plans_collection
+  ON video_recreation_plans(collection_id);
 `;

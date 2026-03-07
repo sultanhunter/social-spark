@@ -5,6 +5,7 @@ import { motion } from "framer-motion";
 import {
   ArrowRight,
   BookMarked,
+  Clapperboard,
   GalleryVerticalEnd,
   FolderOpen,
   Image as ImageIcon,
@@ -143,6 +144,13 @@ export function StorageView() {
               >
                 <Pin className="mr-2 h-4 w-4" />
                 Pinterest Agent
+              </Button>
+              <Button
+                variant="outline"
+                onClick={() => router.push(`/collections/${activeCollection.id}/video-agent`)}
+              >
+                <Clapperboard className="mr-2 h-4 w-4" />
+                Video Agent
               </Button>
               <Button variant="primary" onClick={() => setAddPostOpen(true)}>
                 <Plus className="mr-2 h-4 w-4" />

@@ -103,7 +103,7 @@ async function planBlogImagePrompts({
   reasoningModel?: ReasoningModel;
 }): Promise<BlogImagePromptPlan> {
   const fallback = fallbackPromptPlan(topic);
-  const model = genAI.getGenerativeModel({ model: reasoningModel || "gemini-3-pro-preview" });
+  const model = genAI.getGenerativeModel({ model: reasoningModel || "gemini-3.1-pro-preview" });
 
   const prompt = `Create image prompts for an Islamic women's health blog post.
 
