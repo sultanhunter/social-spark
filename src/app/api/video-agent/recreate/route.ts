@@ -55,6 +55,43 @@ function isMissingTableError(error: unknown): boolean {
   return row.code === "42P01";
 }
 
+function isMissingColumnError(error: unknown, columnName: string): boolean {
+  if (!error || typeof error !== "object") return false;
+  const row = error as Record<string, unknown>;
+  const message = typeof row.message === "string" ? row.message.toLowerCase() : "";
+  const details = typeof row.details === "string" ? row.details.toLowerCase() : "";
+  const combined = `${message} ${details}`;
+  return combined.includes(columnName.toLowerCase()) && combined.includes("column");
+}
+
+async function fetchCollectionRow(collectionId: string): Promise<CollectionRow | null> {
+  const primary = await supabase
+    .from("collections")
+    .select("id, app_name, app_description, app_context")
+    .eq("id", collectionId)
+    .single();
+
+  if (!primary.error && primary.data) {
+    return primary.data as CollectionRow;
+  }
+
+  if (primary.error && isMissingColumnError(primary.error, "app_context")) {
+    const fallback = await supabase
+      .from("collections")
+      .select("id, app_name, app_description")
+      .eq("id", collectionId)
+      .single();
+
+    if (!fallback.error && fallback.data) {
+      return fallback.data as CollectionRow;
+    }
+
+    return null;
+  }
+
+  return null;
+}
+
 function toFormatAnalysis(row: VideoFormatRow): VideoFormatAnalysis {
   return {
     formatName: row.format_name,
@@ -99,12 +136,8 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const [collectionResult, formatResult, videoResult] = await Promise.all([
-      supabase
-        .from("collections")
-        .select("id, app_name, app_description, app_context")
-        .eq("id", collectionId)
-        .single(),
+    const [collection, formatResult, videoResult] = await Promise.all([
+      fetchCollectionRow(collectionId),
       supabase
         .from("video_formats")
         .select("*")
@@ -119,7 +152,7 @@ export async function POST(request: NextRequest) {
         .single(),
     ]);
 
-    if (collectionResult.error || !collectionResult.data) {
+    if (!collection) {
       return NextResponse.json({ error: "Collection not found." }, { status: 404 });
     }
 
@@ -157,7 +190,6 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Video source not found." }, { status: 404 });
     }
 
-    const collection = collectionResult.data as CollectionRow;
     const format = formatResult.data as unknown as VideoFormatRow;
     const sourceVideo = videoResult.data as unknown as VideoFormatVideoRow;
 
