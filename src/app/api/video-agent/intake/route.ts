@@ -104,6 +104,10 @@ export async function POST(request: NextRequest) {
     const formatAnalysis = await analyzeVideoFormatFromSource(sourceMetadata, reasoningModel);
     sourceMetadata.transcriptSummary = formatAnalysis.transcriptSummary || null;
     sourceMetadata.transcriptText = formatAnalysis.transcriptText || null;
+    sourceMetadata.sourceDurationSeconds =
+      typeof formatAnalysis.sourceDurationSeconds === "number"
+        ? formatAnalysis.sourceDurationSeconds
+        : null;
 
     const { data: existingFormats, error: existingFormatsError } = await supabase
       .from("video_formats")

@@ -21,6 +21,7 @@ export interface VideoSourceMetadata {
   userNotes?: string | null;
   transcriptSummary?: string | null;
   transcriptText?: string | null;
+  sourceDurationSeconds?: number | null;
 }
 
 export interface VideoFormatAnalysis {
@@ -28,6 +29,7 @@ export interface VideoFormatAnalysis {
   formatType: NormalizedFormatType;
   formatSignature: string;
   analysisMethod: AnalysisMethod;
+  sourceDurationSeconds: number | null;
   sampledFrameCount: number;
   sampledFrameSources: string[];
   directMediaUrl: string | null;
@@ -193,6 +195,26 @@ function enforceFaithPositiveFraming(text: string): string {
   return output;
 }
 
+function sourceDurationHint(seconds: number | null | undefined): string {
+  if (typeof seconds !== "number" || !Number.isFinite(seconds) || seconds <= 0) {
+    return "unknown";
+  }
+
+  const rounded = Math.round(seconds);
+  return `${rounded}s`;
+}
+
+function sourceMatchedDurationFallback(seconds: number | null | undefined): string {
+  if (typeof seconds !== "number" || !Number.isFinite(seconds) || seconds <= 0) {
+    return "45-60 seconds";
+  }
+
+  const base = Math.max(10, Math.round(seconds));
+  const min = Math.max(8, Math.round(base * 0.9));
+  const max = Math.max(min + 2, Math.round(base * 1.1));
+  return `${min}-${max} seconds (match source around ${base}s)`;
+}
+
 function toFormatSignature(input: string): string {
   const normalized = input
     .toLowerCase()
@@ -285,6 +307,7 @@ function extractMetaContent(html: string, key: string): string | null {
 
 async function buildVisualEvidence(source: VideoSourceMetadata): Promise<{
   method: AnalysisMethod;
+  sourceDurationSeconds: number | null;
   parts: InlineImagePart[];
   sampledFrameSources: string[];
   directMediaUrl: string | null;
@@ -332,6 +355,10 @@ async function buildVisualEvidence(source: VideoSourceMetadata): Promise<{
 
   return {
     method: "frame_aware",
+    sourceDurationSeconds:
+      typeof frameExtraction.durationSeconds === "number" && Number.isFinite(frameExtraction.durationSeconds)
+        ? frameExtraction.durationSeconds
+        : null,
     parts: frameParts,
     sampledFrameSources: ["remote_extractor_frames"],
     directMediaUrl: frameExtraction.videoUrl,
@@ -471,6 +498,7 @@ JSON SHAPE:
     formatType,
     formatSignature,
     analysisMethod: visualEvidence.method,
+    sourceDurationSeconds: visualEvidence.sourceDurationSeconds,
     sampledFrameCount: visualEvidence.parts.length,
     sampledFrameSources: visualEvidence.sampledFrameSources,
     directMediaUrl: visualEvidence.directMediaUrl,
@@ -584,6 +612,7 @@ interface BuildRecreationPlanArgs {
     userNotes: string | null;
     transcriptSummary?: string | null;
     transcriptText?: string | null;
+    sourceDurationSeconds?: number | null;
   };
   format: VideoFormatAnalysis;
   reasoningModel?: ReasoningModel;
@@ -629,11 +658,13 @@ REFERENCE VIDEO:
 - Notes: ${sourceVideo.userNotes || "N/A"}
 - Transcript Summary: ${sourceVideo.transcriptSummary || "N/A"}
 - Transcript Text: ${sourceVideo.transcriptText || "N/A"}
+- Source Duration: ${sourceDurationHint(sourceVideo.sourceDurationSeconds)}
 
 RESPONSE RULES:
 - Build for Muslim women audience and keep tone faith-aware, practical, and respectful.
 - Keep output execution-ready, not high-level fluff.
-- Use clear timing beats for 15-35 second vertical video.
+- Match the source video length by default (target within +/-10% of source duration when source duration is available).
+- Use enough timing beats to cover the full source-matched duration (not compressed short-form unless source itself is short).
 - Include Higgsfield prompts that can be copied directly.
 - Never celebrate anti-religious behavior. Do not frame skipping prayer, neglecting salah, or distancing from worship as a positive outcome.
 - Prefer positive faith framing: celebrate being able to pray, spiritual consistency, barakah-oriented routines, and practical habits that support worship.
@@ -701,6 +732,10 @@ JSON SHAPE:
   const row = isRecord(parsed) ? parsed : {};
   const deliverableSpecRow = isRecord(row.deliverableSpec) ? row.deliverableSpec : {};
   const scriptRow = isRecord(row.script) ? row.script : {};
+  const maxBeats =
+    typeof sourceVideo.sourceDurationSeconds === "number" && Number.isFinite(sourceVideo.sourceDurationSeconds)
+      ? clamp(Math.round(sourceVideo.sourceDurationSeconds / 4), 6, 24)
+      : 12;
 
   const beatsRaw = Array.isArray(scriptRow.beats) ? scriptRow.beats : [];
   const beats: PlanBeat[] = beatsRaw
@@ -715,7 +750,7 @@ JSON SHAPE:
       };
     })
     .filter((beat): beat is PlanBeat => Boolean(beat))
-    .slice(0, 8);
+    .slice(0, maxBeats);
 
   const promptsRaw = Array.isArray(row.higgsfieldPrompts) ? row.higgsfieldPrompts : [];
   const higgsfieldPrompts: HiggsfieldPrompt[] = promptsRaw
@@ -791,7 +826,10 @@ JSON SHAPE:
     ),
     overlayOpportunities: sanitizeStringArray(row.overlayOpportunities, 8),
     deliverableSpec: {
-      duration: sanitizeString(deliverableSpecRow.duration, "20-30 seconds"),
+      duration: sanitizeString(
+        deliverableSpecRow.duration,
+        sourceMatchedDurationFallback(sourceVideo.sourceDurationSeconds)
+      ),
       aspectRatio: sanitizeString(deliverableSpecRow.aspectRatio, "9:16"),
       platforms: sanitizeStringArray(deliverableSpecRow.platforms, 4),
       voiceStyle: sanitizeString(deliverableSpecRow.voiceStyle, "Warm, direct, practical"),

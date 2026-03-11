@@ -102,6 +102,7 @@ function toFormatAnalysis(row: VideoFormatRow): VideoFormatAnalysis {
         : "hybrid",
     formatSignature: row.format_signature,
     analysisMethod: "frame_aware",
+    sourceDurationSeconds: null,
     sampledFrameCount: 0,
     sampledFrameSources: [],
     directMediaUrl: null,
@@ -127,9 +128,10 @@ function toFormatAnalysis(row: VideoFormatRow): VideoFormatAnalysis {
 function getSourceTranscriptFromAnalysisPayload(payload: unknown): {
   summary: string | null;
   text: string | null;
+  sourceDurationSeconds: number | null;
 } {
   if (!payload || typeof payload !== "object") {
-    return { summary: null, text: null };
+    return { summary: null, text: null, sourceDurationSeconds: null };
   }
 
   const row = payload as Record<string, unknown>;
@@ -156,9 +158,20 @@ function getSourceTranscriptFromAnalysisPayload(payload: unknown): {
         ? formatAnalysis.transcriptText.trim()
       : null;
 
+  const sourceDurationSecondsRaw =
+    typeof sourceMetadata?.sourceDurationSeconds === "number"
+      ? sourceMetadata.sourceDurationSeconds
+      : typeof formatAnalysis?.sourceDurationSeconds === "number"
+        ? formatAnalysis.sourceDurationSeconds
+        : null;
+
   return {
     summary: transcriptSummary,
     text: transcriptText,
+    sourceDurationSeconds:
+      typeof sourceDurationSecondsRaw === "number" && Number.isFinite(sourceDurationSecondsRaw)
+        ? sourceDurationSecondsRaw
+        : null,
   };
 }
 
@@ -258,6 +271,7 @@ export async function POST(request: NextRequest) {
         userNotes: sourceVideo.user_notes,
         transcriptSummary: transcriptContext.summary,
         transcriptText: transcriptContext.text,
+        sourceDurationSeconds: transcriptContext.sourceDurationSeconds,
       },
       format: toFormatAnalysis(format),
       reasoningModel,
