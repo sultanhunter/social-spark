@@ -85,6 +85,7 @@ type HiggsfieldPrompt = {
   prompt: string;
   recommendedModel?: string;
   modelReason?: string;
+  shotDuration?: string;
 };
 
 type VideoPlan = {
@@ -173,6 +174,11 @@ function getPromptModel(item: HiggsfieldPrompt): string {
 function getPromptReason(item: HiggsfieldPrompt): string {
   const value = typeof item.modelReason === "string" ? item.modelReason.trim() : "";
   return value || "Best for natural human motion and identity consistency.";
+}
+
+function getPromptDuration(item: HiggsfieldPrompt): string {
+  const value = typeof item.shotDuration === "string" ? item.shotDuration.trim() : "";
+  return value || "4s";
 }
 
 export function VideoAgentView({ collectionId }: { collectionId: string }) {
@@ -355,7 +361,7 @@ export function VideoAgentView({ collectionId }: { collectionId: string }) {
     return plan.higgsfieldPrompts
       .map(
         (item, index) =>
-          `Scene ${index + 1} - ${item.scene}\nModel: ${getPromptModel(item)}\nWhy: ${getPromptReason(item)}\nPrompt: ${item.prompt}`
+          `Scene ${index + 1} - ${item.scene}\nDuration: ${getPromptDuration(item)}\nModel: ${getPromptModel(item)}\nWhy: ${getPromptReason(item)}\nPrompt: ${item.prompt}`
       )
       .join("\n\n");
   }, [plan]);
@@ -815,6 +821,9 @@ export function VideoAgentView({ collectionId }: { collectionId: string }) {
                     {plan.higgsfieldPrompts.map((item, index) => (
                       <div key={`${item.scene}-${index}`} className="rounded-md border border-slate-200 bg-white p-2.5">
                         <p className="text-sm font-semibold text-slate-800">{index + 1}. {item.scene}</p>
+                        <p className="mt-1 text-xs text-slate-600">
+                          <span className="font-semibold">Duration:</span> {getPromptDuration(item)}
+                        </p>
                         <p className="mt-1 text-xs text-slate-600">
                           <span className="font-semibold">Model:</span> {getPromptModel(item)}
                         </p>

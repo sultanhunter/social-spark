@@ -80,6 +80,7 @@ type HiggsfieldPrompt = {
   prompt: string;
   recommendedModel: string;
   modelReason: string;
+  shotDuration: string;
 };
 
 export interface VideoRecreationPlan {
@@ -684,6 +685,7 @@ RESPONSE RULES:
   - If character speaks on camera, include the exact spoken line in quotes and prefix with "Dialogue:".
   - If character does not speak, explicitly write "No dialogue" and describe facial/body expression intent.
 - For every Higgsfield scene, include a recommended Higgsfield model and why it is the best fit for that scene.
+- For every Higgsfield scene, include individual shotDuration (for example: "3.5s" or "0:08").
 - If source content appears to include a famous public figure, public speech, or recognisable creator persona that should not be rewritten:
   - Set integrationMode to "public_figure_overlay_only".
   - Do NOT rewrite their core spoken lines or impersonate them.
@@ -723,7 +725,8 @@ JSON SHAPE:
       "scene": "string",
       "prompt": "string with Dialogue: \"...\" OR No dialogue: ...",
       "recommendedModel": "string",
-      "modelReason": "string"
+      "modelReason": "string",
+      "shotDuration": "string"
     }
   ],
   "productionSteps": ["string"],
@@ -777,6 +780,7 @@ JSON SHAPE:
           item.modelReason,
           "Best for natural human motion, consistent face identity, and believable lifestyle scenes."
         ),
+        shotDuration: sanitizeString(item.shotDuration, "4s"),
       };
     })
     .filter((item): item is HiggsfieldPrompt => Boolean(item))
