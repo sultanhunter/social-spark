@@ -80,10 +80,11 @@ function parseRemoteError(rawBody: string): { message: string; upstreamRequestId
         ? parsed.details
         : "";
 
+    const baseError = typeof parsed.error === "string" ? parsed.error : "";
     const message =
-      (typeof parsed.error === "string" ? parsed.error : "") ||
-      details ||
-      fallbackMessage;
+      baseError && details
+        ? `${baseError}: ${details}`
+        : baseError || details || fallbackMessage;
 
     const upstreamRequestId =
       typeof parsed.requestId === "string" && parsed.requestId.trim()
