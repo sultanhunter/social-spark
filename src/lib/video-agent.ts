@@ -152,6 +152,28 @@ function sanitizeNumber(value: unknown, fallback = 0): number {
   return value;
 }
 
+function ensureHiggsfieldPromptHasPerformanceInstruction(prompt: string): string {
+  const normalized = cleanText(prompt);
+  if (!normalized) {
+    return "Create a vertical 9:16 AI influencer shot with realistic movement. No dialogue: character expresses the emotion silently through facial expression and body language.";
+  }
+
+  const hasPerformanceCue =
+    /\bdialogue\b/i.test(normalized) ||
+    /\bno dialogue\b/i.test(normalized) ||
+    /\bsilent\b/i.test(normalized) ||
+    /\bvoiceover\b/i.test(normalized) ||
+    /\bsays\b/i.test(normalized) ||
+    /\bspeaks\b/i.test(normalized) ||
+    /"[^"]+"/.test(normalized);
+
+  if (hasPerformanceCue) {
+    return normalized;
+  }
+
+  return `${normalized} No dialogue: character expresses the intended emotion and intent silently.`;
+}
+
 function toFormatSignature(input: string): string {
   const normalized = input
     .toLowerCase()
@@ -603,6 +625,9 @@ RESPONSE RULES:
 - Reuse the source transcript style (cadence, phrasing, emotional tone) when drafting narration so output feels native to the original format.
 - If human presence is needed, include execution-ready Higgsfield prompts for the AI influencer scenes and include persona continuity instructions.
 - Production steps must explicitly describe how to generate and stitch AI influencer shots with app overlays.
+- Every Higgsfield scene prompt must include performance instruction:
+  - If character speaks on camera, include the exact spoken line in quotes and prefix with "Dialogue:".
+  - If character does not speak, explicitly write "No dialogue" and describe facial/body expression intent.
 - If source content appears to include a famous public figure, public speech, or recognisable creator persona that should not be rewritten:
   - Set integrationMode to "public_figure_overlay_only".
   - Do NOT rewrite their core spoken lines or impersonate them.
@@ -640,7 +665,7 @@ JSON SHAPE:
   "higgsfieldPrompts": [
     {
       "scene": "string",
-      "prompt": "string"
+      "prompt": "string with Dialogue: \"...\" OR No dialogue: ..."
     }
   ],
   "productionSteps": ["string"],
@@ -676,9 +701,11 @@ JSON SHAPE:
       if (!isRecord(item)) return null;
       return {
         scene: sanitizeString(item.scene, "Scene"),
-        prompt: sanitizeString(
-          item.prompt,
-          "Create a vertical 9:16 AI influencer shot for Muslimah audience: modest outfit, natural expression, soft daylight, realistic movement, clean background, consistent character identity across scenes."
+        prompt: ensureHiggsfieldPromptHasPerformanceInstruction(
+          sanitizeString(
+            item.prompt,
+            "Create a vertical 9:16 AI influencer shot for Muslimah audience: modest outfit, natural expression, soft daylight, realistic movement, clean background, consistent character identity across scenes. No dialogue: character conveys reassurance through calm facial expression and gentle nod."
+          )
         ),
       };
     })
