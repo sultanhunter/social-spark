@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { supabase } from "@/lib/supabase";
 import {
   buildVideoRecreationPlan,
+  type UGCCharacterProfile,
   type VideoFormatAnalysis,
 } from "@/lib/video-agent";
 import { DEFAULT_REASONING_MODEL, isReasoningModel } from "@/lib/reasoning-model";
@@ -44,6 +45,20 @@ type VideoFormatVideoRow = {
   thumbnail_url: string | null;
   user_notes: string | null;
   analysis_payload?: Record<string, unknown> | null;
+};
+
+type VideoUgcCharacterRow = {
+  id: string;
+  collection_id: string;
+  character_name: string;
+  persona_summary: string;
+  visual_style: string;
+  wardrobe_notes: string | null;
+  voice_tone: string | null;
+  prompt_template: string;
+  reference_image_url: string | null;
+  image_model: string | null;
+  is_default?: boolean | null;
 };
 
 function asText(value: unknown): string {
@@ -175,12 +190,29 @@ function getSourceTranscriptFromAnalysisPayload(payload: unknown): {
   };
 }
 
+function toUgcCharacterProfile(row: VideoUgcCharacterRow | null): UGCCharacterProfile | null {
+  if (!row) return null;
+
+  return {
+    id: row.id,
+    characterName: row.character_name,
+    personaSummary: row.persona_summary,
+    visualStyle: row.visual_style,
+    wardrobeNotes: row.wardrobe_notes || "Modest modern outfit with soft neutral palette.",
+    voiceTone: row.voice_tone || "Warm, calm, practical",
+    promptTemplate: row.prompt_template,
+    referenceImageUrl: row.reference_image_url,
+    imageModel: row.image_model,
+  };
+}
+
 export async function POST(request: NextRequest) {
   try {
     const body = (await request.json()) as Record<string, unknown>;
     const collectionId = asText(body.collectionId);
     const formatId = asText(body.formatId);
     const videoId = asText(body.videoId);
+    const selectedCharacterId = asText(body.characterId);
     const reasoningModel = isReasoningModel(body.reasoningModel)
       ? body.reasoningModel
       : DEFAULT_REASONING_MODEL;
@@ -248,10 +280,71 @@ export async function POST(request: NextRequest) {
 
     const format = formatResult.data as unknown as VideoFormatRow;
     const sourceVideo = videoResult.data as unknown as VideoFormatVideoRow;
+    let ugcCharacter: UGCCharacterProfile | null = null;
+
+    if (format.format_type === "ugc") {
+      const fullSelect =
+        "id, collection_id, character_name, persona_summary, visual_style, wardrobe_notes, voice_tone, prompt_template, reference_image_url, image_model, is_default";
+
+      let characterResult = selectedCharacterId
+        ? await supabase
+            .from("video_ugc_characters")
+            .select(fullSelect)
+            .eq("collection_id", collectionId)
+            .eq("id", selectedCharacterId)
+            .maybeSingle()
+        : await supabase
+            .from("video_ugc_characters")
+            .select(fullSelect)
+            .eq("collection_id", collectionId)
+            .eq("is_default", true)
+            .maybeSingle();
+
+      if (characterResult.error && isMissingColumnError(characterResult.error, "is_default")) {
+        characterResult = selectedCharacterId
+          ? await supabase
+              .from("video_ugc_characters")
+              .select("id, collection_id, character_name, persona_summary, visual_style, wardrobe_notes, voice_tone, prompt_template, reference_image_url, image_model")
+              .eq("collection_id", collectionId)
+              .eq("id", selectedCharacterId)
+              .maybeSingle()
+          : await supabase
+              .from("video_ugc_characters")
+              .select("id, collection_id, character_name, persona_summary, visual_style, wardrobe_notes, voice_tone, prompt_template, reference_image_url, image_model")
+              .eq("collection_id", collectionId)
+              .order("created_at", { ascending: true })
+              .limit(1)
+              .maybeSingle();
+      }
+
+      if (characterResult.error) {
+        if (isMissingTableError(characterResult.error)) {
+          return NextResponse.json(
+            {
+              error:
+                "UGC character table is missing. Run the video-agent SQL migration first (see supabase-migration.sql).",
+            },
+            { status: 500 }
+          );
+        }
+        throw characterResult.error;
+      }
+
+      ugcCharacter = characterResult.data
+        ? toUgcCharacterProfile(characterResult.data as unknown as VideoUgcCharacterRow)
+        : null;
+    }
 
     if (sourceVideo.format_id !== format.id) {
       return NextResponse.json(
         { error: "Selected video does not belong to the selected format." },
+        { status: 400 }
+      );
+    }
+
+    if (format.format_type === "ugc" && !ugcCharacter) {
+      return NextResponse.json(
+        { error: "Select a UGC character (or set one as default) before generating a UGC recreation plan." },
         { status: 400 }
       );
     }
@@ -274,6 +367,7 @@ export async function POST(request: NextRequest) {
         sourceDurationSeconds: transcriptContext.sourceDurationSeconds,
       },
       format: toFormatAnalysis(format),
+      ugcCharacter,
       reasoningModel,
     });
 
@@ -286,6 +380,7 @@ export async function POST(request: NextRequest) {
         app_name: appName,
         plan_payload: {
           reasoningModel,
+          ugcCharacterId: ugcCharacter?.id || null,
           generatedAt: new Date().toISOString(),
           plan,
         },

@@ -12,6 +12,7 @@ import {
   LayoutGrid,
   Plus,
   Sparkles,
+  Users,
   Video,
   Pin,
 } from "lucide-react";
@@ -151,6 +152,13 @@ export function StorageView() {
               >
                 <Clapperboard className="mr-2 h-4 w-4" />
                 Video Agent
+              </Button>
+              <Button
+                variant="outline"
+                onClick={() => router.push(`/collections/${activeCollection.id}/characters`)}
+              >
+                <Users className="mr-2 h-4 w-4" />
+                Characters
               </Button>
               <Button variant="primary" onClick={() => setAddPostOpen(true)}>
                 <Plus className="mr-2 h-4 w-4" />

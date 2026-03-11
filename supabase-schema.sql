@@ -115,6 +115,23 @@ CREATE TABLE video_recreation_plans (
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
+-- Default UGC character profile per collection
+CREATE TABLE video_ugc_characters (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  collection_id UUID NOT NULL REFERENCES collections(id) ON DELETE CASCADE,
+  character_name TEXT NOT NULL,
+  persona_summary TEXT NOT NULL,
+  visual_style TEXT NOT NULL,
+  wardrobe_notes TEXT,
+  voice_tone TEXT,
+  prompt_template TEXT NOT NULL,
+  reference_image_url TEXT,
+  image_model VARCHAR(120),
+  is_default BOOLEAN NOT NULL DEFAULT FALSE,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
 -- Create indexes for better query performance
 CREATE INDEX idx_saved_posts_collection_id ON saved_posts(collection_id);
 CREATE INDEX idx_recreated_posts_collection_id ON recreated_posts(collection_id);
@@ -124,6 +141,7 @@ CREATE INDEX idx_video_formats_collection_id ON video_formats(collection_id);
 CREATE INDEX idx_video_format_videos_collection_id ON video_format_videos(collection_id);
 CREATE INDEX idx_video_format_videos_format_id ON video_format_videos(format_id);
 CREATE INDEX idx_video_recreation_plans_collection_id ON video_recreation_plans(collection_id);
+CREATE INDEX idx_video_ugc_characters_collection_id ON video_ugc_characters(collection_id);
 
 -- Enable Row Level Security (RLS)
 ALTER TABLE collections ENABLE ROW LEVEL SECURITY;
@@ -133,6 +151,7 @@ ALTER TABLE pinterest_agent_generations ENABLE ROW LEVEL SECURITY;
 ALTER TABLE video_formats ENABLE ROW LEVEL SECURITY;
 ALTER TABLE video_format_videos ENABLE ROW LEVEL SECURITY;
 ALTER TABLE video_recreation_plans ENABLE ROW LEVEL SECURITY;
+ALTER TABLE video_ugc_characters ENABLE ROW LEVEL SECURITY;
 
 -- Create policies (allow all for now - customize based on your auth setup)
 CREATE POLICY "Enable all operations for all users" ON collections
@@ -154,4 +173,7 @@ CREATE POLICY "Enable all operations for all users" ON video_format_videos
   FOR ALL USING (true) WITH CHECK (true);
 
 CREATE POLICY "Enable all operations for all users" ON video_recreation_plans
+  FOR ALL USING (true) WITH CHECK (true);
+
+CREATE POLICY "Enable all operations for all users" ON video_ugc_characters
   FOR ALL USING (true) WITH CHECK (true);

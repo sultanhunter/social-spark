@@ -109,3 +109,39 @@ CREATE TABLE IF NOT EXISTS video_recreation_plans (
 
 CREATE INDEX IF NOT EXISTS idx_video_recreation_plans_collection
   ON video_recreation_plans(collection_id);
+
+-- Default UGC character profile per collection
+CREATE TABLE IF NOT EXISTS video_ugc_characters (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  collection_id UUID NOT NULL REFERENCES collections(id) ON DELETE CASCADE,
+  character_name TEXT NOT NULL,
+  persona_summary TEXT NOT NULL,
+  visual_style TEXT NOT NULL,
+  wardrobe_notes TEXT,
+  voice_tone TEXT,
+  prompt_template TEXT NOT NULL,
+  reference_image_url TEXT,
+  image_model VARCHAR(120),
+  is_default BOOLEAN NOT NULL DEFAULT FALSE,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_video_ugc_characters_collection
+  ON video_ugc_characters(collection_id);
+
+ALTER TABLE video_ugc_characters
+  ADD COLUMN IF NOT EXISTS is_default BOOLEAN NOT NULL DEFAULT FALSE;
+
+ALTER TABLE video_ugc_characters
+  DROP CONSTRAINT IF EXISTS video_ugc_characters_collection_id_key;
+
+WITH first_rows AS (
+  SELECT id, collection_id,
+         ROW_NUMBER() OVER (PARTITION BY collection_id ORDER BY created_at ASC) AS rn
+  FROM video_ugc_characters
+)
+UPDATE video_ugc_characters AS c
+SET is_default = (f.rn = 1)
+FROM first_rows AS f
+WHERE c.id = f.id;

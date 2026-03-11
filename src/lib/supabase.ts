@@ -173,6 +173,22 @@ export interface VideoRecreationPlan {
   created_at: string;
 }
 
+export interface VideoUgcCharacter {
+  id: string;
+  collection_id: string;
+  character_name: string;
+  persona_summary: string;
+  visual_style: string;
+  wardrobe_notes: string | null;
+  voice_tone: string | null;
+  prompt_template: string;
+  reference_image_url: string | null;
+  image_model: string | null;
+  is_default: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
 // SQL Schema for Supabase (run this in Supabase SQL editor)
 export const SCHEMA_SQL = `
 -- Collections table
@@ -357,4 +373,24 @@ CREATE TABLE IF NOT EXISTS video_recreation_plans (
 
 CREATE INDEX IF NOT EXISTS idx_video_recreation_plans_collection
   ON video_recreation_plans(collection_id);
+
+-- Default UGC character per collection
+CREATE TABLE IF NOT EXISTS video_ugc_characters (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  collection_id UUID REFERENCES collections(id) ON DELETE CASCADE,
+  character_name TEXT NOT NULL,
+  persona_summary TEXT NOT NULL,
+  visual_style TEXT NOT NULL,
+  wardrobe_notes TEXT,
+  voice_tone TEXT,
+  prompt_template TEXT NOT NULL,
+  reference_image_url TEXT,
+  image_model VARCHAR(120),
+  is_default BOOLEAN NOT NULL DEFAULT FALSE,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+  updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_video_ugc_characters_collection
+  ON video_ugc_characters(collection_id);
 `;

@@ -108,6 +108,18 @@ export interface VideoRecreationPlan {
   qaChecklist: string[];
 }
 
+export interface UGCCharacterProfile {
+  id?: string;
+  characterName: string;
+  personaSummary: string;
+  visualStyle: string;
+  wardrobeNotes: string;
+  voiceTone: string;
+  promptTemplate: string;
+  referenceImageUrl?: string | null;
+  imageModel?: string | null;
+}
+
 function requireGeminiKey(): void {
   if (!process.env.GOOGLE_GEMINI_API_KEY) {
     throw new Error("GOOGLE_GEMINI_API_KEY is missing. Add it before running the video pipeline.");
@@ -230,6 +242,21 @@ function sourceMatchedDurationFallback(seconds: number | null | undefined): stri
   const min = Math.max(8, Math.round(base * 0.9));
   const max = Math.max(min + 2, Math.round(base * 1.1));
   return `${min}-${max} seconds (match source around ${base}s)`;
+}
+
+function applyUgcCharacterLock(prompt: string, character: UGCCharacterProfile): string {
+  const cleanedPrompt = cleanText(prompt);
+  const lockLine = `Character Lock: ${character.characterName}. ${character.promptTemplate}`;
+
+  if (!cleanedPrompt) {
+    return `${lockLine} No dialogue: character expresses calm confidence with natural eye contact.`;
+  }
+
+  if (/character lock:/i.test(cleanedPrompt) || new RegExp(escapeRegExp(character.characterName), "i").test(cleanedPrompt)) {
+    return cleanedPrompt;
+  }
+
+  return `${lockLine} ${cleanedPrompt}`;
 }
 
 function toFormatSignature(input: string): string {
@@ -632,6 +659,7 @@ interface BuildRecreationPlanArgs {
     sourceDurationSeconds?: number | null;
   };
   format: VideoFormatAnalysis;
+  ugcCharacter?: UGCCharacterProfile | null;
   reasoningModel?: ReasoningModel;
 }
 
@@ -640,6 +668,7 @@ export async function buildVideoRecreationPlan({
   appContext,
   sourceVideo,
   format,
+  ugcCharacter,
   reasoningModel = DEFAULT_REASONING_MODEL,
 }: BuildRecreationPlanArgs): Promise<VideoRecreationPlan> {
   requireGeminiKey();
@@ -663,9 +692,13 @@ CREATOR CONSTRAINT:
 - If this format requires on-camera human presence (UGC, testimonial, talking-head, lifestyle human actions), you must use AI influencer shots generated in Higgsfield.
 - Keep one consistent influencer persona across scenes (face, age range, modest styling, tone, lighting continuity).
 - Do not mention "AI" or "generated" inside the public-facing script unless explicitly needed.
+- If formatType is ugc, ALWAYS use the provided UGC character profile consistently across all scenes.
 
 SELECTED FORMAT:
 ${JSON.stringify(format, null, 2)}
+
+UGC CHARACTER PROFILE:
+${ugcCharacter ? JSON.stringify(ugcCharacter, null, 2) : "N/A"}
 
 REFERENCE VIDEO:
 - URL: ${sourceVideo.sourceUrl}
@@ -701,6 +734,7 @@ RESPONSE RULES:
 - For every Higgsfield scene, include a recommended Higgsfield model and why it is the best fit for that scene.
 - For every Higgsfield scene, include individual shotDuration (for example: "3.5s" or "0:08").
 - Keep the prompt field clean scene direction only. Do NOT include model, reason, or duration text inside prompt; use the dedicated fields.
+- For ugc format, include a Character Lock continuity directive in each scene using the provided UGC character profile.
 - If source content appears to include a famous public figure, public speech, or recognisable creator persona that should not be rewritten:
   - Set integrationMode to "public_figure_overlay_only".
   - Do NOT rewrite their core spoken lines or impersonate them.
@@ -803,6 +837,14 @@ JSON SHAPE:
     .filter((item): item is HiggsfieldPrompt => Boolean(item))
     .slice(0, 8);
 
+  const ugcLockedPrompts =
+    format.formatType === "ugc" && ugcCharacter
+      ? higgsfieldPrompts.map((item) => ({
+          ...item,
+          prompt: applyUgcCharacterLock(item.prompt, ugcCharacter),
+        }))
+      : higgsfieldPrompts;
+
   const mentionState = { count: 0 };
   const integrationModeRaw = sanitizeString(row.integrationMode, "standard_adaptation");
   const integrationMode: "standard_adaptation" | "public_figure_overlay_only" =
@@ -873,7 +915,7 @@ JSON SHAPE:
       beats: adjustedBeatsForMode,
       cta: enforceFaithPositiveFraming(adjustedCta),
     },
-    higgsfieldPrompts,
+    higgsfieldPrompts: ugcLockedPrompts,
     productionSteps: sanitizeStringArray(row.productionSteps, 12),
     editingTimeline: sanitizeStringArray(row.editingTimeline, 12),
     assetsChecklist: sanitizeStringArray(row.assetsChecklist, 12),

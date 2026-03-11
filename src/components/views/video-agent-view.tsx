@@ -11,6 +11,7 @@ import {
   Link2,
   ListChecks,
   Sparkles,
+  Users,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
@@ -132,6 +133,26 @@ type PlansResponse = {
   error?: string;
 };
 
+type UgcCharacter = {
+  id: string;
+  characterName: string;
+  personaSummary: string;
+  visualStyle: string;
+  wardrobeNotes: string | null;
+  voiceTone: string | null;
+  promptTemplate: string;
+  referenceImageUrl: string | null;
+  imageModel: string | null;
+  isDefault?: boolean;
+  updatedAt: string;
+};
+
+type CharacterResponse = {
+  characters?: UgcCharacter[];
+  character?: UgcCharacter | null;
+  error?: string;
+};
+
 function formatTypeVariant(type: string): "default" | "video" | "success" {
   if (type === "ugc") return "video";
   if (type === "ai_video") return "success";
@@ -194,6 +215,9 @@ export function VideoAgentView({ collectionId }: { collectionId: string }) {
   const [plan, setPlan] = useState<VideoPlan | null>(null);
   const [planId, setPlanId] = useState<string | null>(null);
   const [savedPlans, setSavedPlans] = useState<SavedPlan[]>([]);
+  const [ugcCharacters, setUgcCharacters] = useState<UgcCharacter[]>([]);
+  const [selectedUgcCharacterId, setSelectedUgcCharacterId] = useState<string | null>(null);
+  const [isLoadingCharacter, setIsLoadingCharacter] = useState(false);
   const [isLoadingLibrary, setIsLoadingLibrary] = useState(false);
   const [isLoadingPlans, setIsLoadingPlans] = useState(false);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
@@ -250,9 +274,53 @@ export function VideoAgentView({ collectionId }: { collectionId: string }) {
     [collectionId]
   );
 
+  const loadCharacter = useCallback(async () => {
+    setIsLoadingCharacter(true);
+
+    try {
+      const response = await fetch(
+        `/api/video-agent/characters?collectionId=${encodeURIComponent(collectionId)}`,
+        {
+          method: "GET",
+          cache: "no-store",
+        }
+      );
+
+      const data = (await response.json()) as CharacterResponse;
+
+      if (!response.ok) {
+        throw new Error(data.error || "Failed to load UGC character.");
+      }
+
+      const characters = Array.isArray(data.characters)
+        ? data.characters
+        : data.character
+          ? [data.character]
+          : [];
+
+      setUgcCharacters(characters);
+      setSelectedUgcCharacterId((current) => {
+        if (current && characters.some((item) => item.id === current)) {
+          return current;
+        }
+
+        const defaultCharacter = characters.find((item) => item.isDefault) || null;
+        return defaultCharacter?.id || characters[0]?.id || null;
+      });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to load UGC character.");
+    } finally {
+      setIsLoadingCharacter(false);
+    }
+  }, [collectionId]);
+
   useEffect(() => {
     void loadLibrary();
   }, [loadLibrary]);
+
+  useEffect(() => {
+    void loadCharacter();
+  }, [loadCharacter]);
 
   const selectedFormat = useMemo(
     () => library.find((format) => format.id === selectedFormatId) || null,
@@ -275,6 +343,11 @@ export function VideoAgentView({ collectionId }: { collectionId: string }) {
   const selectedVideo = useMemo(
     () => selectedFormat?.videos.find((video) => video.id === selectedVideoId) || null,
     [selectedFormat, selectedVideoId]
+  );
+
+  const selectedUgcCharacter = useMemo(
+    () => ugcCharacters.find((item) => item.id === selectedUgcCharacterId) || null,
+    [ugcCharacters, selectedUgcCharacterId]
   );
 
   const loadSavedPlans = useCallback(
@@ -426,6 +499,11 @@ export function VideoAgentView({ collectionId }: { collectionId: string }) {
       return;
     }
 
+    if (selectedFormat.format_type === "ugc" && !selectedUgcCharacter) {
+      setError("Select a UGC character first (or create one in Characters section), then generate the plan.");
+      return;
+    }
+
     setIsGeneratingPlan(true);
     setError("");
     setSuccess("");
@@ -438,6 +516,7 @@ export function VideoAgentView({ collectionId }: { collectionId: string }) {
           collectionId,
           formatId: selectedFormat.id,
           videoId: selectedVideo.id,
+          characterId: selectedFormat.format_type === "ugc" ? selectedUgcCharacter?.id : null,
           reasoningModel,
         }),
       });
@@ -501,6 +580,47 @@ export function VideoAgentView({ collectionId }: { collectionId: string }) {
                 {activeCollection?.app_name || "Muslimah Pro"}
               </p>
               <p>{activeCollection?.app_description || "Add collection app description for better adaptation quality."}</p>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">UGC Characters</CardTitle>
+              <CardDescription>
+                {isLoadingCharacter
+                  ? "Loading characters..."
+                  : `${ugcCharacters.length} characters available`}
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              {selectedUgcCharacter ? (
+                <div className="space-y-2 rounded-lg border border-slate-200 bg-slate-50 p-3">
+                  <div className="flex items-center gap-2">
+                    <Users className="h-4 w-4 text-rose-600" />
+                    <p className="text-sm font-semibold text-slate-800">{selectedUgcCharacter.characterName}</p>
+                  </div>
+                  {selectedUgcCharacter.referenceImageUrl ? (
+                    <img
+                      src={selectedUgcCharacter.referenceImageUrl}
+                      alt={selectedUgcCharacter.characterName}
+                      className="h-34 w-full rounded-md object-cover"
+                    />
+                  ) : null}
+                  <p className="text-xs text-slate-600">{selectedUgcCharacter.personaSummary}</p>
+                  <p className="text-[11px] text-slate-500">
+                    Model: {selectedUgcCharacter.imageModel || "gemini-3-pro-image-preview"}
+                  </p>
+                </div>
+              ) : (
+                <p className="text-xs text-slate-500">
+                  No characters yet. Create one in Character Studio, then select it in UGC plan generation.
+                </p>
+              )}
+
+              <Button variant="outline" onClick={() => router.push(`/collections/${collectionId}/characters`)}>
+                <Users className="mr-2 h-4 w-4" />
+                Open Character Studio
+              </Button>
             </CardContent>
           </Card>
 
@@ -635,6 +755,39 @@ export function VideoAgentView({ collectionId }: { collectionId: string }) {
                 <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700">
                   {selectedFormat.summary}
                 </div>
+
+                {selectedFormat.format_type === "ugc" ? (
+                  <div className="space-y-2 rounded-lg border border-slate-200 bg-slate-50 p-3">
+                    <div className="flex items-center justify-between gap-3">
+                      <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">UGC Character Selection</p>
+                      <button
+                        type="button"
+                        onClick={() => router.push(`/collections/${collectionId}/characters`)}
+                        className="text-xs font-medium text-rose-700 hover:text-rose-600"
+                      >
+                        Manage characters
+                      </button>
+                    </div>
+                    {ugcCharacters.length === 0 ? (
+                      <p className="text-sm text-amber-800">
+                        No UGC character found. Create one in Character Studio before generating this plan.
+                      </p>
+                    ) : (
+                      <select
+                        value={selectedUgcCharacterId || ""}
+                        onChange={(event) => setSelectedUgcCharacterId(event.target.value || null)}
+                        className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800 outline-none transition focus:border-rose-400 focus:ring-2 focus:ring-rose-200"
+                      >
+                        {ugcCharacters.map((character) => (
+                          <option key={character.id} value={character.id}>
+                            {character.characterName}
+                            {character.isDefault ? " (Default)" : ""}
+                          </option>
+                        ))}
+                      </select>
+                    )}
+                  </div>
+                ) : null}
 
                 <div className="grid gap-3 md:grid-cols-2">
                   <SimpleList title="Hook Patterns" items={selectedFormat.hook_patterns} />
