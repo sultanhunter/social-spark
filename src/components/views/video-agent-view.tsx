@@ -83,8 +83,8 @@ type PlanBeat = {
 type HiggsfieldPrompt = {
   scene: string;
   prompt: string;
-  recommendedModel: string;
-  modelReason: string;
+  recommendedModel?: string;
+  modelReason?: string;
 };
 
 type VideoPlan = {
@@ -163,6 +163,16 @@ function formatDateTime(value: string): string {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
   return date.toLocaleString();
+}
+
+function getPromptModel(item: HiggsfieldPrompt): string {
+  const value = typeof item.recommendedModel === "string" ? item.recommendedModel.trim() : "";
+  return value || "Higgsfield Realistic Character";
+}
+
+function getPromptReason(item: HiggsfieldPrompt): string {
+  const value = typeof item.modelReason === "string" ? item.modelReason.trim() : "";
+  return value || "Best for natural human motion and identity consistency.";
 }
 
 export function VideoAgentView({ collectionId }: { collectionId: string }) {
@@ -345,7 +355,7 @@ export function VideoAgentView({ collectionId }: { collectionId: string }) {
     return plan.higgsfieldPrompts
       .map(
         (item, index) =>
-          `Scene ${index + 1} - ${item.scene}\nModel: ${item.recommendedModel}\nWhy: ${item.modelReason}\nPrompt: ${item.prompt}`
+          `Scene ${index + 1} - ${item.scene}\nModel: ${getPromptModel(item)}\nWhy: ${getPromptReason(item)}\nPrompt: ${item.prompt}`
       )
       .join("\n\n");
   }, [plan]);
@@ -799,13 +809,23 @@ export function VideoAgentView({ collectionId }: { collectionId: string }) {
                   </p>
                 </div>
 
-                <SimpleList
-                  title="Higgsfield Prompts"
-                  items={plan.higgsfieldPrompts.map(
-                    (item, index) =>
-                      `${index + 1}. ${item.scene} [${item.recommendedModel}] - ${item.prompt} (Why: ${item.modelReason})`
-                  )}
-                />
+                <div className="space-y-2 rounded-lg border border-slate-200 bg-slate-50 p-3">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Higgsfield Prompts</p>
+                  <div className="space-y-2">
+                    {plan.higgsfieldPrompts.map((item, index) => (
+                      <div key={`${item.scene}-${index}`} className="rounded-md border border-slate-200 bg-white p-2.5">
+                        <p className="text-sm font-semibold text-slate-800">{index + 1}. {item.scene}</p>
+                        <p className="mt-1 text-xs text-slate-600">
+                          <span className="font-semibold">Model:</span> {getPromptModel(item)}
+                        </p>
+                        <p className="mt-1 text-xs text-slate-500">
+                          <span className="font-semibold">Why:</span> {getPromptReason(item)}
+                        </p>
+                        <p className="mt-1.5 text-sm text-slate-700">{item.prompt}</p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
 
                 <div className="grid gap-3 md:grid-cols-3">
                   <SimpleList title="Editing Timeline" items={plan.editingTimeline} />
