@@ -174,6 +174,25 @@ function ensureHiggsfieldPromptHasPerformanceInstruction(prompt: string): string
   return `${normalized} No dialogue: character expresses the intended emotion and intent silently.`;
 }
 
+function enforceFaithPositiveFraming(text: string): string {
+  let output = cleanText(text);
+  if (!output) return output;
+
+  const replacements: Array<[RegExp, string]> = [
+    [/\b(can(?:'|’)t|cannot|unable to|not able to)\s+(pray|make salah|pray on time)\b/gi, "able to pray consistently"],
+    [/\b(skip(?:ping)?|miss(?:ing)?)\s+(prayer|salah)\b/gi, "maintain prayer consistency"],
+    [/\bno prayer\b/gi, "consistent prayer"],
+    [/\bwithout prayer\b/gi, "with prayer consistency"],
+    [/\b(celebrate|love|enjoy)\s+(not praying|skipping prayer|missing salah)\b/gi, "celebrate being able to pray and stay spiritually grounded"],
+  ];
+
+  for (const [pattern, replacement] of replacements) {
+    output = output.replace(pattern, replacement);
+  }
+
+  return output;
+}
+
 function toFormatSignature(input: string): string {
   const normalized = input
     .toLowerCase()
@@ -616,6 +635,9 @@ RESPONSE RULES:
 - Keep output execution-ready, not high-level fluff.
 - Use clear timing beats for 15-35 second vertical video.
 - Include Higgsfield prompts that can be copied directly.
+- Never celebrate anti-religious behavior. Do not frame skipping prayer, neglecting salah, or distancing from worship as a positive outcome.
+- Prefer positive faith framing: celebrate being able to pray, spiritual consistency, barakah-oriented routines, and practical habits that support worship.
+- If mentioning difficult phases, keep compassionate tone and guide toward faith-positive actions and recovery, not disengagement.
 - Keep this value-first, not ad-first. The video should feel like native educational/lifestyle content.
 - Do NOT force app mention in every script. Mention the app only when naturally relevant.
 - If app insertion is useful, prefer subtle visual integration (screen recording/screenshot overlay, UI callout, or quick proof moment) instead of hard-selling narration.
@@ -725,8 +747,13 @@ JSON SHAPE:
   );
   const adjustedBeats = beats.map((beat) => ({
     ...beat,
-    narration: limitAppNameMentions(beat.narration, appName, mentionState),
-    onScreenText: limitAppNameMentions(beat.onScreenText, appName, mentionState),
+    narration: enforceFaithPositiveFraming(
+      limitAppNameMentions(beat.narration, appName, mentionState)
+    ),
+    onScreenText: enforceFaithPositiveFraming(
+      limitAppNameMentions(beat.onScreenText, appName, mentionState)
+    ),
+    editNote: enforceFaithPositiveFraming(beat.editNote),
   }));
   const adjustedCta = limitAppNameMentions(
     sanitizeString(scriptRow.cta, "Save this and try the routine today; use your tracker to stay consistent."),
@@ -747,11 +774,14 @@ JSON SHAPE:
 
   return {
     title: sanitizeString(row.title, `${appName} format recreation plan`),
-    strategy: sanitizeString(
-      row.strategy,
-      "Reuse the selected format skeleton as value-first content, generate any required human scenes with a consistent Higgsfield AI influencer, and add subtle app integration where naturally relevant."
-    ),
-    objective: sanitizeString(row.objective, "Deliver practical guidance with authentic retention flow and optional low-friction app visibility."),
+    strategy: (() => {
+      const normalized = enforceFaithPositiveFraming(sanitizeString(row.strategy, ""));
+      return normalized || "Reuse the selected format skeleton as value-first content, generate any required human scenes with a consistent Higgsfield AI influencer, and add subtle app integration where naturally relevant.";
+    })(),
+    objective: (() => {
+      const normalized = enforceFaithPositiveFraming(sanitizeString(row.objective, ""));
+      return normalized || "Deliver practical guidance with authentic retention flow and optional low-friction app visibility.";
+    })(),
     integrationMode,
     publicFigureNotes: sanitizeString(
       row.publicFigureNotes,
@@ -767,9 +797,9 @@ JSON SHAPE:
       voiceStyle: sanitizeString(deliverableSpecRow.voiceStyle, "Warm, direct, practical"),
     },
     script: {
-      hook: adjustedHook,
+      hook: enforceFaithPositiveFraming(adjustedHook),
       beats: adjustedBeatsForMode,
-      cta: adjustedCta,
+      cta: enforceFaithPositiveFraming(adjustedCta),
     },
     higgsfieldPrompts,
     productionSteps: sanitizeStringArray(row.productionSteps, 12),
