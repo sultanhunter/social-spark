@@ -78,6 +78,8 @@ type PlanBeat = {
 type HiggsfieldPrompt = {
   scene: string;
   prompt: string;
+  recommendedModel: string;
+  modelReason: string;
 };
 
 export interface VideoRecreationPlan {
@@ -681,6 +683,7 @@ RESPONSE RULES:
 - Every Higgsfield scene prompt must include performance instruction:
   - If character speaks on camera, include the exact spoken line in quotes and prefix with "Dialogue:".
   - If character does not speak, explicitly write "No dialogue" and describe facial/body expression intent.
+- For every Higgsfield scene, include a recommended Higgsfield model and why it is the best fit for that scene.
 - If source content appears to include a famous public figure, public speech, or recognisable creator persona that should not be rewritten:
   - Set integrationMode to "public_figure_overlay_only".
   - Do NOT rewrite their core spoken lines or impersonate them.
@@ -718,7 +721,9 @@ JSON SHAPE:
   "higgsfieldPrompts": [
     {
       "scene": "string",
-      "prompt": "string with Dialogue: \"...\" OR No dialogue: ..."
+      "prompt": "string with Dialogue: \"...\" OR No dialogue: ...",
+      "recommendedModel": "string",
+      "modelReason": "string"
     }
   ],
   "productionSteps": ["string"],
@@ -763,6 +768,14 @@ JSON SHAPE:
             item.prompt,
             "Create a vertical 9:16 AI influencer shot for Muslimah audience: modest outfit, natural expression, soft daylight, realistic movement, clean background, consistent character identity across scenes. No dialogue: character conveys reassurance through calm facial expression and gentle nod."
           )
+        ),
+        recommendedModel: sanitizeString(
+          item.recommendedModel,
+          "Higgsfield Realistic Character"
+        ),
+        modelReason: sanitizeString(
+          item.modelReason,
+          "Best for natural human motion, consistent face identity, and believable lifestyle scenes."
         ),
       };
     })

@@ -83,6 +83,8 @@ type PlanBeat = {
 type HiggsfieldPrompt = {
   scene: string;
   prompt: string;
+  recommendedModel: string;
+  modelReason: string;
 };
 
 type VideoPlan = {
@@ -341,7 +343,10 @@ export function VideoAgentView({ collectionId }: { collectionId: string }) {
   const higgsfieldClipboardText = useMemo(() => {
     if (!plan) return "";
     return plan.higgsfieldPrompts
-      .map((item, index) => `Scene ${index + 1} - ${item.scene}\n${item.prompt}`)
+      .map(
+        (item, index) =>
+          `Scene ${index + 1} - ${item.scene}\nModel: ${item.recommendedModel}\nWhy: ${item.modelReason}\nPrompt: ${item.prompt}`
+      )
       .join("\n\n");
   }, [plan]);
 
@@ -796,7 +801,10 @@ export function VideoAgentView({ collectionId }: { collectionId: string }) {
 
                 <SimpleList
                   title="Higgsfield Prompts"
-                  items={plan.higgsfieldPrompts.map((item, index) => `${index + 1}. ${item.scene}: ${item.prompt}`)}
+                  items={plan.higgsfieldPrompts.map(
+                    (item, index) =>
+                      `${index + 1}. ${item.scene} [${item.recommendedModel}] - ${item.prompt} (Why: ${item.modelReason})`
+                  )}
                 />
 
                 <div className="grid gap-3 md:grid-cols-3">
