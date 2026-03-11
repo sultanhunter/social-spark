@@ -189,6 +189,19 @@ export interface VideoUgcCharacter {
   updated_at: string;
 }
 
+export interface VideoUgcCharacterAngle {
+  id: string;
+  collection_id: string;
+  character_id: string;
+  angle_key: string;
+  angle_label: string;
+  angle_prompt: string;
+  image_url: string;
+  image_model: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
 // SQL Schema for Supabase (run this in Supabase SQL editor)
 export const SCHEMA_SQL = `
 -- Collections table
@@ -393,4 +406,24 @@ CREATE TABLE IF NOT EXISTS video_ugc_characters (
 
 CREATE INDEX IF NOT EXISTS idx_video_ugc_characters_collection
   ON video_ugc_characters(collection_id);
+
+-- Character angle library
+CREATE TABLE IF NOT EXISTS video_ugc_character_angles (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  collection_id UUID REFERENCES collections(id) ON DELETE CASCADE,
+  character_id UUID REFERENCES video_ugc_characters(id) ON DELETE CASCADE,
+  angle_key TEXT NOT NULL,
+  angle_label TEXT NOT NULL,
+  angle_prompt TEXT NOT NULL,
+  image_url TEXT NOT NULL,
+  image_model VARCHAR(120),
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+  updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_video_ugc_character_angles_collection
+  ON video_ugc_character_angles(collection_id);
+
+CREATE INDEX IF NOT EXISTS idx_video_ugc_character_angles_character
+  ON video_ugc_character_angles(character_id);
 `;

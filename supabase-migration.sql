@@ -145,3 +145,23 @@ UPDATE video_ugc_characters AS c
 SET is_default = (f.rn = 1)
 FROM first_rows AS f
 WHERE c.id = f.id;
+
+-- Saved angle variations for each UGC character
+CREATE TABLE IF NOT EXISTS video_ugc_character_angles (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  collection_id UUID NOT NULL REFERENCES collections(id) ON DELETE CASCADE,
+  character_id UUID NOT NULL REFERENCES video_ugc_characters(id) ON DELETE CASCADE,
+  angle_key TEXT NOT NULL,
+  angle_label TEXT NOT NULL,
+  angle_prompt TEXT NOT NULL,
+  image_url TEXT NOT NULL,
+  image_model VARCHAR(120),
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_video_ugc_character_angles_collection
+  ON video_ugc_character_angles(collection_id);
+
+CREATE INDEX IF NOT EXISTS idx_video_ugc_character_angles_character
+  ON video_ugc_character_angles(character_id);

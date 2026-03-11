@@ -41,6 +41,19 @@ type VideoUgcCharacterRow = {
   updated_at: string;
 };
 
+type VideoUgcCharacterAngleRow = {
+  id: string;
+  collection_id: string;
+  character_id: string;
+  angle_key: string;
+  angle_label: string;
+  angle_prompt: string;
+  image_url: string;
+  image_model: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
 function asText(value: unknown): string {
   return typeof value === "string" ? value.trim() : "";
 }
@@ -216,7 +229,7 @@ Return strict JSON only:
   };
 }
 
-function toCharacterResponse(row: VideoUgcCharacterRow) {
+function toCharacterResponse(row: VideoUgcCharacterRow, angles: VideoUgcCharacterAngleRow[] = []) {
   return {
     id: row.id,
     collectionId: row.collection_id,
@@ -229,6 +242,16 @@ function toCharacterResponse(row: VideoUgcCharacterRow) {
     referenceImageUrl: row.reference_image_url,
     imageModel: row.image_model,
     isDefault: Boolean(row.is_default),
+    angles: angles.map((angle) => ({
+      id: angle.id,
+      angleKey: angle.angle_key,
+      angleLabel: angle.angle_label,
+      anglePrompt: angle.angle_prompt,
+      imageUrl: angle.image_url,
+      imageModel: angle.image_model,
+      createdAt: angle.created_at,
+      updatedAt: angle.updated_at,
+    })),
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -272,7 +295,30 @@ export async function GET(request: NextRequest) {
     }
 
     const rows = Array.isArray(data) ? (data as unknown as VideoUgcCharacterRow[]) : [];
-    return NextResponse.json({ characters: rows.map(toCharacterResponse) });
+
+    const { data: angleData, error: angleError } = await supabase
+      .from("video_ugc_character_angles")
+      .select("*")
+      .eq("collection_id", collectionId)
+      .order("created_at", { ascending: false });
+
+    if (angleError && !isMissingTableError(angleError)) {
+      throw angleError;
+    }
+
+    const angles = Array.isArray(angleData) ? (angleData as unknown as VideoUgcCharacterAngleRow[]) : [];
+    const anglesByCharacter = new Map<string, VideoUgcCharacterAngleRow[]>();
+
+    for (const angle of angles) {
+      if (!anglesByCharacter.has(angle.character_id)) {
+        anglesByCharacter.set(angle.character_id, []);
+      }
+      anglesByCharacter.get(angle.character_id)?.push(angle);
+    }
+
+    return NextResponse.json({
+      characters: rows.map((row) => toCharacterResponse(row, anglesByCharacter.get(row.id) || [])),
+    });
   } catch (err) {
     return NextResponse.json(
       { error: err instanceof Error ? err.message : "Failed to load UGC characters." },

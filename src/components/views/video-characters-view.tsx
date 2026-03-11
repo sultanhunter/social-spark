@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { ArrowLeft, Loader2, Sparkles, Star } from "lucide-react";
+import { ArrowLeft, Camera, Loader2, Sparkles, Star } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -29,7 +29,17 @@ type UgcCharacter = {
   referenceImageUrl: string | null;
   imageModel: string | null;
   isDefault?: boolean;
+  angles?: CharacterAngle[];
   updatedAt: string;
+};
+
+type CharacterAngle = {
+  id: string;
+  angleKey: string;
+  angleLabel: string;
+  anglePrompt: string;
+  imageUrl: string;
+  imageModel: string | null;
 };
 
 type CharactersResponse = {
@@ -46,6 +56,7 @@ export function VideoCharactersView({ collectionId }: { collectionId: string }) 
   const [isLoading, setIsLoading] = useState(false);
   const [isCreating, setIsCreating] = useState(false);
   const [defaultingId, setDefaultingId] = useState<string | null>(null);
+  const [generatingAnglesId, setGeneratingAnglesId] = useState<string | null>(null);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
 
@@ -134,6 +145,37 @@ export function VideoCharactersView({ collectionId }: { collectionId: string }) 
       setError(err instanceof Error ? err.message : "Failed to set default character.");
     } finally {
       setDefaultingId(null);
+    }
+  };
+
+  const handleGenerateAngles = async (characterId: string) => {
+    setGeneratingAnglesId(characterId);
+    setError("");
+    setSuccess("");
+
+    try {
+      const response = await fetch("/api/video-agent/characters/angles", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          collectionId,
+          characterId,
+          imageGenerationModel: imageModel,
+          replaceExisting: true,
+        }),
+      });
+
+      const data = (await response.json()) as { error?: string };
+      if (!response.ok) {
+        throw new Error(data.error || "Failed to generate character angles.");
+      }
+
+      setSuccess("Generated angle pack for selected character.");
+      await loadCharacters();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to generate character angles.");
+    } finally {
+      setGeneratingAnglesId(null);
     }
   };
 
@@ -229,6 +271,26 @@ export function VideoCharactersView({ collectionId }: { collectionId: string }) 
                     <p className="mt-2 text-xs text-slate-600">{character.personaSummary}</p>
                     <p className="mt-1 text-[11px] text-slate-500">Image model: {character.imageModel || "N/A"}</p>
                     <p className="mt-1 text-[11px] text-slate-500">Voice: {character.voiceTone || "N/A"}</p>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="mt-3"
+                      onClick={() => handleGenerateAngles(character.id)}
+                      disabled={generatingAnglesId === character.id}
+                    >
+                      {generatingAnglesId === character.id ? (
+                        <>
+                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                          Generating angles...
+                        </>
+                      ) : (
+                        <>
+                          <Camera className="mr-2 h-4 w-4" />
+                          {character.angles && character.angles.length > 0 ? "Regenerate Angles" : "Generate Angles"}
+                        </>
+                      )}
+                    </Button>
+
                     {!character.isDefault ? (
                       <Button
                         variant="outline"
@@ -249,6 +311,24 @@ export function VideoCharactersView({ collectionId }: { collectionId: string }) 
                           </>
                         )}
                       </Button>
+                    ) : null}
+
+                    {character.angles && character.angles.length > 0 ? (
+                      <div className="mt-3 space-y-2">
+                        <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Angle Pack</p>
+                        <div className="grid grid-cols-2 gap-2">
+                          {character.angles.map((angle) => (
+                            <div key={angle.id} className="rounded-md border border-slate-200 p-1.5">
+                              <img
+                                src={angle.imageUrl}
+                                alt={angle.angleLabel}
+                                className="h-24 w-full rounded object-cover"
+                              />
+                              <p className="mt-1 text-[11px] font-medium text-slate-700">{angle.angleLabel}</p>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
                     ) : null}
                   </div>
                 ))}
