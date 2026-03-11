@@ -571,6 +571,12 @@ TOOLS AVAILABLE:
 - Higgsfield subscription for generation
 - Professional video editing tools
 
+CREATOR CONSTRAINT:
+- Assume there are no real human creators available for collaboration.
+- If this format requires on-camera human presence (UGC, testimonial, talking-head, lifestyle human actions), you must use AI influencer shots generated in Higgsfield.
+- Keep one consistent influencer persona across scenes (face, age range, modest styling, tone, lighting continuity).
+- Do not mention "AI" or "generated" inside the public-facing script unless explicitly needed.
+
 SELECTED FORMAT:
 ${JSON.stringify(format, null, 2)}
 
@@ -595,6 +601,8 @@ RESPONSE RULES:
 - CTA must be soft and non-salesy (example style: save/share/follow/use this method), with optional subtle app reference only if it fits context.
 - For any app overlay moment, specify placement and intent in editNote (for example: "top-right mini overlay of cycle day screen for 2s").
 - Reuse the source transcript style (cadence, phrasing, emotional tone) when drafting narration so output feels native to the original format.
+- If human presence is needed, include execution-ready Higgsfield prompts for the AI influencer scenes and include persona continuity instructions.
+- Production steps must explicitly describe how to generate and stitch AI influencer shots with app overlays.
 - If source content appears to include a famous public figure, public speech, or recognisable creator persona that should not be rewritten:
   - Set integrationMode to "public_figure_overlay_only".
   - Do NOT rewrite their core spoken lines or impersonate them.
@@ -668,7 +676,10 @@ JSON SHAPE:
       if (!isRecord(item)) return null;
       return {
         scene: sanitizeString(item.scene, "Scene"),
-        prompt: sanitizeString(item.prompt, "Create a vertical 9:16 shot aligned with the selected format."),
+        prompt: sanitizeString(
+          item.prompt,
+          "Create a vertical 9:16 AI influencer shot for Muslimah audience: modest outfit, natural expression, soft daylight, realistic movement, clean background, consistent character identity across scenes."
+        ),
       };
     })
     .filter((item): item is HiggsfieldPrompt => Boolean(item))
@@ -709,7 +720,10 @@ JSON SHAPE:
 
   return {
     title: sanitizeString(row.title, `${appName} format recreation plan`),
-    strategy: sanitizeString(row.strategy, "Reuse the selected format skeleton as value-first content, with only subtle app integration where naturally relevant."),
+    strategy: sanitizeString(
+      row.strategy,
+      "Reuse the selected format skeleton as value-first content, generate any required human scenes with a consistent Higgsfield AI influencer, and add subtle app integration where naturally relevant."
+    ),
     objective: sanitizeString(row.objective, "Deliver practical guidance with authentic retention flow and optional low-friction app visibility."),
     integrationMode,
     publicFigureNotes: sanitizeString(
