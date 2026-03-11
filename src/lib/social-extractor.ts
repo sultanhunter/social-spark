@@ -17,6 +17,23 @@ export interface ExtractedVideoFrame {
   data: string;
 }
 
+export interface ExtractedTranscriptSegment {
+  startSec: number;
+  endSec: number;
+  text: string;
+}
+
+export interface ExtractedVideoTranscript {
+  available: boolean;
+  provider: string | null;
+  model: string | null;
+  language: string | null;
+  summary: string | null;
+  fullText: string | null;
+  segments: ExtractedTranscriptSegment[];
+  error: string | null;
+}
+
 export interface ExtractedVideoFramesData {
   title: string | null;
   description: string | null;
@@ -27,6 +44,7 @@ export interface ExtractedVideoFramesData {
   extractedFrameCount: number;
   frameWidth: number;
   frames: ExtractedVideoFrame[];
+  transcript: ExtractedVideoTranscript;
 }
 
 function isHttpUrl(value: unknown): value is string {
@@ -225,6 +243,8 @@ export async function extractVideoFrames(
     sessionId?: string;
     frameCount?: number;
     frameWidth?: number;
+    includeTranscript?: boolean;
+    transcriptMaxSeconds?: number;
   }
 ): Promise<ExtractedVideoFramesData> {
   if (platform !== "instagram" && platform !== "tiktok") {
@@ -262,6 +282,8 @@ export async function extractVideoFrames(
         sessionId: options?.sessionId,
         frameCount: options?.frameCount,
         frameWidth: options?.frameWidth,
+        includeTranscript: options?.includeTranscript,
+        transcriptMaxSeconds: options?.transcriptMaxSeconds,
       }),
       signal: controller.signal,
     });
@@ -294,6 +316,7 @@ export async function extractVideoFrames(
       extractedFrameCount?: unknown;
       frameWidth?: unknown;
       frames?: unknown;
+      transcript?: unknown;
     };
 
     const frames = Array.isArray(data.frames)
@@ -326,6 +349,41 @@ export async function extractVideoFrames(
         ? `remote:${data.extractor}`
         : "remote:extractor-service";
 
+    const transcriptRow =
+      data.transcript && typeof data.transcript === "object"
+        ? (data.transcript as Record<string, unknown>)
+        : null;
+
+    const transcriptSegmentsRaw = Array.isArray(transcriptRow?.segments)
+      ? (transcriptRow?.segments as unknown[])
+      : [];
+
+    const transcriptSegments = transcriptSegmentsRaw
+      .map((item) => {
+        if (!item || typeof item !== "object") return null;
+        const row = item as Record<string, unknown>;
+        const text = typeof row.text === "string" ? row.text.trim() : "";
+        if (!text) return null;
+
+        return {
+          startSec: typeof row.startSec === "number" ? row.startSec : 0,
+          endSec: typeof row.endSec === "number" ? row.endSec : 0,
+          text,
+        } satisfies ExtractedTranscriptSegment;
+      })
+      .filter((item): item is ExtractedTranscriptSegment => Boolean(item));
+
+    const transcript: ExtractedVideoTranscript = {
+      available: Boolean(transcriptRow?.available),
+      provider: typeof transcriptRow?.provider === "string" ? transcriptRow.provider : null,
+      model: typeof transcriptRow?.model === "string" ? transcriptRow.model : null,
+      language: typeof transcriptRow?.language === "string" ? transcriptRow.language : null,
+      summary: typeof transcriptRow?.summary === "string" ? transcriptRow.summary : null,
+      fullText: typeof transcriptRow?.fullText === "string" ? transcriptRow.fullText : null,
+      segments: transcriptSegments,
+      error: typeof transcriptRow?.error === "string" ? transcriptRow.error : null,
+    };
+
     console.log(
       `[extract-remote-video] req=${requestId} success elapsedMs=${elapsedMs} extractor=${extractor} frames=${frames.length}`
     );
@@ -352,6 +410,7 @@ export async function extractVideoFrames(
           ? data.frameWidth
           : 960,
       frames,
+      transcript,
     };
   } catch (error) {
     if (error instanceof Error && error.name === "AbortError") {

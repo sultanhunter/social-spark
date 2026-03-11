@@ -19,6 +19,8 @@ export interface VideoSourceMetadata {
   description: string | null;
   thumbnailUrl: string | null;
   userNotes?: string | null;
+  transcriptSummary?: string | null;
+  transcriptText?: string | null;
 }
 
 export interface VideoFormatAnalysis {
@@ -29,6 +31,10 @@ export interface VideoFormatAnalysis {
   sampledFrameCount: number;
   sampledFrameSources: string[];
   directMediaUrl: string | null;
+  transcriptAvailable: boolean;
+  transcriptSummary: string;
+  transcriptText: string;
+  transcriptHighlights: string[];
   visualSignals: string[];
   onScreenTextPatterns: string[];
   summary: string;
@@ -76,6 +82,9 @@ export interface VideoRecreationPlan {
   title: string;
   strategy: string;
   objective: string;
+  integrationMode: "standard_adaptation" | "public_figure_overlay_only";
+  publicFigureNotes: string;
+  overlayOpportunities: string[];
   deliverableSpec: {
     duration: string;
     aspectRatio: string;
@@ -238,6 +247,12 @@ async function buildVisualEvidence(source: VideoSourceMetadata): Promise<{
   parts: InlineImagePart[];
   sampledFrameSources: string[];
   directMediaUrl: string | null;
+  transcript: {
+    available: boolean;
+    summary: string | null;
+    fullText: string | null;
+    highlights: string[];
+  };
 }> {
   if (source.platform !== "instagram" && source.platform !== "tiktok") {
     throw new Error(
@@ -250,6 +265,8 @@ async function buildVisualEvidence(source: VideoSourceMetadata): Promise<{
     sessionId,
     frameCount: FRAME_SAMPLE_TARGET,
     frameWidth: 960,
+    includeTranscript: true,
+    transcriptMaxSeconds: 90,
   });
 
   const frameParts = frameExtraction.frames
@@ -267,11 +284,22 @@ async function buildVisualEvidence(source: VideoSourceMetadata): Promise<{
     );
   }
 
+  const transcriptHighlights = frameExtraction.transcript.segments
+    .map((segment) => cleanText(segment.text))
+    .filter(Boolean)
+    .slice(0, 8);
+
   return {
     method: "frame_aware",
     parts: frameParts,
     sampledFrameSources: ["remote_extractor_frames"],
     directMediaUrl: frameExtraction.videoUrl,
+    transcript: {
+      available: frameExtraction.transcript.available,
+      summary: frameExtraction.transcript.summary,
+      fullText: frameExtraction.transcript.fullText,
+      highlights: transcriptHighlights,
+    },
   };
 }
 
@@ -350,18 +378,26 @@ VISUAL EVIDENCE:
 - sampledFrameSources: ${visualEvidence.sampledFrameSources.join(", ") || "none"}
 - directMediaUrl: ${visualEvidence.directMediaUrl || "N/A"}
 
+TRANSCRIPT EVIDENCE:
+- transcriptAvailable: ${visualEvidence.transcript.available ? "yes" : "no"}
+- transcriptSummary: ${visualEvidence.transcript.summary || "N/A"}
+- transcriptHighlights: ${visualEvidence.transcript.highlights.join(" | ") || "N/A"}
+- transcriptFullText: ${visualEvidence.transcript.fullText || "N/A"}
+
 OUTPUT RULES:
 - Return strict JSON only.
 - formatType must be one of: ugc, ai_video, hybrid, editorial.
 - formatSignature must be stable across similar videos, lowercase snake_case, 3-6 words.
 - Focus on structure and repeatable production system (hook type, shot style, edit rhythm), not topic specifics.
 - Extract visible text overlays from attached frames when possible.
+- If transcript is available, use it heavily for hook language patterns and messaging structure.
 
 JSON SHAPE:
 {
   "formatName": "string",
   "formatType": "ugc|ai_video|hybrid|editorial",
   "formatSignature": "string",
+  "transcriptHighlights": ["string"],
   "visualSignals": ["string"],
   "onScreenTextPatterns": ["string"],
   "summary": "string",
@@ -397,6 +433,18 @@ JSON SHAPE:
     sampledFrameCount: visualEvidence.parts.length,
     sampledFrameSources: visualEvidence.sampledFrameSources,
     directMediaUrl: visualEvidence.directMediaUrl,
+    transcriptAvailable: visualEvidence.transcript.available,
+    transcriptSummary: sanitizeString(
+      visualEvidence.transcript.summary,
+      visualEvidence.transcript.available ? "Transcript extracted from source video." : ""
+    ),
+    transcriptText: sanitizeString(visualEvidence.transcript.fullText, ""),
+    transcriptHighlights: sanitizeStringArray(
+      row.transcriptHighlights,
+      10
+    ).length
+      ? sanitizeStringArray(row.transcriptHighlights, 10)
+      : visualEvidence.transcript.highlights,
     visualSignals: sanitizeStringArray(row.visualSignals, 8),
     onScreenTextPatterns: sanitizeStringArray(row.onScreenTextPatterns, 10),
     summary: sanitizeString(row.summary, "Reusable short-form structure with a strong hook and clear CTA."),
@@ -493,6 +541,8 @@ interface BuildRecreationPlanArgs {
     description: string | null;
     platform: string;
     userNotes: string | null;
+    transcriptSummary?: string | null;
+    transcriptText?: string | null;
   };
   format: VideoFormatAnalysis;
   reasoningModel?: ReasoningModel;
@@ -530,6 +580,8 @@ REFERENCE VIDEO:
 - Title: ${sourceVideo.title || "N/A"}
 - Description: ${sourceVideo.description || "N/A"}
 - Notes: ${sourceVideo.userNotes || "N/A"}
+- Transcript Summary: ${sourceVideo.transcriptSummary || "N/A"}
+- Transcript Text: ${sourceVideo.transcriptText || "N/A"}
 
 RESPONSE RULES:
 - Build for Muslim women audience and keep tone faith-aware, practical, and respectful.
@@ -542,6 +594,12 @@ RESPONSE RULES:
 - Keep explicit app name mentions to a maximum of 1 in the entire script (hook + beats + CTA).
 - CTA must be soft and non-salesy (example style: save/share/follow/use this method), with optional subtle app reference only if it fits context.
 - For any app overlay moment, specify placement and intent in editNote (for example: "top-right mini overlay of cycle day screen for 2s").
+- Reuse the source transcript style (cadence, phrasing, emotional tone) when drafting narration so output feels native to the original format.
+- If source content appears to include a famous public figure, public speech, or recognisable creator persona that should not be rewritten:
+  - Set integrationMode to "public_figure_overlay_only".
+  - Do NOT rewrite their core spoken lines or impersonate them.
+  - Keep original speech/audio moments and only integrate app via subtle overlays/screenshots/screen recordings.
+  - Avoid making it look like endorsement by that public figure.
 - Return strict JSON only.
 
 JSON SHAPE:
@@ -549,6 +607,9 @@ JSON SHAPE:
   "title": "string",
   "strategy": "string",
   "objective": "string",
+  "integrationMode": "standard_adaptation|public_figure_overlay_only",
+  "publicFigureNotes": "string",
+  "overlayOpportunities": ["string"],
   "deliverableSpec": {
     "duration": "string",
     "aspectRatio": "9:16",
@@ -614,6 +675,11 @@ JSON SHAPE:
     .slice(0, 8);
 
   const mentionState = { count: 0 };
+  const integrationModeRaw = sanitizeString(row.integrationMode, "standard_adaptation");
+  const integrationMode: "standard_adaptation" | "public_figure_overlay_only" =
+    integrationModeRaw === "public_figure_overlay_only"
+      ? "public_figure_overlay_only"
+      : "standard_adaptation";
   const adjustedHook = limitAppNameMentions(
     sanitizeString(scriptRow.hook, "Start with a direct pain-point hook in first 2 seconds."),
     appName,
@@ -630,10 +696,29 @@ JSON SHAPE:
     mentionState
   );
 
+  const adjustedBeatsForMode =
+    integrationMode === "public_figure_overlay_only"
+      ? adjustedBeats.map((beat) => ({
+          ...beat,
+          narration:
+            sanitizeString(beat.narration, "").length > 0 && /original|keep|source audio|use source/i.test(beat.narration)
+              ? beat.narration
+              : "Keep original source speech/audio for this beat; no rewritten voice line.",
+        }))
+      : adjustedBeats;
+
   return {
     title: sanitizeString(row.title, `${appName} format recreation plan`),
     strategy: sanitizeString(row.strategy, "Reuse the selected format skeleton as value-first content, with only subtle app integration where naturally relevant."),
     objective: sanitizeString(row.objective, "Deliver practical guidance with authentic retention flow and optional low-friction app visibility."),
+    integrationMode,
+    publicFigureNotes: sanitizeString(
+      row.publicFigureNotes,
+      integrationMode === "public_figure_overlay_only"
+        ? "Detected public-figure style source. Preserve original speech and use overlay-only app integration."
+        : "No strict public-figure preservation constraints detected."
+    ),
+    overlayOpportunities: sanitizeStringArray(row.overlayOpportunities, 8),
     deliverableSpec: {
       duration: sanitizeString(deliverableSpecRow.duration, "20-30 seconds"),
       aspectRatio: sanitizeString(deliverableSpecRow.aspectRatio, "9:16"),
@@ -642,7 +727,7 @@ JSON SHAPE:
     },
     script: {
       hook: adjustedHook,
-      beats: adjustedBeats,
+      beats: adjustedBeatsForMode,
       cta: adjustedCta,
     },
     higgsfieldPrompts,

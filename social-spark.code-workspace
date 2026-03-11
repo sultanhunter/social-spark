@@ -1,0 +1,14 @@
+{
+	"folders": [
+		{
+			"path": "."
+		},
+		{
+			"path": "../social-extractor-render"
+		},
+		{
+			"path": "../Perri"
+		}
+	],
+	"settings": {}
+}

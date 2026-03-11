@@ -114,6 +114,21 @@ type RecreateResponse = {
   error?: string;
 };
 
+type SavedPlan = {
+  id: string;
+  format_id: string;
+  source_video_id: string;
+  reasoningModel?: string | null;
+  generatedAt?: string;
+  created_at: string;
+  plan: VideoPlan;
+};
+
+type PlansResponse = {
+  plans?: SavedPlan[];
+  error?: string;
+};
+
 function formatTypeVariant(type: string): "default" | "video" | "success" {
   if (type === "ugc") return "video";
   if (type === "ai_video") return "success";
@@ -142,6 +157,12 @@ function getVideoFrameCount(video: LibraryVideo): number | null {
   return typeof frameCount === "number" && Number.isFinite(frameCount) ? frameCount : null;
 }
 
+function formatDateTime(value: string): string {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleString();
+}
+
 export function VideoAgentView({ collectionId }: { collectionId: string }) {
   const router = useRouter();
   const { activeCollection } = useAppStore();
@@ -154,7 +175,9 @@ export function VideoAgentView({ collectionId }: { collectionId: string }) {
   const [selectedVideoId, setSelectedVideoId] = useState<string | null>(null);
   const [plan, setPlan] = useState<VideoPlan | null>(null);
   const [planId, setPlanId] = useState<string | null>(null);
+  const [savedPlans, setSavedPlans] = useState<SavedPlan[]>([]);
   const [isLoadingLibrary, setIsLoadingLibrary] = useState(false);
+  const [isLoadingPlans, setIsLoadingPlans] = useState(false);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [isGeneratingPlan, setIsGeneratingPlan] = useState(false);
   const [error, setError] = useState("");
@@ -235,6 +258,67 @@ export function VideoAgentView({ collectionId }: { collectionId: string }) {
     () => selectedFormat?.videos.find((video) => video.id === selectedVideoId) || null,
     [selectedFormat, selectedVideoId]
   );
+
+  const loadSavedPlans = useCallback(
+    async (options?: {
+      formatId?: string | null;
+      videoId?: string | null;
+      preferredPlanId?: string | null;
+    }) => {
+      const effectiveFormatId = options?.formatId ?? selectedFormatId;
+      const effectiveVideoId = options?.videoId ?? selectedVideoId;
+
+      if (!effectiveFormatId || !effectiveVideoId) {
+        setSavedPlans([]);
+        setPlan(null);
+        setPlanId(null);
+        return;
+      }
+
+      setIsLoadingPlans(true);
+
+      try {
+        const url = `/api/video-agent/plans?collectionId=${encodeURIComponent(collectionId)}&formatId=${encodeURIComponent(effectiveFormatId)}&videoId=${encodeURIComponent(effectiveVideoId)}&limit=20`;
+
+        const response = await fetch(url, {
+          method: "GET",
+          cache: "no-store",
+        });
+
+        const data = (await response.json()) as PlansResponse;
+
+        if (!response.ok) {
+          throw new Error(data.error || "Failed to load saved recreation plans.");
+        }
+
+        const plans = Array.isArray(data.plans) ? data.plans : [];
+        setSavedPlans(plans);
+
+        const preferredPlan =
+          (options?.preferredPlanId
+            ? plans.find((item) => item.id === options.preferredPlanId)
+            : null) || plans[0] || null;
+
+        if (!preferredPlan) {
+          setPlan(null);
+          setPlanId(null);
+          return;
+        }
+
+        setPlan(preferredPlan.plan);
+        setPlanId(preferredPlan.id);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Failed to load saved recreation plans.");
+      } finally {
+        setIsLoadingPlans(false);
+      }
+    },
+    [collectionId, selectedFormatId, selectedVideoId]
+  );
+
+  useEffect(() => {
+    void loadSavedPlans();
+  }, [loadSavedPlans]);
 
   const scriptClipboardText = useMemo(() => {
     if (!plan) return "";
@@ -350,6 +434,12 @@ export function VideoAgentView({ collectionId }: { collectionId: string }) {
       setPlan(data.plan);
       setPlanId(data.planId || null);
       setSuccess("Generated your recreation plan and script.");
+
+      await loadSavedPlans({
+        formatId: selectedFormat.id,
+        videoId: selectedVideo.id,
+        preferredPlanId: data.planId || null,
+      });
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to generate recreation plan.");
     } finally {
@@ -607,6 +697,50 @@ export function VideoAgentView({ collectionId }: { collectionId: string }) {
                       Copy Higgsfield Prompts
                     </Button>
                   ) : null}
+                </div>
+
+                <div className="space-y-2 rounded-lg border border-slate-200 bg-slate-50 p-3">
+                  <div className="flex items-center justify-between gap-3">
+                    <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Saved Recreation Plans</p>
+                    <span className="text-xs text-slate-500">
+                      {isLoadingPlans ? "Loading..." : `${savedPlans.length} saved`}
+                    </span>
+                  </div>
+
+                  {savedPlans.length === 0 ? (
+                    <p className="text-xs text-slate-500">No saved plans for this source yet. Generate one to persist it.</p>
+                  ) : (
+                    <div className="space-y-2">
+                      {savedPlans.map((savedPlan) => {
+                        const isActivePlan = planId === savedPlan.id;
+
+                        return (
+                          <button
+                            key={savedPlan.id}
+                            type="button"
+                            onClick={() => {
+                              setPlan(savedPlan.plan);
+                              setPlanId(savedPlan.id);
+                              setSuccess("Loaded saved recreation plan.");
+                            }}
+                            className={`w-full rounded-md border px-3 py-2 text-left transition ${
+                              isActivePlan
+                                ? "border-rose-300 bg-rose-50"
+                                : "border-slate-200 bg-white hover:border-slate-300"
+                            }`}
+                          >
+                            <p className={`text-xs font-semibold ${isActivePlan ? "text-rose-700" : "text-slate-700"}`}>
+                              {savedPlan.plan.title || "Saved plan"}
+                            </p>
+                            <p className="mt-1 text-[11px] text-slate-500">
+                              {formatDateTime(savedPlan.generatedAt || savedPlan.created_at)}
+                              {savedPlan.reasoningModel ? ` · ${savedPlan.reasoningModel}` : ""}
+                            </p>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
                 </div>
               </CardContent>
             </Card>

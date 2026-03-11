@@ -43,6 +43,7 @@ type VideoFormatVideoRow = {
   description: string | null;
   thumbnail_url: string | null;
   user_notes: string | null;
+  analysis_payload?: Record<string, unknown> | null;
 };
 
 function asText(value: unknown): string {
@@ -104,6 +105,10 @@ function toFormatAnalysis(row: VideoFormatRow): VideoFormatAnalysis {
     sampledFrameCount: 0,
     sampledFrameSources: [],
     directMediaUrl: null,
+    transcriptAvailable: false,
+    transcriptSummary: "",
+    transcriptText: "",
+    transcriptHighlights: [],
     visualSignals: [],
     onScreenTextPatterns: [],
     summary: row.summary,
@@ -116,6 +121,44 @@ function toFormatAnalysis(row: VideoFormatRow): VideoFormatAnalysis {
     recreationChecklist: Array.isArray(row.recreation_checklist) ? row.recreation_checklist : [],
     durationGuidance: row.duration_guidance || "",
     confidence: typeof row.confidence === "number" ? row.confidence : 0.64,
+  };
+}
+
+function getSourceTranscriptFromAnalysisPayload(payload: unknown): {
+  summary: string | null;
+  text: string | null;
+} {
+  if (!payload || typeof payload !== "object") {
+    return { summary: null, text: null };
+  }
+
+  const row = payload as Record<string, unknown>;
+  const sourceMetadata =
+    row.sourceMetadata && typeof row.sourceMetadata === "object"
+      ? (row.sourceMetadata as Record<string, unknown>)
+      : null;
+  const formatAnalysis =
+    row.formatAnalysis && typeof row.formatAnalysis === "object"
+      ? (row.formatAnalysis as Record<string, unknown>)
+      : null;
+
+  const transcriptSummary =
+    (typeof sourceMetadata?.transcriptSummary === "string" && sourceMetadata.transcriptSummary.trim())
+      ? sourceMetadata.transcriptSummary.trim()
+      : typeof formatAnalysis?.transcriptSummary === "string" && formatAnalysis.transcriptSummary.trim()
+        ? formatAnalysis.transcriptSummary.trim()
+        : null;
+
+  const transcriptText =
+    (typeof sourceMetadata?.transcriptText === "string" && sourceMetadata.transcriptText.trim())
+      ? sourceMetadata.transcriptText.trim()
+      : (typeof formatAnalysis?.transcriptText === "string" && formatAnalysis.transcriptText.trim())
+        ? formatAnalysis.transcriptText.trim()
+      : null;
+
+  return {
+    summary: transcriptSummary,
+    text: transcriptText,
   };
 }
 
@@ -146,7 +189,7 @@ export async function POST(request: NextRequest) {
         .single(),
       supabase
         .from("video_format_videos")
-        .select("id, collection_id, format_id, source_url, platform, title, description, thumbnail_url, user_notes")
+        .select("id, collection_id, format_id, source_url, platform, title, description, thumbnail_url, user_notes, analysis_payload")
         .eq("id", videoId)
         .eq("collection_id", collectionId)
         .single(),
@@ -202,6 +245,7 @@ export async function POST(request: NextRequest) {
 
     const appName = (collection.app_name || "Muslimah Pro").trim() || "Muslimah Pro";
     const appContext = (collection.app_description || collection.app_context || "").trim();
+    const transcriptContext = getSourceTranscriptFromAnalysisPayload(sourceVideo.analysis_payload);
 
     const plan = await buildVideoRecreationPlan({
       appName,
@@ -212,6 +256,8 @@ export async function POST(request: NextRequest) {
         description: sourceVideo.description,
         platform: sourceVideo.platform,
         userNotes: sourceVideo.user_notes,
+        transcriptSummary: transcriptContext.summary,
+        transcriptText: transcriptContext.text,
       },
       format: toFormatAnalysis(format),
       reasoningModel,

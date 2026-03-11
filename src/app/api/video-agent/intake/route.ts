@@ -102,6 +102,8 @@ export async function POST(request: NextRequest) {
     sourceMetadata.userNotes = userNotes;
 
     const formatAnalysis = await analyzeVideoFormatFromSource(sourceMetadata, reasoningModel);
+    sourceMetadata.transcriptSummary = formatAnalysis.transcriptSummary || null;
+    sourceMetadata.transcriptText = formatAnalysis.transcriptText || null;
 
     const { data: existingFormats, error: existingFormatsError } = await supabase
       .from("video_formats")
