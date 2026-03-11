@@ -821,12 +821,10 @@ export function VideoAgentView({ collectionId }: { collectionId: string }) {
                     {plan.higgsfieldPrompts.map((item, index) => (
                       <div key={`${item.scene}-${index}`} className="rounded-md border border-slate-200 bg-white p-2.5">
                         <p className="text-sm font-semibold text-slate-800">{index + 1}. {item.scene}</p>
-                        <p className="mt-1 text-xs text-slate-600">
-                          <span className="font-semibold">Duration:</span> {getPromptDuration(item)}
-                        </p>
-                        <p className="mt-1 text-xs text-slate-600">
-                          <span className="font-semibold">Model:</span> {getPromptModel(item)}
-                        </p>
+                        <div className="mt-1 flex flex-wrap items-center gap-2">
+                          <Badge variant="default">Duration: {getPromptDuration(item)}</Badge>
+                          <Badge variant="video">Model: {getPromptModel(item)}</Badge>
+                        </div>
                         <p className="mt-1 text-xs text-slate-500">
                           <span className="font-semibold">Why:</span> {getPromptReason(item)}
                         </p>

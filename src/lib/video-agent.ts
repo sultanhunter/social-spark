@@ -179,6 +179,20 @@ function ensureHiggsfieldPromptHasPerformanceInstruction(prompt: string): string
   return `${normalized} No dialogue: character expresses the intended emotion and intent silently.`;
 }
 
+function stripPromptMetaTags(prompt: string): string {
+  const cleaned = prompt
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => {
+      if (!line) return false;
+      return !/^(model|recommendedmodel|duration|shotduration|why|reason)\s*:/i.test(line);
+    })
+    .join(" ")
+    .trim();
+
+  return cleaned;
+}
+
 function enforceFaithPositiveFraming(text: string): string {
   let output = cleanText(text);
   if (!output) return output;
@@ -686,6 +700,7 @@ RESPONSE RULES:
   - If character does not speak, explicitly write "No dialogue" and describe facial/body expression intent.
 - For every Higgsfield scene, include a recommended Higgsfield model and why it is the best fit for that scene.
 - For every Higgsfield scene, include individual shotDuration (for example: "3.5s" or "0:08").
+- Keep the prompt field clean scene direction only. Do NOT include model, reason, or duration text inside prompt; use the dedicated fields.
 - If source content appears to include a famous public figure, public speech, or recognisable creator persona that should not be rewritten:
   - Set integrationMode to "public_figure_overlay_only".
   - Do NOT rewrite their core spoken lines or impersonate them.
@@ -767,9 +782,11 @@ JSON SHAPE:
       return {
         scene: sanitizeString(item.scene, "Scene"),
         prompt: ensureHiggsfieldPromptHasPerformanceInstruction(
-          sanitizeString(
-            item.prompt,
-            "Create a vertical 9:16 AI influencer shot for Muslimah audience: modest outfit, natural expression, soft daylight, realistic movement, clean background, consistent character identity across scenes. No dialogue: character conveys reassurance through calm facial expression and gentle nod."
+          stripPromptMetaTags(
+            sanitizeString(
+              item.prompt,
+              "Create a vertical 9:16 AI influencer shot for Muslimah audience: modest outfit, natural expression, soft daylight, realistic movement, clean background, consistent character identity across scenes. No dialogue: character conveys reassurance through calm facial expression and gentle nod."
+            )
           )
         ),
         recommendedModel: sanitizeString(
