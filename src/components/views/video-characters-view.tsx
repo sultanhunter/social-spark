@@ -187,6 +187,9 @@ export function VideoCharactersView({ collectionId }: { collectionId: string }) 
                     </option>
                   ))}
                 </select>
+                <p className="text-[11px] text-slate-500">
+                  For most photoreal faces, start with `imagen-4.0-ultra-generate-001`.
+                </p>
               </div>
             </div>
 

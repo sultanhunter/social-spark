@@ -135,6 +135,8 @@ async function generateCharacterProfile(
   wardrobeNotes: string;
   voiceTone: string;
   promptTemplate: string;
+  identityAnchors: string[];
+  realismDirectives: string[];
 }> {
   if (!process.env.GOOGLE_GEMINI_API_KEY) {
     throw new Error("GOOGLE_GEMINI_API_KEY is missing.");
@@ -153,6 +155,9 @@ TASK:
 - Keep tone practical, warm, and faith-aware.
 - Keep styling modest and contemporary.
 - Avoid stereotypes.
+- The character must feel like a REAL person, not a polished AI model.
+- Make the persona visually recognizable with stable unique markers.
+- Avoid overly perfect, doll-like, hyper-symmetrical beauty language.
 
 Return strict JSON only:
 {
@@ -161,7 +166,9 @@ Return strict JSON only:
   "visualStyle": "string",
   "wardrobeNotes": "string",
   "voiceTone": "string",
-  "promptTemplate": "single continuity sentence for all Higgsfield prompts"
+  "promptTemplate": "single continuity sentence for all Higgsfield prompts",
+  "identityAnchors": ["3-5 short distinctive physical/personality markers"],
+  "realismDirectives": ["3-5 camera realism constraints"]
 }`;
 
   const result = await model.generateContent(prompt);
@@ -184,8 +191,28 @@ Return strict JSON only:
     voiceTone: cleanText(parsed.voiceTone, "Warm, clear, grounded, reassuring."),
     promptTemplate: cleanText(
       parsed.promptTemplate,
-      "Use the same female Muslimah creator identity in every UGC scene: consistent face, modest styling, natural expression, calm confident delivery, and realistic movement."
+      "Use the same female Muslimah creator identity in every UGC scene: consistent face, modest styling, natural expression, calm confident delivery, realistic movement, and no beauty-filter look."
     ),
+    identityAnchors: Array.isArray(parsed.identityAnchors)
+      ? parsed.identityAnchors
+          .map((item) => cleanText(item))
+          .filter(Boolean)
+          .slice(0, 5)
+      : [
+          "Slight asymmetry in smile and brow expression",
+          "Subtle natural skin texture with a tiny beauty mark",
+          "Soft, grounded eye contact with calm pauses",
+        ],
+    realismDirectives: Array.isArray(parsed.realismDirectives)
+      ? parsed.realismDirectives
+          .map((item) => cleanText(item))
+          .filter(Boolean)
+          .slice(0, 6)
+      : [
+          "No beauty filter, no airbrushed skin, no CGI sheen",
+          "Preserve pores, fine texture, and slight under-eye natural detail",
+          "Use documentary smartphone realism and lived-in background",
+        ],
   };
 }
 
@@ -280,12 +307,15 @@ export async function POST(request: NextRequest) {
     const profile = await generateCharacterProfile(appName, appContext, reasoningModel);
 
     const imagePrompt = [
-      `Create a high-quality portrait reference image for a recurring UGC creator persona named ${profile.characterName}.`,
+      `Create a high-quality photorealistic portrait reference image for a recurring UGC creator persona named ${profile.characterName}.`,
       profile.promptTemplate,
       `Persona: ${profile.personaSummary}.`,
       `Visual style: ${profile.visualStyle}.`,
       `Wardrobe: ${profile.wardrobeNotes}.`,
-      "Vertical 9:16, upper-body framing, natural lighting, clean background, realistic skin texture, no text overlay.",
+      `Identity anchors: ${profile.identityAnchors.join("; ")}.`,
+      `Realism directives: ${profile.realismDirectives.join("; ")}.`,
+      "Vertical 9:16, upper-body framing, natural lighting, documentary smartphone realism, lived-in authentic background, realistic skin texture with pores and minor imperfections, slight facial asymmetry, flyaway hair strands, no text overlay.",
+      "NEGATIVE: plastic skin, porcelain face, hyper-symmetry, uncanny eyes, glossy CGI skin, beauty filter, fashion-magazine retouch.",
     ].join(" ");
 
     const referenceImageUrl = await generateImage(imagePrompt, {
@@ -324,7 +354,7 @@ export async function POST(request: NextRequest) {
         visual_style: profile.visualStyle,
         wardrobe_notes: profile.wardrobeNotes,
         voice_tone: profile.voiceTone,
-        prompt_template: profile.promptTemplate,
+        prompt_template: `${profile.promptTemplate} Identity anchors: ${profile.identityAnchors.join("; ")}. Realism directives: ${profile.realismDirectives.join("; ")}.`,
         reference_image_url: referenceImageUrl,
         image_model: imageModel,
         is_default: setAsDefault,
