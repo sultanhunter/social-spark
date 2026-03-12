@@ -66,6 +66,8 @@ type GeneratedVersionResult = {
   images: string[];
   recreatedPostId?: string | null;
   caption?: string | null;
+  generatedCount?: number;
+  totalAssets?: number;
 };
 
 type RecreationStep = "prepare" | "script" | "complete";
@@ -114,6 +116,10 @@ type RecreatedHistoryItem = {
 type FlattenedAsset = {
   name: string;
   prompt: string;
+};
+
+type QueuedAsset = FlattenedAsset & {
+  index: number;
 };
 
 const DEFAULT_FALLBACK_ASSET_PROMPT =
@@ -212,6 +218,13 @@ function flattenAssetPrompts(slidePlans: SlidePlan[] | null | undefined): Flatte
   }
 
   return flattened;
+}
+
+function buildAssetQueue(slidePlans: SlidePlan[] | null | undefined): QueuedAsset[] {
+  return flattenAssetPrompts(slidePlans).map((asset, index) => ({
+    ...asset,
+    index,
+  }));
 }
 
 function HistorySlidePlans({ plans, itemId, script }: { plans: SlidePlan[]; itemId: string; script?: string | null }) {
@@ -371,10 +384,14 @@ export function PostDetailView({ postId }: PostDetailViewProps) {
   const [isGeneratingScript, setIsGeneratingScript] = useState(false);
   const [isGeneratingImages, setIsGeneratingImages] = useState(false);
   const [scriptRequestMode, setScriptRequestMode] = useState<"default" | "hook_strategy">("default");
+  const [imageProgress, setImageProgress] = useState<{ done: number; total: number; current: string }>({
+    done: 0,
+    total: 0,
+    current: "",
+  });
   const [error, setError] = useState("");
   const [reasoningModel, setReasoningModel] = useState(DEFAULT_REASONING_MODEL);
   const [imageGenerationModel, setImageGenerationModel] = useState(DEFAULT_IMAGE_GENERATION_MODEL);
-  const [recreatedPostId, setRecreatedPostId] = useState<string | null>(null);
   const [history, setHistory] = useState<RecreatedHistoryItem[]>([]);
   const [isHistoryLoading, setIsHistoryLoading] = useState(false);
   const [generatingHistoryBySetId, setGeneratingHistoryBySetId] = useState<Record<string, boolean>>({});
@@ -629,6 +646,99 @@ export function PostDetailView({ postId }: PostDetailViewProps) {
     }
   };
 
+  const generateAssetsSequential = useCallback(
+    async ({
+      recreatedPostId: targetRecreatedPostId,
+      queue,
+      onAssetComplete,
+    }: {
+      recreatedPostId: string;
+      queue: QueuedAsset[];
+      onAssetComplete?: (payload: {
+        generatedMediaUrls: string[];
+        generatedCount: number;
+        totalAssets: number;
+        assetIndex: number;
+      }) => void;
+    }) => {
+      if (!activeCollection || !selectedPost) {
+        return { failures: ["Missing collection or post context."], generatedMediaUrls: [] as string[] };
+      }
+
+      const failures: string[] = [];
+      let lastGeneratedMediaUrls: string[] = [];
+
+      for (let idx = 0; idx < queue.length; idx += 1) {
+        const asset = queue[idx];
+        try {
+          const response = await fetch("/api/recreate/regenerate-asset", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              collectionId: activeCollection.id,
+              postId: selectedPost.id,
+              appName: activeCollection.app_name,
+              recreatedPostId: targetRecreatedPostId,
+              assetIndex: asset.index,
+              assetPrompt: asset.prompt,
+              imageGenerationModel,
+              reasoningModel,
+              totalAssets: queue.length,
+              isFinalAsset: idx === queue.length - 1,
+            }),
+          });
+
+          const data = (await response.json()) as {
+            error?: string;
+            generatedMediaUrls?: unknown;
+            generatedCount?: number;
+            totalAssets?: number;
+            imageGenerationModel?: string;
+            reasoningModel?: string;
+          };
+
+          if (!response.ok) {
+            throw new Error(data.error || "Failed to generate asset");
+          }
+
+          if (isReasoningModel(data.reasoningModel)) {
+            setReasoningModel(data.reasoningModel);
+          }
+
+          if (isImageGenerationModel(data.imageGenerationModel)) {
+            setImageGenerationModel(data.imageGenerationModel);
+          }
+
+          const generatedMediaUrls = Array.isArray(data.generatedMediaUrls)
+            ? data.generatedMediaUrls.map((item) => (typeof item === "string" ? item : ""))
+            : [];
+
+          lastGeneratedMediaUrls = generatedMediaUrls;
+
+          onAssetComplete?.({
+            generatedMediaUrls,
+            generatedCount:
+              typeof data.generatedCount === "number"
+                ? data.generatedCount
+                : generatedMediaUrls.filter((url) => typeof url === "string" && url.trim().length > 0).length,
+            totalAssets:
+              typeof data.totalAssets === "number" ? data.totalAssets : queue.length,
+            assetIndex: asset.index,
+          });
+        } catch (assetError) {
+          failures.push(
+            `${asset.name || `Asset ${asset.index + 1}`}: ${
+              assetError instanceof Error ? assetError.message : "Generation failed"
+            }`
+          );
+        }
+      }
+
+      return { failures, generatedMediaUrls: lastGeneratedMediaUrls };
+    },
+    [activeCollection, selectedPost, imageGenerationModel, reasoningModel]
+  );
+
   const handleGenerateHistoryImages = async (item: RecreatedHistoryItem) => {
     if (!activeCollection || !selectedPost) return;
 
@@ -642,53 +752,54 @@ export function PostDetailView({ postId }: PostDetailViewProps) {
     setError("");
 
     try {
-      const adaptationMode: "app_context" | "variant_only" = /Adaptation Mode\s*:\s*app_context/i.test(script)
-        ? "app_context"
-        : "variant_only";
-      const setType = inferHistorySetType(item);
-
       const slidePlans = Array.isArray(item.slide_plans) ? item.slide_plans : [];
+      const queue = buildAssetQueue(slidePlans);
 
-      const response = await fetch("/api/recreate/generate", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          script,
-          slidePlans,
-          versions: [
-            {
-              id: `history-${item.id}`,
-              label: "History Regeneration",
-              setType: setType === "unknown" ? adaptationMode : setType,
-              adaptationMode,
-              usesAppContext: adaptationMode === "app_context",
-              uiGenerationMode: "ai_creative",
-              followsReferenceLayout: false,
-              script,
-              slidePlans,
-              recreatedPostId: item.id,
-            },
-          ],
-          collectionId: activeCollection.id,
-          postId: selectedPost.id,
-          appName: activeCollection.app_name,
-          recreatedPostId: item.id,
-          reasoningModel,
-          imageGenerationModel,
-        }),
+      setHistory((prev) =>
+        prev.map((historyItem) =>
+          historyItem.id === item.id
+            ? {
+                ...historyItem,
+                status: "generating",
+                generated_media_urls: [],
+              }
+            : historyItem
+        )
+      );
+
+      const { failures, generatedMediaUrls } = await generateAssetsSequential({
+        recreatedPostId: item.id,
+        queue,
+        onAssetComplete: ({ generatedMediaUrls: urls }) => {
+          setHistory((prev) =>
+            prev.map((historyItem) =>
+              historyItem.id === item.id
+                ? {
+                    ...historyItem,
+                    status: "generating",
+                    generated_media_urls: urls,
+                  }
+                : historyItem
+            )
+          );
+        },
       });
 
-      const data = await response.json();
-      if (!response.ok) {
-        throw new Error(data.error || "Failed to generate images for this set");
-      }
+      setHistory((prev) =>
+        prev.map((historyItem) =>
+          historyItem.id === item.id
+            ? {
+                ...historyItem,
+                status: failures.length > 0 ? "failed" : "completed",
+                generated_media_urls:
+                  generatedMediaUrls.length > 0 ? generatedMediaUrls : historyItem.generated_media_urls,
+              }
+            : historyItem
+        )
+      );
 
-      if (isReasoningModel(data.reasoningModel)) {
-        setReasoningModel(data.reasoningModel);
-      }
-
-      if (isImageGenerationModel(data.imageGenerationModel)) {
-        setImageGenerationModel(data.imageGenerationModel);
+      if (failures.length > 0) {
+        setError(`Some history assets failed: ${failures.slice(0, 3).join(" | ")}`);
       }
 
       await loadHistory({ silent: true });
@@ -831,9 +942,9 @@ export function PostDetailView({ postId }: PostDetailViewProps) {
     setScriptVersions([]);
     setActiveVersionId("");
     setGeneratedVersions([]);
+    setImageProgress({ done: 0, total: 0, current: "" });
     setNicheState(null);
     setError("");
-    setRecreatedPostId(null);
     setCaptionsBySetId({});
     setCaptionLoadingBySetId({});
     setPostingInstagramBySetId({});
@@ -918,7 +1029,7 @@ export function PostDetailView({ postId }: PostDetailViewProps) {
         setScriptVersions([]);
         setActiveVersionId("");
         setGeneratedVersions([]);
-        setRecreatedPostId(null);
+        setImageProgress({ done: 0, total: 0, current: "" });
         setStep("prepare");
         return;
       }
@@ -958,7 +1069,7 @@ export function PostDetailView({ postId }: PostDetailViewProps) {
           : data.primaryVersionId || versions[0].id
       );
       setGeneratedVersions([]);
-      setRecreatedPostId(typeof data.recreatedPostId === "string" ? data.recreatedPostId : null);
+      setImageProgress({ done: 0, total: 0, current: "" });
       setStep("script");
       await loadHistory();
     } catch (err) {
@@ -980,72 +1091,101 @@ export function PostDetailView({ postId }: PostDetailViewProps) {
     setError("");
 
     try {
-      const fallbackScript = activeVersion?.script || scriptVersions[0]?.script || "";
-      const fallbackPlans = activeVersion?.slidePlans || scriptVersions[0]?.slidePlans || [];
+      const versionQueues = scriptVersions.map((version) => ({
+        version,
+        queue: buildAssetQueue(version.slidePlans),
+      }));
 
-      const response = await fetch("/api/recreate/generate", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          script: fallbackScript,
-          slidePlans: fallbackPlans,
-          versions: scriptVersions,
-          collectionId: activeCollection.id,
-          postId: selectedPost.id,
-          appName: activeCollection.app_name,
-          recreatedPostId,
-          reasoningModel,
-          imageGenerationModel,
-        }),
+      const totalAssets = versionQueues.reduce((sum, item) => sum + item.queue.length, 0);
+      let completedAssets = 0;
+      const failures: string[] = [];
+
+      setGeneratedVersions(
+        versionQueues.map(({ version, queue }) => ({
+          id: version.id,
+          label: version.label,
+          adaptationMode: version.adaptationMode,
+          usesAppContext: version.usesAppContext,
+          uiGenerationMode: version.uiGenerationMode,
+          followsReferenceLayout: version.followsReferenceLayout,
+          script: version.script,
+          plans: version.slidePlans,
+          images: [],
+          recreatedPostId: version.recreatedPostId || null,
+          generatedCount: 0,
+          totalAssets: queue.length,
+        }))
+      );
+
+      setImageProgress({
+        done: 0,
+        total: totalAssets,
+        current: totalAssets > 0 ? "Preparing generation queue..." : "No assets to generate.",
       });
 
-      const data = await response.json();
-      if (!response.ok) {
-        throw new Error(data.error || "Failed to generate images");
-      }
+      setStep("complete");
 
-      if (isReasoningModel(data.reasoningModel)) {
-        setReasoningModel(data.reasoningModel);
-      }
+      for (const { version, queue } of versionQueues) {
+        if (!version.recreatedPostId) {
+          failures.push(`${version.label}: missing recreated post id.`);
+          completedAssets += queue.length;
+          continue;
+        }
 
-      if (isImageGenerationModel(data.imageGenerationModel)) {
-        setImageGenerationModel(data.imageGenerationModel);
-      }
+        const { failures: versionFailures } = await generateAssetsSequential({
+          recreatedPostId: version.recreatedPostId,
+          queue,
+          onAssetComplete: ({ generatedMediaUrls, generatedCount, totalAssets: versionTotal, assetIndex }) => {
+            completedAssets += 1;
+            const currentAsset = queue.find((item) => item.index === assetIndex);
 
-      const results = Array.isArray(data.versionResults) ? (data.versionResults as GeneratedVersionResult[]) : [];
-      const failedVersions = Array.isArray(data.failedVersions)
-        ? data.failedVersions.filter(
-          (item: unknown): item is { label?: string; error?: string } =>
-            typeof item === "object" && item !== null
-        )
-        : [];
+            setGeneratedVersions((prev) =>
+              prev.map((item) =>
+                item.id === version.id
+                  ? {
+                      ...item,
+                      images: generatedMediaUrls,
+                      generatedCount,
+                      totalAssets: versionTotal,
+                    }
+                  : item
+              )
+            );
 
-      if (results.length === 0 && Array.isArray(data.images)) {
-        setGeneratedVersions([
-          {
-            id: "fallback",
-            label: activeVersion?.label || "Generated Output",
-            adaptationMode: activeVersion?.adaptationMode || "variant_only",
-            usesAppContext: Boolean(activeVersion?.usesAppContext),
-            uiGenerationMode: activeVersion?.uiGenerationMode || "ai_creative",
-            followsReferenceLayout: Boolean(activeVersion?.followsReferenceLayout),
-            script: fallbackScript,
-            plans: fallbackPlans,
-            images: data.images,
-            recreatedPostId: typeof data.recreatedPostId === "string" ? data.recreatedPostId : null,
+            setImageProgress({
+              done: completedAssets,
+              total: totalAssets,
+              current:
+                completedAssets >= totalAssets
+                  ? "Generation complete."
+                  : `Generated ${version.label} · ${currentAsset?.name || `Asset ${assetIndex + 1}`}`,
+            });
           },
-        ]);
-      } else {
-        setGeneratedVersions(results);
+        });
+
+        failures.push(
+          ...versionFailures.map((message) => `${version.label}: ${message}`)
+        );
+
+        if (versionFailures.length > 0) {
+          completedAssets += versionFailures.length;
+          setImageProgress({
+            done: completedAssets,
+            total: totalAssets,
+            current:
+              completedAssets >= totalAssets
+                ? "Generation complete with some failures."
+                : `Completed ${completedAssets}/${totalAssets}`,
+          });
+        }
       }
 
-      if (failedVersions.length > 0) {
-        const failures = failedVersions
-          .map((item: { label?: string; error?: string }) =>
-            `${item.label || "Version"}: ${item.error || "Unknown error"}`
-          )
-          .join(" | ");
-        setError(`Some versions failed during verification pipeline. ${failures}`);
+      if (totalAssets === 0) {
+        setImageProgress({ done: 0, total: 0, current: "No assets to generate." });
+      }
+
+      if (failures.length > 0) {
+        setError(`Some assets failed: ${failures.slice(0, 3).join(" | ")}`);
       }
 
       setStep("complete");
@@ -1062,9 +1202,9 @@ export function PostDetailView({ postId }: PostDetailViewProps) {
     setScriptVersions([]);
     setActiveVersionId("");
     setGeneratedVersions([]);
+    setImageProgress({ done: 0, total: 0, current: "" });
     setNicheState(null);
     setError("");
-    setRecreatedPostId(null);
     setSelectedReferenceImages(referenceImages);
     setCaptionsBySetId({});
     setCaptionLoadingBySetId({});
@@ -1355,6 +1495,15 @@ export function PostDetailView({ postId }: PostDetailViewProps) {
                 </div>
               )}
 
+              {imageProgress.total > 0 ? (
+                <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700">
+                  <p>
+                    Progress: {imageProgress.done}/{imageProgress.total}
+                  </p>
+                  {imageProgress.current ? <p className="text-xs text-slate-500">{imageProgress.current}</p> : null}
+                </div>
+              ) : null}
+
               {error ? (
                 <div className="flex items-start gap-2 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">
                   <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
@@ -1444,6 +1593,9 @@ export function PostDetailView({ postId }: PostDetailViewProps) {
                     const caption = captionsBySetId[captionKey] || result.caption || "";
                     const hasCaption = Boolean(caption.trim());
                     const instagramResult = instagramResultBySetId[captionKey];
+                    const validImages = result.images.filter(
+                      (url): url is string => typeof url === "string" && url.trim().length > 0
+                    );
 
                     return (
                       <div key={result.id} className="space-y-3 rounded-xl border border-slate-200 bg-slate-50 p-4">
@@ -1509,12 +1661,12 @@ export function PostDetailView({ postId }: PostDetailViewProps) {
                               <Button
                                 variant="outline"
                                 size="sm"
-                                disabled={result.images.length === 0}
+                                disabled={validImages.length === 0}
                                 isLoading={Boolean(postingInstagramBySetId[captionKey])}
                                 onClick={() =>
                                   handlePublishToInstagram({
                                     setId: captionKey,
-                                    imageUrls: result.images,
+                                    imageUrls: validImages,
                                     caption,
                                     recreatedPostId: result.recreatedPostId,
                                   })
@@ -1540,6 +1692,7 @@ export function PostDetailView({ postId }: PostDetailViewProps) {
                               }
                             }
                             return result.images.map((url, index) => {
+                              if (!url || !url.trim()) return null;
                               const imageId = `current-${result.id}-${index}`;
                               const assetName = assetNames[index] || `Asset ${index + 1}`;
 

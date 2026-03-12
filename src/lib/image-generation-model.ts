@@ -23,7 +23,7 @@ export const IMAGE_GENERATION_MODELS = [
 
 export type ImageGenerationModel = (typeof IMAGE_GENERATION_MODELS)[number]["id"];
 
-export const DEFAULT_IMAGE_GENERATION_MODEL: ImageGenerationModel = "gemini-3-pro-image-preview";
+export const DEFAULT_IMAGE_GENERATION_MODEL: ImageGenerationModel = "gemini-3.1-flash-image-preview";
 
 export function isImageGenerationModel(value: unknown): value is ImageGenerationModel {
   if (typeof value !== "string") return false;
