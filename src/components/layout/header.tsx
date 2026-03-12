@@ -1,14 +1,35 @@
 "use client";
 
-import { Menu, Search, Bell, ChevronRight } from "lucide-react";
+import { Menu, Search, Bell, ChevronRight, Plus, Link2, Sparkles } from "lucide-react";
 import { useAppStore } from "@/store/app-store";
 import { Input } from "@/components/ui/input";
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { usePathname } from "next/navigation";
+import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/modal";
+import { DEFAULT_REASONING_MODEL } from "@/lib/reasoning-model";
 
 export function Header() {
   const pathname = usePathname();
   const { toggleSidebar, activeCollection, posts } = useAppStore();
+  const [isAddVideoOpen, setIsAddVideoOpen] = useState(false);
+  const [videoUrl, setVideoUrl] = useState("");
+  const [videoNotes, setVideoNotes] = useState("");
+  const [isSubmittingVideo, setIsSubmittingVideo] = useState(false);
+  const [videoError, setVideoError] = useState("");
+
+  const routeContext = useMemo(() => {
+    const parts = pathname.split("/").filter(Boolean);
+    const isVideoAgentRoute = parts[0] === "collections" && parts[2] === "video-agent";
+    const collectionId = isVideoAgentRoute ? parts[1] : null;
+    return { isVideoAgentRoute, collectionId };
+  }, [pathname]);
 
   const locationLabel = useMemo(() => {
     const pathParts = pathname.split("/").filter(Boolean);
@@ -23,6 +44,61 @@ export function Header() {
     const postTitle = posts.find((post) => post.id === postId)?.title || "Post details";
     return `${collectionName} / ${postTitle}`;
   }, [activeCollection, pathname, posts]);
+
+  const resetVideoModal = () => {
+    setVideoUrl("");
+    setVideoNotes("");
+    setVideoError("");
+  };
+
+  const handleAddVideo = async () => {
+    if (!routeContext.collectionId) {
+      setVideoError("No collection selected.");
+      return;
+    }
+
+    if (!videoUrl.trim()) {
+      setVideoError("Paste a valid video URL.");
+      return;
+    }
+
+    setIsSubmittingVideo(true);
+    setVideoError("");
+
+    try {
+      const response = await fetch("/api/video-agent/intake", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          collectionId: routeContext.collectionId,
+          url: videoUrl.trim(),
+          userNotes: videoNotes.trim() || null,
+          reasoningModel: DEFAULT_REASONING_MODEL,
+        }),
+      });
+
+      const data = await response.json();
+      if (!response.ok) {
+        throw new Error(data?.error || "Failed to add video.");
+      }
+
+      window.dispatchEvent(
+        new CustomEvent("video-agent:source-added", {
+          detail: {
+            formatId: data?.format?.id || null,
+            videoId: data?.video?.id || null,
+          },
+        })
+      );
+
+      setIsAddVideoOpen(false);
+      resetVideoModal();
+    } catch (err) {
+      setVideoError(err instanceof Error ? err.message : "Failed to add video.");
+    } finally {
+      setIsSubmittingVideo(false);
+    }
+  };
 
   return (
     <header className="sticky top-0 z-40 h-16 border-b border-slate-200 bg-white/90 backdrop-blur-xl">
@@ -51,6 +127,13 @@ export function Header() {
         </div>
 
         <div className="flex items-center gap-2">
+          {routeContext.isVideoAgentRoute ? (
+            <Button variant="primary" size="sm" onClick={() => setIsAddVideoOpen(true)}>
+              <Plus className="mr-1.5 h-3.5 w-3.5" />
+              Add Video
+            </Button>
+          ) : null}
+
           {activeCollection ? (
             <span className="hidden rounded-lg bg-rose-50 px-2.5 py-1 text-xs font-medium text-rose-700 md:inline-flex">
               {activeCollection.app_name}
@@ -65,6 +148,54 @@ export function Header() {
           </div>
         </div>
       </div>
+
+      <Dialog
+        open={isAddVideoOpen}
+        onOpenChange={(open) => {
+          setIsAddVideoOpen(open);
+          if (!open) resetVideoModal();
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Add Source Video</DialogTitle>
+            <DialogDescription>
+              Paste a social URL to analyze and auto-group into a matching format.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4 p-6 pt-4">
+            <Input
+              icon={<Link2 className="h-4 w-4" />}
+              placeholder="https://..."
+              value={videoUrl}
+              onChange={(event) => {
+                setVideoUrl(event.target.value);
+                setVideoError("");
+              }}
+            />
+
+            <textarea
+              value={videoNotes}
+              onChange={(event) => setVideoNotes(event.target.value)}
+              rows={3}
+              placeholder="Optional notes..."
+              className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800 outline-none transition focus:border-rose-400 focus:ring-2 focus:ring-rose-200"
+            />
+
+            {videoError ? (
+              <p className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-700">
+                {videoError}
+              </p>
+            ) : null}
+
+            <Button variant="primary" className="w-full" onClick={handleAddVideo} isLoading={isSubmittingVideo}>
+              <Sparkles className="mr-1.5 h-4 w-4" />
+              {isSubmittingVideo ? "Analyzing..." : "Analyze & Add"}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </header>
   );
 }

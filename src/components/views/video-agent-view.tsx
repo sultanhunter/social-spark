@@ -8,8 +8,6 @@ import {
   Clapperboard,
   Copy,
   ExternalLink,
-  Link2,
-  Plus,
   Play,
   Sparkles,
   Users,
@@ -30,7 +28,6 @@ import {
 } from "@xyflow/react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Input } from "@/components/ui/input";
 import { useAppStore } from "@/store/app-store";
 import {
   DEFAULT_REASONING_MODEL,
@@ -68,14 +65,6 @@ type LibraryFormat = {
 
 type FormatsResponse = {
   formats?: LibraryFormat[];
-  error?: string;
-};
-
-type IntakeResponse = {
-  createdNewFormat?: boolean;
-  groupedVideoCount?: number | null;
-  format?: { id?: string };
-  video?: { id?: string };
   error?: string;
 };
 
@@ -153,27 +142,36 @@ type CharacterResponse = {
   error?: string;
 };
 
+type FormatNodeData = {
+  format: LibraryFormat;
+  selectedFormatId: string | null;
+  onSelect: (formatId: string) => void;
+};
+
 type VideoNodeData = {
   formatId: string;
   formatName: string;
+  formatType: string;
   video: LibraryVideo;
   ratio: number;
   selectedVideoId: string | null;
   playingVideoId: string | null;
   directMediaUrl: string | null;
+  reasoningModel: ReasoningModel;
+  onReasoningModelChange: (value: string) => void;
+  isLoadingCharacters: boolean;
+  ugcCharacters: UgcCharacter[];
+  selectedUgcCharacterId: string | null;
+  onCharacterChange: (characterId: string | null) => void;
+  onOpenCharacterStudio: () => void;
+  onGeneratePlan: (formatId: string, videoId: string) => void;
+  isGeneratingPlan: boolean;
+  error: string;
+  success: string;
   onSelect: (formatId: string, videoId: string) => void;
   onPlay: (formatId: string, videoId: string) => void;
   onOpen: (url: string) => void;
   onAspect: (videoId: string, ratio: number) => void;
-};
-
-type IntakeNodeData = {
-  sourceUrl: string;
-  userNotes: string;
-  isAnalyzing: boolean;
-  onSourceChange: (value: string) => void;
-  onNotesChange: (value: string) => void;
-  onAnalyze: () => void;
 };
 
 type FormatTypeNodeData = {
@@ -261,6 +259,27 @@ function buildHiggsfieldClipboardText(plan: VideoPlan): string {
         `Scene ${index + 1} - ${item.scene}\nDuration: ${getPromptDuration(item)}\nModel: ${getPromptModel(item)}\nWhy: ${getPromptReason(item)}\nPrompt: ${item.prompt}`
     )
     .join("\n\n");
+}
+
+function FormatCanvasNode({ data }: NodeProps<Node<FormatNodeData>>) {
+  const isSelected = data.selectedFormatId === data.format.id;
+
+  return (
+    <div className={`min-w-[250px] rounded-2xl border bg-white px-3 py-2 shadow-sm ${isSelected ? "border-rose-300" : "border-slate-200"}`}>
+      <Handle type="target" position={Position.Top} className="!h-2 !w-2 !bg-violet-300" />
+      <Handle type="source" position={Position.Bottom} className="!h-2 !w-2 !bg-violet-300" />
+
+      <button type="button" onClick={() => data.onSelect(data.format.id)} className="nodrag flex w-full items-center justify-between gap-2 text-left">
+        <div className="min-w-0">
+          <p className="truncate text-sm font-semibold text-slate-800">{data.format.format_name}</p>
+          <div className="mt-1 flex items-center gap-2">
+            <Badge variant={formatTypeVariant(data.format.format_type)}>{data.format.format_type}</Badge>
+            <Badge variant="default">{data.format.videos.length} videos</Badge>
+          </div>
+        </div>
+      </button>
+    </div>
+  );
 }
 
 function VideoCanvasNode({ data }: NodeProps<Node<VideoNodeData>>) {
@@ -366,43 +385,67 @@ function VideoCanvasNode({ data }: NodeProps<Node<VideoNodeData>>) {
           Open
         </Button>
       </div>
-    </div>
-  );
-}
 
-function IntakeCanvasNode({ data }: NodeProps<Node<IntakeNodeData>>) {
-  return (
-    <div className="nopan w-[360px] rounded-2xl border border-rose-200 bg-white p-3 shadow-sm">
-      <Handle type="source" position={Position.Bottom} className="!h-2 !w-2 !bg-rose-300" />
+      <div
+        className={`overflow-hidden transition-all duration-300 ease-out ${
+          isSelected ? "mt-2 max-h-72 opacity-100" : "max-h-0 opacity-0"
+        }`}
+      >
+        <div className="space-y-2 rounded-lg border border-slate-200 bg-slate-50 p-2">
+          <select
+            value={data.reasoningModel}
+            onChange={(event) => data.onReasoningModelChange(event.target.value)}
+            className="nodrag w-full rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-xs text-slate-800 outline-none transition focus:border-rose-400 focus:ring-2 focus:ring-rose-200"
+          >
+            {REASONING_MODELS.map((model) => (
+              <option key={model.id} value={model.id}>
+                {model.label}
+              </option>
+            ))}
+          </select>
 
-      <div className="mb-2 flex items-center gap-2">
-        <div className="rounded-full bg-rose-100 p-1.5 text-rose-600">
-          <Plus className="h-3.5 w-3.5" />
+          {data.formatType === "ugc" ? (
+            <>
+              <select
+                value={data.selectedUgcCharacterId || ""}
+                onChange={(event) => data.onCharacterChange(event.target.value || null)}
+                disabled={data.isLoadingCharacters}
+                className="nodrag w-full rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-xs text-slate-800 outline-none transition focus:border-rose-400 focus:ring-2 focus:ring-rose-200"
+              >
+                <option value="">{data.isLoadingCharacters ? "Loading characters..." : "Select UGC character"}</option>
+                {data.ugcCharacters.map((character) => (
+                  <option key={character.id} value={character.id}>
+                    {character.characterName}
+                    {character.isDefault ? " (Default)" : ""}
+                  </option>
+                ))}
+              </select>
+
+              <Button variant="outline" size="sm" onClick={data.onOpenCharacterStudio} className="nodrag w-full">
+                <Users className="mr-1 h-3.5 w-3.5" />
+                Character Studio
+              </Button>
+            </>
+          ) : null}
+
+          <Button
+            variant="primary"
+            size="sm"
+            className="nodrag w-full"
+            onClick={() => data.onGeneratePlan(data.formatId, data.video.id)}
+            isLoading={data.isGeneratingPlan}
+          >
+            <Sparkles className="mr-1.5 h-3.5 w-3.5" />
+            {data.isGeneratingPlan ? "Generating..." : "Generate Plan"}
+          </Button>
+
+          {data.error ? (
+            <div className="rounded-md border border-rose-200 bg-rose-50 px-2 py-1.5 text-[11px] text-rose-700">{data.error}</div>
+          ) : null}
+          {data.success ? (
+            <div className="rounded-md border border-emerald-200 bg-emerald-50 px-2 py-1.5 text-[11px] text-emerald-700">{data.success}</div>
+          ) : null}
         </div>
-        <div>
-          <p className="text-sm font-semibold text-slate-800">Add Source Video</p>
-          <p className="text-xs text-slate-500">Paste URL and group it on canvas.</p>
-        </div>
-      </div>
-
-      <div className="space-y-2">
-        <Input
-          icon={<Link2 className="h-4 w-4" />}
-          placeholder="https://..."
-          value={data.sourceUrl}
-          onChange={(event) => data.onSourceChange(event.target.value)}
-        />
-        <textarea
-          value={data.userNotes}
-          onChange={(event) => data.onNotesChange(event.target.value)}
-          rows={2}
-          placeholder="Optional notes..."
-          className="nodrag nopan w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800 outline-none transition focus:border-rose-400 focus:ring-2 focus:ring-rose-200"
-        />
-        <Button variant="primary" onClick={data.onAnalyze} isLoading={data.isAnalyzing} className="nodrag nopan w-full">
-          <Sparkles className="mr-2 h-4 w-4" />
-          {data.isAnalyzing ? "Analyzing..." : "Analyze & Group"}
-        </Button>
       </div>
     </div>
   );
@@ -435,8 +478,8 @@ function FormatTypeCanvasNode({ data }: NodeProps<Node<FormatTypeNodeData>>) {
 }
 
 const nodeTypes = {
-  intakeNode: IntakeCanvasNode,
   typeNode: FormatTypeCanvasNode,
+  formatNode: FormatCanvasNode,
   videoNode: VideoCanvasNode,
 };
 
@@ -444,8 +487,6 @@ export function VideoAgentView({ collectionId }: { collectionId: string }) {
   const router = useRouter();
   const { activeCollection } = useAppStore();
 
-  const [sourceUrl, setSourceUrl] = useState("");
-  const [userNotes, setUserNotes] = useState("");
   const [reasoningModel, setReasoningModel] = useState<ReasoningModel>(DEFAULT_REASONING_MODEL);
 
   const [library, setLibrary] = useState<LibraryFormat[]>([]);
@@ -465,7 +506,6 @@ export function VideoAgentView({ collectionId }: { collectionId: string }) {
   const [isLoadingLibrary, setIsLoadingLibrary] = useState(false);
   const [isLoadingCharacters, setIsLoadingCharacters] = useState(false);
   const [isLoadingPlans, setIsLoadingPlans] = useState(false);
-  const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [isGeneratingPlan, setIsGeneratingPlan] = useState(false);
 
   const [error, setError] = useState("");
@@ -720,66 +760,39 @@ export function VideoAgentView({ collectionId }: { collectionId: string }) {
     void loadSavedPlans();
   }, [loadSavedPlans]);
 
-  const handleAnalyze = useCallback(async () => {
-    if (!sourceUrl.trim()) {
-      setError("Paste a video URL first.");
-      return;
-    }
+  useEffect(() => {
+    const onSourceAdded = (event: Event) => {
+      const detail = (event as CustomEvent<{ formatId?: string; videoId?: string }>).detail;
 
-    setIsAnalyzing(true);
-    setError("");
-    setSuccess("");
-
-    try {
-      const response = await fetch("/api/video-agent/intake", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          collectionId,
-          url: sourceUrl.trim(),
-          userNotes: userNotes.trim() || null,
-          reasoningModel,
-        }),
+      setSuccess("Video added to library.");
+      void loadLibrary({
+        formatId: detail?.formatId || null,
+        videoId: detail?.videoId || null,
       });
+    };
 
-      const data = (await response.json()) as IntakeResponse;
-      if (!response.ok) {
-        throw new Error(data.error || "Failed to analyze and group video.");
-      }
+    window.addEventListener("video-agent:source-added", onSourceAdded as EventListener);
+    return () => window.removeEventListener("video-agent:source-added", onSourceAdded as EventListener);
+  }, [loadLibrary]);
 
-      setSourceUrl("");
-      const countText =
-        typeof data.groupedVideoCount === "number"
-          ? ` (${data.groupedVideoCount} videos in group)`
-          : "";
-      setSuccess(
-        data.createdNewFormat
-          ? `New format created${countText}.`
-          : `Matched existing format${countText}.`
-      );
+  const handleGeneratePlan = useCallback(async (formatIdArg?: string, videoIdArg?: string) => {
+    const targetFormat =
+      (formatIdArg ? library.find((item) => item.id === formatIdArg) : null) || selectedFormat;
+    const targetVideo =
+      (targetFormat && videoIdArg ? targetFormat.videos.find((item) => item.id === videoIdArg) : null) || selectedVideo;
 
-      await loadLibrary({
-        formatId: data.format?.id || null,
-        videoId: data.video?.id || null,
-      });
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to analyze and group video.");
-    } finally {
-      setIsAnalyzing(false);
-    }
-  }, [collectionId, sourceUrl, userNotes, reasoningModel, loadLibrary]);
-
-  const handleGeneratePlan = useCallback(async () => {
-    if (!selectedFormat || !selectedVideo) {
+    if (!targetFormat || !targetVideo) {
       setError("Select a format and video first.");
       return;
     }
 
-    if (selectedFormat.format_type === "ugc" && !selectedUgcCharacter) {
+    if (targetFormat.format_type === "ugc" && !selectedUgcCharacter) {
       setError("This is a UGC format. Select a character from Character Studio first.");
       return;
     }
 
+    setSelectedFormatId(targetFormat.id);
+    setSelectedVideoId(targetVideo.id);
     setIsGeneratingPlan(true);
     setError("");
     setSuccess("");
@@ -790,9 +803,9 @@ export function VideoAgentView({ collectionId }: { collectionId: string }) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           collectionId,
-          formatId: selectedFormat.id,
-          videoId: selectedVideo.id,
-          characterId: selectedFormat.format_type === "ugc" ? selectedUgcCharacter?.id : null,
+          formatId: targetFormat.id,
+          videoId: targetVideo.id,
+          characterId: targetFormat.format_type === "ugc" ? selectedUgcCharacter?.id : null,
           reasoningModel,
         }),
       });
@@ -811,8 +824,8 @@ export function VideoAgentView({ collectionId }: { collectionId: string }) {
       setSuccess("Recreation plan generated.");
 
       await loadSavedPlans({
-        formatId: selectedFormat.id,
-        videoId: selectedVideo.id,
+        formatId: targetFormat.id,
+        videoId: targetVideo.id,
         preferredPlanId: data.planId || null,
       });
     } catch (err) {
@@ -820,31 +833,15 @@ export function VideoAgentView({ collectionId }: { collectionId: string }) {
     } finally {
       setIsGeneratingPlan(false);
     }
-  }, [collectionId, selectedFormat, selectedVideo, selectedUgcCharacter, reasoningModel, loadSavedPlans]);
+  }, [collectionId, library, selectedFormat, selectedVideo, selectedUgcCharacter, reasoningModel, loadSavedPlans]);
 
   const canvasGraph = useMemo(() => {
     const nodes: Node[] = [];
     const edges: Edge[] = [];
 
-    nodes.push({
-      id: "intake-node",
-      type: "intakeNode",
-      position: { x: 100, y: 40 },
-      data: {
-        sourceUrl,
-        userNotes,
-        isAnalyzing,
-        onSourceChange: (value: string) => setSourceUrl(value),
-        onNotesChange: (value: string) => setUserNotes(value),
-        onAnalyze: () => {
-          void handleAnalyze();
-        },
-      } satisfies IntakeNodeData,
-    });
-
-    const typeStartX = 100;
-    const typeSpacingX = 320;
-    const typeY = 260;
+    const typeStartX = 120;
+    const typeSpacingX = 360;
+    const typeY = 120;
 
     orderedTypes.forEach((type, typeIndex) => {
       const typeNodeId = `type-${type}`;
@@ -868,64 +865,44 @@ export function VideoAgentView({ collectionId }: { collectionId: string }) {
         } satisfies FormatTypeNodeData,
       });
 
-      edges.push({
-        id: `intake->${typeNodeId}`,
-        source: "intake-node",
-        target: typeNodeId,
-        type: "smoothstep",
-        style: {
-          stroke: "#d8b4fe",
-          strokeWidth: 1.5,
-          strokeDasharray: "4 4",
-        },
-      });
-
       if (!typeExpanded) return;
 
-      const videosForType = formats.flatMap((format) =>
-        format.videos.map((video) => ({
-          formatId: format.id,
-          formatName: format.format_name,
-          video,
-        }))
-      );
-
-      if (videosForType.length === 0) return;
-
-      const videoY = typeY + 210;
+      const formatY = typeY + 150;
+      const videoY = formatY + 180;
+      const formatGap = 80;
       const videoSpacingX = 260;
-      const videoRowWidth = (videosForType.length - 1) * videoSpacingX;
-      const videoStartX = typeX - videoRowWidth / 2;
 
-      videosForType.forEach((item, index) => {
-        const videoNodeId = `video-${item.video.id}`;
+      const groupWidths = formats.map((format) => {
+        const count = Math.max(1, format.videos.length);
+        return Math.max(260, 230 + (count - 1) * videoSpacingX);
+      });
+
+      const totalWidth = groupWidths.reduce((sum, width) => sum + width, 0) + Math.max(0, formats.length - 1) * formatGap;
+      let cursorX = typeX - totalWidth / 2;
+
+      formats.forEach((format, formatIndex) => {
+        const groupWidth = groupWidths[formatIndex] || 260;
+        const groupCenterX = cursorX + groupWidth / 2;
+        const formatNodeId = `format-${format.id}`;
 
         nodes.push({
-          id: videoNodeId,
-          type: "videoNode",
+          id: formatNodeId,
+          type: "formatNode",
           position: {
-            x: videoStartX + index * videoSpacingX,
-            y: videoY,
+            x: groupCenterX - 125,
+            y: formatY,
           },
           data: {
-            formatId: item.formatId,
-            formatName: item.formatName,
-            video: item.video,
-            ratio: clampAspectRatio(videoAspectRatios[item.video.id] || 9 / 16),
-            selectedVideoId,
-            playingVideoId,
-            directMediaUrl: getVideoDirectMediaUrl(item.video),
-            onSelect: handleSelectVideo,
-            onPlay: handlePlayVideo,
-            onOpen: handleOpenSource,
-            onAspect: handleAspect,
-          } satisfies VideoNodeData,
+            format,
+            selectedFormatId,
+            onSelect: (formatId: string) => setSelectedFormatId(formatId),
+          } satisfies FormatNodeData,
         });
 
         edges.push({
-          id: `${typeNodeId}->${videoNodeId}`,
+          id: `${typeNodeId}->${formatNodeId}`,
           source: typeNodeId,
-          target: videoNodeId,
+          target: formatNodeId,
           type: "smoothstep",
           style: {
             stroke: "#c4b5fd",
@@ -933,27 +910,94 @@ export function VideoAgentView({ collectionId }: { collectionId: string }) {
             strokeDasharray: "4 4",
           },
         });
+
+        const videos = format.videos;
+        const rowWidth = Math.max(0, videos.length - 1) * videoSpacingX;
+        const videoCenterStartX = groupCenterX - rowWidth / 2;
+
+        videos.forEach((video, videoIndex) => {
+          const videoNodeId = `video-${video.id}`;
+
+          nodes.push({
+            id: videoNodeId,
+            type: "videoNode",
+            position: {
+              x: videoCenterStartX + videoIndex * videoSpacingX - 115,
+              y: videoY,
+            },
+            data: {
+              formatId: format.id,
+              formatName: format.format_name,
+              formatType: format.format_type,
+              video,
+              ratio: clampAspectRatio(videoAspectRatios[video.id] || 9 / 16),
+              selectedVideoId,
+              playingVideoId,
+              directMediaUrl: getVideoDirectMediaUrl(video),
+              reasoningModel,
+              onReasoningModelChange: (value: string) => {
+                if (isReasoningModel(value)) setReasoningModel(value);
+              },
+              isLoadingCharacters,
+              ugcCharacters,
+              selectedUgcCharacterId,
+              onCharacterChange: (characterId: string | null) => setSelectedUgcCharacterId(characterId),
+              onOpenCharacterStudio: () => router.push(`/collections/${collectionId}/characters`),
+              onGeneratePlan: (formatId: string, videoId: string) => {
+                void handleGeneratePlan(formatId, videoId);
+              },
+              isGeneratingPlan: isGeneratingPlan && selectedVideoId === video.id,
+              error,
+              success,
+              onSelect: handleSelectVideo,
+              onPlay: handlePlayVideo,
+              onOpen: handleOpenSource,
+              onAspect: handleAspect,
+            } satisfies VideoNodeData,
+          });
+
+          edges.push({
+            id: `${formatNodeId}->${videoNodeId}`,
+            source: formatNodeId,
+            target: videoNodeId,
+            type: "smoothstep",
+            style: {
+              stroke: "#c4b5fd",
+              strokeWidth: 1.5,
+              strokeDasharray: "4 4",
+            },
+          });
+        });
+
+        cursorX += groupWidth + formatGap;
       });
     });
 
     return { nodes, edges };
   }, [
-    sourceUrl,
-    userNotes,
-    isAnalyzing,
+    collectionId,
     orderedTypes,
     formatsByType,
     expandedType,
     selectedFormatType,
     handleSelectType,
+    selectedFormatId,
     selectedVideoId,
     playingVideoId,
+    reasoningModel,
+    isLoadingCharacters,
+    ugcCharacters,
+    selectedUgcCharacterId,
+    isGeneratingPlan,
+    error,
+    success,
     videoAspectRatios,
+    router,
     handleSelectVideo,
     handlePlayVideo,
     handleOpenSource,
     handleAspect,
-    handleAnalyze,
+    handleGeneratePlan,
   ]);
 
   return (
@@ -1012,7 +1056,7 @@ export function VideoAgentView({ collectionId }: { collectionId: string }) {
         <div className="pointer-events-none absolute right-4 top-4 z-10 w-[330px] space-y-2">
           <div className="pointer-events-auto rounded-xl border border-slate-200 bg-white/95 p-3 shadow-sm backdrop-blur">
             <div className="mb-2 flex items-center justify-between gap-2">
-              <p className="text-sm font-semibold text-slate-800">Plan Controls</p>
+              <p className="text-sm font-semibold text-slate-800">Plan Output</p>
               <Badge variant="default" className="max-w-[170px] truncate">
                 {activeCollection?.app_name || "Muslimah Pro"}
               </Badge>
@@ -1026,54 +1070,9 @@ export function VideoAgentView({ collectionId }: { collectionId: string }) {
                 ) : null}
               </div>
 
-              <select
-                value={reasoningModel}
-                onChange={(event) => {
-                  const value = event.target.value;
-                  if (isReasoningModel(value)) setReasoningModel(value);
-                }}
-                className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800 outline-none transition focus:border-rose-400 focus:ring-2 focus:ring-rose-200"
-              >
-                {REASONING_MODELS.map((model) => (
-                  <option key={model.id} value={model.id}>
-                    {model.label}
-                  </option>
-                ))}
-              </select>
-
-              {selectedFormat?.format_type === "ugc" ? (
-                <>
-                  <select
-                    value={selectedUgcCharacterId || ""}
-                    onChange={(event) => setSelectedUgcCharacterId(event.target.value || null)}
-                    disabled={isLoadingCharacters}
-                    className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800 outline-none transition focus:border-rose-400 focus:ring-2 focus:ring-rose-200"
-                  >
-                    <option value="">{isLoadingCharacters ? "Loading characters..." : "Select UGC character"}</option>
-                    {ugcCharacters.map((character) => (
-                      <option key={character.id} value={character.id}>
-                        {character.characterName}
-                        {character.isDefault ? " (Default)" : ""}
-                      </option>
-                    ))}
-                  </select>
-                  <Button variant="outline" size="sm" onClick={() => router.push(`/collections/${collectionId}/characters`)}>
-                    <Users className="mr-1.5 h-3.5 w-3.5" />
-                    Character Studio
-                  </Button>
-                </>
-              ) : null}
-
-              <Button
-                variant="primary"
-                onClick={handleGeneratePlan}
-                isLoading={isGeneratingPlan}
-                disabled={!selectedVideo}
-                className="w-full"
-              >
-                <Sparkles className="mr-2 h-4 w-4" />
-                {isGeneratingPlan ? "Generating..." : "Generate Plan"}
-              </Button>
+              <p className="text-xs text-slate-500">
+                Select a video card to open in-card controls and generate the plan there.
+              </p>
 
               {error ? (
                 <div className="flex items-start gap-2 rounded-lg border border-rose-200 bg-rose-50 px-2.5 py-2 text-xs text-rose-700">
