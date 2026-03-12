@@ -27,7 +27,6 @@ import {
   type Edge,
   type Node,
   type NodeProps,
-  type ReactFlowInstance,
 } from "@xyflow/react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -158,19 +157,13 @@ type FormatNodeData = {
   format: LibraryFormat;
   expanded: boolean;
   selectedFormatId: string | null;
-  onToggle: (formatId: string) => void;
-  onSelect: (formatId: string) => void;
-};
-
-type VideoNodeData = {
-  formatId: string;
-  video: LibraryVideo;
-  ratio: number;
   selectedVideoId: string | null;
   playingVideoId: string | null;
-  directMediaUrl: string | null;
-  onSelect: (formatId: string, videoId: string) => void;
-  onPlay: (formatId: string, videoId: string) => void;
+  videoAspectRatios: Record<string, number>;
+  onToggle: (formatId: string) => void;
+  onSelect: (formatId: string) => void;
+  onSelectVideo: (formatId: string, videoId: string) => void;
+  onPlayVideo: (formatId: string, videoId: string) => void;
   onOpen: (url: string) => void;
   onAspect: (videoId: string, ratio: number) => void;
 };
@@ -275,7 +268,7 @@ function FormatCanvasNode({ data }: NodeProps<Node<FormatNodeData>>) {
   const isActive = data.selectedFormatId === data.format.id;
 
   return (
-    <div className={`nopan min-w-[260px] rounded-2xl border bg-white px-3 py-2 shadow-sm ${isActive ? "border-rose-300" : "border-slate-200"}`}>
+    <div className={`nopan min-w-[280px] rounded-2xl border bg-white px-3 py-2 shadow-sm ${isActive ? "border-rose-300" : "border-slate-200"}`}>
       <Handle type="target" position={Position.Top} className="!h-2 !w-2 !bg-violet-300" />
       <button
         type="button"
@@ -283,7 +276,7 @@ function FormatCanvasNode({ data }: NodeProps<Node<FormatNodeData>>) {
           data.onSelect(data.format.id);
           data.onToggle(data.format.id);
         }}
-        className="nodrag flex w-full items-center justify-between gap-2 text-left"
+        className="nodrag nopan flex w-full items-center justify-between gap-2 text-left"
       >
         <div className="min-w-0">
           <p className="truncate text-sm font-semibold text-slate-800">{data.format.format_name}</p>
@@ -294,117 +287,129 @@ function FormatCanvasNode({ data }: NodeProps<Node<FormatNodeData>>) {
         </div>
         <ChevronDown className={`h-4 w-4 text-slate-500 transition-transform ${data.expanded ? "rotate-180" : ""}`} />
       </button>
-      <Handle type="source" position={Position.Bottom} className="!h-2 !w-2 !bg-violet-300" />
-    </div>
-  );
-}
 
-function VideoCanvasNode({ data }: NodeProps<Node<VideoNodeData>>) {
-  const isSelected = data.selectedVideoId === data.video.id;
-  const isPlaying = data.directMediaUrl && data.playingVideoId === data.video.id;
-
-  return (
-    <div className={`nopan w-[230px] rounded-2xl border bg-white p-2.5 shadow-sm ${isSelected ? "border-rose-300 ring-2 ring-rose-100" : "border-slate-200"}`}>
-      <Handle type="target" position={Position.Top} className="!h-2 !w-2 !bg-violet-300" />
-
-      <div
-        role="button"
-        tabIndex={0}
-        onClick={() => {
-          data.onSelect(data.formatId, data.video.id);
-          if (data.directMediaUrl) {
-            data.onPlay(data.formatId, data.video.id);
-          }
-        }}
-        onKeyDown={(event) => {
-          if (event.key === "Enter" || event.key === " ") {
-            data.onSelect(data.formatId, data.video.id);
-            if (data.directMediaUrl) {
-              data.onPlay(data.formatId, data.video.id);
-            }
-          }
-        }}
-        className="nodrag cursor-pointer"
-      >
-        <div className="relative overflow-hidden rounded-lg border border-slate-200 bg-slate-100" style={{ aspectRatio: data.ratio }}>
-          {isPlaying && data.directMediaUrl ? (
-            <video
-              key={`${data.video.id}-node`}
-              src={data.directMediaUrl}
-              controls
-              autoPlay
-              muted
-              playsInline
-              preload="metadata"
-              poster={data.video.thumbnail_url || undefined}
-              className="h-full w-full object-cover"
-              onLoadedMetadata={(event) => {
-                const target = event.currentTarget;
-                if (target.videoWidth > 0 && target.videoHeight > 0) {
-                  data.onAspect(data.video.id, target.videoWidth / target.videoHeight);
-                }
-              }}
-            />
-          ) : data.video.thumbnail_url ? (
-            <img
-              src={data.video.thumbnail_url}
-              alt={data.video.title || "Video thumbnail"}
-              className="h-full w-full object-cover"
-              onLoad={(event) => {
-                const { naturalWidth, naturalHeight } = event.currentTarget;
-                if (naturalWidth > 0 && naturalHeight > 0) {
-                  data.onAspect(data.video.id, naturalWidth / naturalHeight);
-                }
-              }}
-            />
+      {data.expanded ? (
+        <div className="mt-2 space-y-2 border-t border-slate-100 pt-2">
+          {data.format.videos.length === 0 ? (
+            <p className="text-xs text-slate-500">No videos yet for this format.</p>
           ) : (
-            <div className="flex h-full w-full items-center justify-center text-slate-500">
-              <Clapperboard className="h-6 w-6" />
-            </div>
+            data.format.videos.map((video) => {
+              const directMediaUrl = getVideoDirectMediaUrl(video);
+              const isSelected = data.selectedVideoId === video.id;
+              const isPlaying = Boolean(directMediaUrl && data.playingVideoId === video.id);
+              const ratio = clampAspectRatio(data.videoAspectRatios[video.id] || 9 / 16);
+
+              return (
+                <div
+                  key={video.id}
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => data.onSelectVideo(data.format.id, video.id)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter" || event.key === " ") {
+                      data.onSelectVideo(data.format.id, video.id);
+                    }
+                  }}
+                  className={`nodrag nopan rounded-xl border bg-white p-2 text-left ${
+                    isSelected ? "border-rose-300 ring-1 ring-rose-100" : "border-slate-200"
+                  }`}
+                >
+                  <div
+                    className="relative overflow-hidden rounded-lg border border-slate-200 bg-slate-100"
+                    style={{ aspectRatio: ratio }}
+                  >
+                    {isPlaying && directMediaUrl ? (
+                      <video
+                        key={`${video.id}-inline`}
+                        src={directMediaUrl}
+                        controls
+                        autoPlay
+                        muted
+                        playsInline
+                        preload="metadata"
+                        poster={video.thumbnail_url || undefined}
+                        className="h-full w-full object-cover"
+                        onLoadedMetadata={(event) => {
+                          const target = event.currentTarget;
+                          if (target.videoWidth > 0 && target.videoHeight > 0) {
+                            data.onAspect(video.id, target.videoWidth / target.videoHeight);
+                          }
+                        }}
+                      />
+                    ) : video.thumbnail_url ? (
+                      <img
+                        src={video.thumbnail_url}
+                        alt={video.title || "Video thumbnail"}
+                        className="h-full w-full object-cover"
+                        onLoad={(event) => {
+                          const { naturalWidth, naturalHeight } = event.currentTarget;
+                          if (naturalWidth > 0 && naturalHeight > 0) {
+                            data.onAspect(video.id, naturalWidth / naturalHeight);
+                          }
+                        }}
+                      />
+                    ) : (
+                      <div className="flex h-full w-full items-center justify-center text-slate-500">
+                        <Clapperboard className="h-5 w-5" />
+                      </div>
+                    )}
+
+                    {directMediaUrl && !isPlaying ? (
+                      <div className="pointer-events-none absolute inset-0 flex items-center justify-center bg-black/20">
+                        <div className="rounded-full bg-black/55 p-2 text-white">
+                          <Play className="h-4 w-4" />
+                        </div>
+                      </div>
+                    ) : null}
+                  </div>
+
+                  <p className="mt-1.5 truncate text-xs font-semibold text-slate-800">{video.title || "Untitled source"}</p>
+                  <div className="mt-1 flex flex-wrap items-center gap-1.5">
+                    <Badge variant="default">{video.platform}</Badge>
+                    {(() => {
+                      const method = getVideoAnalysisMethod(video);
+                      const frameCount = getVideoFrameCount(video);
+                      if (!method) return null;
+                      return (
+                        <Badge variant="default">
+                          {method.replace(/_/g, " ")}
+                          {typeof frameCount === "number" ? ` (${frameCount})` : ""}
+                        </Badge>
+                      );
+                    })()}
+                  </div>
+
+                  <div className="mt-2 flex items-center justify-between">
+                    {directMediaUrl ? (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => data.onPlayVideo(data.format.id, video.id)}
+                        className="nodrag nopan"
+                      >
+                        <Play className="mr-1 h-3.5 w-3.5" />
+                        Play
+                      </Button>
+                    ) : <span />}
+
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => data.onOpen(video.source_url)}
+                      className="nodrag nopan"
+                    >
+                      <ExternalLink className="mr-1 h-3.5 w-3.5" />
+                      Open
+                    </Button>
+                  </div>
+                </div>
+              );
+            })
           )}
-
-          {data.directMediaUrl && !isPlaying ? (
-            <div className="pointer-events-none absolute inset-0 flex items-center justify-center bg-black/20">
-              <div className="rounded-full bg-black/55 p-2 text-white">
-                <Play className="h-4 w-4" />
-              </div>
-            </div>
-          ) : null}
         </div>
-      </div>
+      ) : null}
 
-      <p className="mt-1.5 truncate text-xs font-semibold text-slate-800">{data.video.title || "Untitled source"}</p>
-      <div className="mt-1 flex flex-wrap items-center gap-1.5">
-        <Badge variant="default">{data.video.platform}</Badge>
-        {(() => {
-          const method = getVideoAnalysisMethod(data.video);
-          const frameCount = getVideoFrameCount(data.video);
-          if (!method) return null;
-          return <Badge variant="default">{method.replace(/_/g, " ")}{typeof frameCount === "number" ? ` (${frameCount})` : ""}</Badge>;
-        })()}
-      </div>
-
-      <div className="mt-2 flex items-center justify-between">
-        {data.directMediaUrl ? (
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => {
-              data.onSelect(data.formatId, data.video.id);
-              data.onPlay(data.formatId, data.video.id);
-            }}
-            className="nodrag nopan"
-          >
-            <Play className="mr-1 h-3.5 w-3.5" />
-            Play
-          </Button>
-        ) : <span />}
-
-        <Button variant="ghost" size="sm" onClick={() => data.onOpen(data.video.source_url)} className="nodrag nopan">
-          <ExternalLink className="mr-1 h-3.5 w-3.5" />
-          Open
-        </Button>
-      </div>
+      <Handle type="source" position={Position.Bottom} className="!h-2 !w-2 !bg-violet-300" />
     </div>
   );
 }
@@ -477,7 +482,6 @@ const nodeTypes = {
   intakeNode: IntakeCanvasNode,
   typeNode: FormatTypeCanvasNode,
   formatNode: FormatCanvasNode,
-  videoNode: VideoCanvasNode,
 };
 
 export function VideoAgentView({ collectionId }: { collectionId: string }) {
@@ -502,7 +506,6 @@ export function VideoAgentView({ collectionId }: { collectionId: string }) {
   const [savedPlans, setSavedPlans] = useState<SavedPlan[]>([]);
   const [plan, setPlan] = useState<VideoPlan | null>(null);
   const [planId, setPlanId] = useState<string | null>(null);
-  const [flowInstance, setFlowInstance] = useState<ReactFlowInstance<Node, Edge> | null>(null);
 
   const [isLoadingLibrary, setIsLoadingLibrary] = useState(false);
   const [isLoadingCharacters, setIsLoadingCharacters] = useState(false);
@@ -567,7 +570,7 @@ export function VideoAgentView({ collectionId }: { collectionId: string }) {
       setSelectedFormatId(preferredFormat.id);
       setSelectedVideoId((current) => {
         if (current && preferredFormat.videos.some((video) => video.id === current)) return current;
-        return preferredFormat.videos[0]?.id || null;
+        return null;
       });
 
       setExpandedFormats((prev) => ({
@@ -637,9 +640,7 @@ export function VideoAgentView({ collectionId }: { collectionId: string }) {
             : null) ||
           (selectedVideoId && formats.some((item) => item.videos.some((video) => video.id === selectedVideoId))
             ? selectedVideoId
-            : null) ||
-          nextFormat?.videos[0]?.id ||
-          null;
+            : null);
 
         setSelectedFormatId(nextFormatId);
         setSelectedVideoId(nextVideoId);
@@ -769,7 +770,7 @@ export function VideoAgentView({ collectionId }: { collectionId: string }) {
       return;
     }
 
-    setSelectedVideoId(selectedFormat.videos[0]?.id || null);
+    setSelectedVideoId(null);
   }, [selectedFormat, selectedVideoId]);
 
   useEffect(() => {
@@ -938,10 +939,13 @@ export function VideoAgentView({ collectionId }: { collectionId: string }) {
 
       if (!typeExpanded) return;
 
-      formats.forEach((format, formatIndex) => {
+      let formatCursorY = typeY + 150;
+
+      formats.forEach((format) => {
         const formatNodeId = `format-${format.id}`;
-        const formatY = typeY + 150 + formatIndex * 170;
         const formatExpanded = Boolean(expandedFormats[format.id]);
+        const formatHeight = formatExpanded ? 170 + format.videos.length * 220 : 130;
+        const formatY = formatCursorY;
 
         nodes.push({
           id: formatNodeId,
@@ -951,6 +955,9 @@ export function VideoAgentView({ collectionId }: { collectionId: string }) {
             format,
             expanded: formatExpanded,
             selectedFormatId,
+            selectedVideoId,
+            playingVideoId,
+            videoAspectRatios,
             onToggle: (formatId: string) => {
               setExpandedFormats((prev) => ({
                 [formatId]: !prev[formatId],
@@ -958,9 +965,11 @@ export function VideoAgentView({ collectionId }: { collectionId: string }) {
             },
             onSelect: (formatId: string) => {
               setSelectedFormatId(formatId);
-              const selected = library.find((item) => item.id === formatId) || null;
-              setSelectedVideoId(selected?.videos[0]?.id || null);
             },
+            onSelectVideo: handleSelectVideo,
+            onPlayVideo: handlePlayVideo,
+            onOpen: handleOpenSource,
+            onAspect: handleAspect,
           } satisfies FormatNodeData,
         });
 
@@ -975,51 +984,7 @@ export function VideoAgentView({ collectionId }: { collectionId: string }) {
           },
         });
 
-        if (!formatExpanded) return;
-
-        const videoStartX = typeX + 300;
-        const videoSpacingX = 250;
-        const videoSpacingY = 300;
-        const columns = 3;
-
-        format.videos.forEach((video, videoIndex) => {
-          const col = videoIndex % columns;
-          const row = Math.floor(videoIndex / columns);
-          const videoNodeId = `video-${video.id}`;
-
-          nodes.push({
-            id: videoNodeId,
-            type: "videoNode",
-            position: {
-              x: videoStartX + col * videoSpacingX,
-              y: formatY - 20 + row * videoSpacingY,
-            },
-            data: {
-              formatId: format.id,
-              video,
-              ratio: clampAspectRatio(videoAspectRatios[video.id] || 9 / 16),
-              selectedVideoId,
-              playingVideoId,
-              directMediaUrl: getVideoDirectMediaUrl(video),
-              onSelect: handleSelectVideo,
-              onPlay: handlePlayVideo,
-              onOpen: handleOpenSource,
-              onAspect: handleAspect,
-            } satisfies VideoNodeData,
-          });
-
-          edges.push({
-            id: `${formatNodeId}->${videoNodeId}`,
-            source: formatNodeId,
-            target: videoNodeId,
-            type: "smoothstep",
-            style: {
-              stroke: "#c4b5fd",
-              strokeWidth: 1.4,
-              strokeDasharray: "4 4",
-            },
-          });
-        });
+        formatCursorY += formatHeight + 24;
       });
     });
 
@@ -1043,31 +1008,7 @@ export function VideoAgentView({ collectionId }: { collectionId: string }) {
     handleOpenSource,
     handleAspect,
     handleAnalyze,
-    library,
   ]);
-
-  useEffect(() => {
-    if (!flowInstance || !selectedVideoId) return;
-
-    const focusIds = [`video-${selectedVideoId}`];
-    if (selectedFormatId) focusIds.push(`format-${selectedFormatId}`);
-    if (selectedFormatType) focusIds.push(`type-${selectedFormatType}`);
-
-    const focusNodes = canvasGraph.nodes.filter((node) => focusIds.includes(node.id));
-    if (focusNodes.length === 0) return;
-
-    const timeoutId = window.setTimeout(() => {
-      void flowInstance.fitView({
-        nodes: focusNodes.map((node) => ({ id: node.id })),
-        padding: 0.32,
-        duration: 300,
-        minZoom: 0.25,
-        maxZoom: 1.1,
-      });
-    }, 80);
-
-    return () => window.clearTimeout(timeoutId);
-  }, [flowInstance, selectedVideoId, selectedFormatId, selectedFormatType, canvasGraph.nodes]);
 
   return (
     <div className="flex min-h-0 flex-1 overflow-hidden bg-[#eef2f7]">
@@ -1085,16 +1026,15 @@ export function VideoAgentView({ collectionId }: { collectionId: string }) {
             }}
             minZoom={0.25}
             maxZoom={1.8}
-            nodesDraggable={false}
+            nodesDraggable
             nodesConnectable={false}
-            elementsSelectable={false}
-            panOnDrag
+            elementsSelectable
+            panOnDrag={false}
             panOnScroll
             panOnScrollMode={PanOnScrollMode.Free}
             zoomOnScroll={false}
             zoomOnDoubleClick={false}
             className="bg-[#eff3f8]"
-            onInit={(instance) => setFlowInstance(instance)}
           >
             <Background variant={BackgroundVariant.Dots} gap={24} size={1} color="#cbd5e1" />
             <MiniMap
