@@ -4,12 +4,14 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   AlertCircle,
   ArrowLeft,
-  CheckCircle2,
+  ChevronDown,
+  ChevronLeft,
+  ChevronRight,
   Clapperboard,
   Copy,
   ExternalLink,
   Link2,
-  ListChecks,
+  Play,
   Sparkles,
   Users,
 } from "lucide-react";
@@ -46,17 +48,10 @@ type LibraryFormat = {
   format_type: string;
   format_signature: string;
   summary: string;
-  why_it_works: string[];
   hook_patterns: string[];
   shot_pattern: string[];
   editing_style: string[];
-  script_scaffold: string | null;
-  higgsfield_prompt_template: string | null;
-  recreation_checklist: string[];
-  duration_guidance: string | null;
-  confidence: number | null;
   source_count: number;
-  updated_at: string;
   videos: LibraryVideo[];
 };
 
@@ -93,6 +88,9 @@ type VideoPlan = {
   title: string;
   strategy: string;
   objective: string;
+  integrationMode?: "standard_adaptation" | "public_figure_overlay_only";
+  publicFigureNotes?: string;
+  overlayOpportunities?: string[];
   deliverableSpec: {
     duration: string;
     aspectRatio: string;
@@ -133,18 +131,21 @@ type PlansResponse = {
   error?: string;
 };
 
+type CharacterAngle = {
+  id: string;
+  angleKey: string;
+  angleLabel: string;
+  imageUrl: string;
+};
+
 type UgcCharacter = {
   id: string;
   characterName: string;
   personaSummary: string;
-  visualStyle: string;
-  wardrobeNotes: string | null;
-  voiceTone: string | null;
-  promptTemplate: string;
-  referenceImageUrl: string | null;
   imageModel: string | null;
   isDefault?: boolean;
-  updatedAt: string;
+  referenceImageUrl: string | null;
+  angles?: CharacterAngle[];
 };
 
 type CharacterResponse = {
@@ -159,32 +160,41 @@ function formatTypeVariant(type: string): "default" | "video" | "success" {
   return "default";
 }
 
-function getVideoAnalysisMethod(video: LibraryVideo): string | null {
-  const payload = video.analysis_payload;
-  if (!payload || typeof payload !== "object") return null;
-
-  const formatAnalysis = (payload as Record<string, unknown>).formatAnalysis;
-  if (!formatAnalysis || typeof formatAnalysis !== "object") return null;
-
-  const method = (formatAnalysis as Record<string, unknown>).analysisMethod;
-  return typeof method === "string" ? method : null;
-}
-
-function getVideoFrameCount(video: LibraryVideo): number | null {
-  const payload = video.analysis_payload;
-  if (!payload || typeof payload !== "object") return null;
-
-  const formatAnalysis = (payload as Record<string, unknown>).formatAnalysis;
-  if (!formatAnalysis || typeof formatAnalysis !== "object") return null;
-
-  const frameCount = (formatAnalysis as Record<string, unknown>).sampledFrameCount;
-  return typeof frameCount === "number" && Number.isFinite(frameCount) ? frameCount : null;
-}
-
 function formatDateTime(value: string): string {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
   return date.toLocaleString();
+}
+
+function clampAspectRatio(value: number): number {
+  if (!Number.isFinite(value) || value <= 0) return 9 / 16;
+  return Math.max(0.45, Math.min(2.2, value));
+}
+
+function getVideoFormatAnalysis(video: LibraryVideo): Record<string, unknown> | null {
+  const payload = video.analysis_payload;
+  if (!payload || typeof payload !== "object") return null;
+  const formatAnalysis = (payload as Record<string, unknown>).formatAnalysis;
+  if (!formatAnalysis || typeof formatAnalysis !== "object") return null;
+  return formatAnalysis as Record<string, unknown>;
+}
+
+function getVideoAnalysisMethod(video: LibraryVideo): string | null {
+  const formatAnalysis = getVideoFormatAnalysis(video);
+  const method = formatAnalysis?.analysisMethod;
+  return typeof method === "string" ? method : null;
+}
+
+function getVideoFrameCount(video: LibraryVideo): number | null {
+  const formatAnalysis = getVideoFormatAnalysis(video);
+  const count = formatAnalysis?.sampledFrameCount;
+  return typeof count === "number" && Number.isFinite(count) ? count : null;
+}
+
+function getVideoDirectMediaUrl(video: LibraryVideo): string | null {
+  const formatAnalysis = getVideoFormatAnalysis(video);
+  const url = formatAnalysis?.directMediaUrl;
+  return typeof url === "string" && url.trim().length > 0 ? url : null;
 }
 
 function getPromptModel(item: HiggsfieldPrompt): string {
@@ -209,34 +219,63 @@ export function VideoAgentView({ collectionId }: { collectionId: string }) {
   const [sourceUrl, setSourceUrl] = useState("");
   const [userNotes, setUserNotes] = useState("");
   const [reasoningModel, setReasoningModel] = useState<ReasoningModel>(DEFAULT_REASONING_MODEL);
+
   const [library, setLibrary] = useState<LibraryFormat[]>([]);
+  const [expandedFormats, setExpandedFormats] = useState<Record<string, boolean>>({});
   const [selectedFormatId, setSelectedFormatId] = useState<string | null>(null);
   const [selectedVideoId, setSelectedVideoId] = useState<string | null>(null);
-  const [plan, setPlan] = useState<VideoPlan | null>(null);
-  const [planId, setPlanId] = useState<string | null>(null);
-  const [savedPlans, setSavedPlans] = useState<SavedPlan[]>([]);
+  const [playingCardVideoId, setPlayingCardVideoId] = useState<string | null>(null);
+  const [videoAspectRatios, setVideoAspectRatios] = useState<Record<string, number>>({});
+
   const [ugcCharacters, setUgcCharacters] = useState<UgcCharacter[]>([]);
   const [selectedUgcCharacterId, setSelectedUgcCharacterId] = useState<string | null>(null);
-  const [isLoadingCharacter, setIsLoadingCharacter] = useState(false);
+
+  const [savedPlans, setSavedPlans] = useState<SavedPlan[]>([]);
+  const [plan, setPlan] = useState<VideoPlan | null>(null);
+  const [planId, setPlanId] = useState<string | null>(null);
+
+  const [leftCollapsed, setLeftCollapsed] = useState(false);
+  const [rightCollapsed, setRightCollapsed] = useState(false);
+
   const [isLoadingLibrary, setIsLoadingLibrary] = useState(false);
+  const [isLoadingCharacters, setIsLoadingCharacters] = useState(false);
   const [isLoadingPlans, setIsLoadingPlans] = useState(false);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [isGeneratingPlan, setIsGeneratingPlan] = useState(false);
+
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
+
+  const selectedFormat = useMemo(
+    () => library.find((format) => format.id === selectedFormatId) || null,
+    [library, selectedFormatId]
+  );
+
+  const selectedVideo = useMemo(
+    () => selectedFormat?.videos.find((video) => video.id === selectedVideoId) || null,
+    [selectedFormat, selectedVideoId]
+  );
+
+  const selectedUgcCharacter = useMemo(
+    () => ugcCharacters.find((item) => item.id === selectedUgcCharacterId) || null,
+    [ugcCharacters, selectedUgcCharacterId]
+  );
+
+  const selectedVideoDirectUrl = selectedVideo ? getVideoDirectMediaUrl(selectedVideo) : null;
 
   const loadLibrary = useCallback(
     async (preferred?: { formatId?: string | null; videoId?: string | null }) => {
       setIsLoadingLibrary(true);
-
       try {
-        const response = await fetch(`/api/video-agent/formats?collectionId=${encodeURIComponent(collectionId)}`, {
-          method: "GET",
-          cache: "no-store",
-        });
+        const response = await fetch(
+          `/api/video-agent/formats?collectionId=${encodeURIComponent(collectionId)}`,
+          {
+            method: "GET",
+            cache: "no-store",
+          }
+        );
 
         const data = (await response.json()) as FormatsResponse;
-
         if (!response.ok) {
           throw new Error(data.error || "Failed to load video format library.");
         }
@@ -244,26 +283,40 @@ export function VideoAgentView({ collectionId }: { collectionId: string }) {
         const formats = Array.isArray(data.formats) ? data.formats : [];
         setLibrary(formats);
 
-        setSelectedFormatId((current) => {
-          const preferredId = preferred?.formatId;
-          if (preferredId && formats.some((item) => item.id === preferredId)) {
-            return preferredId;
-          }
-          if (current && formats.some((item) => item.id === current)) {
-            return current;
-          }
-          return formats[0]?.id || null;
-        });
+        const nextFormatId =
+          (preferred?.formatId && formats.some((item) => item.id === preferred.formatId)
+            ? preferred.formatId
+            : null) ||
+          (selectedFormatId && formats.some((item) => item.id === selectedFormatId)
+            ? selectedFormatId
+            : null) ||
+          formats[0]?.id ||
+          null;
 
-        setSelectedVideoId((current) => {
-          const preferredVideoId = preferred?.videoId;
-          if (preferredVideoId && formats.some((format) => format.videos.some((video) => video.id === preferredVideoId))) {
-            return preferredVideoId;
+        const nextFormat = formats.find((item) => item.id === nextFormatId) || null;
+
+        const nextVideoId =
+          (preferred?.videoId && formats.some((item) => item.videos.some((video) => video.id === preferred.videoId))
+            ? preferred.videoId
+            : null) ||
+          (selectedVideoId && formats.some((item) => item.videos.some((video) => video.id === selectedVideoId))
+            ? selectedVideoId
+            : null) ||
+          nextFormat?.videos[0]?.id ||
+          null;
+
+        setSelectedFormatId(nextFormatId);
+        setSelectedVideoId(nextVideoId);
+
+        setExpandedFormats((prev) => {
+          const next = { ...prev };
+          if (nextFormatId) {
+            next[nextFormatId] = true;
           }
-          if (current && formats.some((format) => format.videos.some((video) => video.id === current))) {
-            return current;
+          if (formats.length > 0 && !Object.values(next).some(Boolean)) {
+            next[formats[0].id] = true;
           }
-          return formats[0]?.videos[0]?.id || null;
+          return next;
         });
       } catch (err) {
         setError(err instanceof Error ? err.message : "Failed to load video format library.");
@@ -271,12 +324,11 @@ export function VideoAgentView({ collectionId }: { collectionId: string }) {
         setIsLoadingLibrary(false);
       }
     },
-    [collectionId]
+    [collectionId, selectedFormatId, selectedVideoId]
   );
 
-  const loadCharacter = useCallback(async () => {
-    setIsLoadingCharacter(true);
-
+  const loadCharacters = useCallback(async () => {
+    setIsLoadingCharacters(true);
     try {
       const response = await fetch(
         `/api/video-agent/characters?collectionId=${encodeURIComponent(collectionId)}`,
@@ -287,45 +339,85 @@ export function VideoAgentView({ collectionId }: { collectionId: string }) {
       );
 
       const data = (await response.json()) as CharacterResponse;
-
       if (!response.ok) {
-        throw new Error(data.error || "Failed to load UGC character.");
+        throw new Error(data.error || "Failed to load UGC characters.");
       }
 
-      const characters = Array.isArray(data.characters)
+      const list = Array.isArray(data.characters)
         ? data.characters
         : data.character
           ? [data.character]
           : [];
+      setUgcCharacters(list);
 
-      setUgcCharacters(characters);
       setSelectedUgcCharacterId((current) => {
-        if (current && characters.some((item) => item.id === current)) {
-          return current;
-        }
-
-        const defaultCharacter = characters.find((item) => item.isDefault) || null;
-        return defaultCharacter?.id || characters[0]?.id || null;
+        if (current && list.some((item) => item.id === current)) return current;
+        const defaultCharacter = list.find((item) => item.isDefault) || null;
+        return defaultCharacter?.id || list[0]?.id || null;
       });
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to load UGC character.");
+      setError(err instanceof Error ? err.message : "Failed to load UGC characters.");
     } finally {
-      setIsLoadingCharacter(false);
+      setIsLoadingCharacters(false);
     }
   }, [collectionId]);
 
+  const loadSavedPlans = useCallback(
+    async (options?: { formatId?: string | null; videoId?: string | null; preferredPlanId?: string | null }) => {
+      const formatId = options?.formatId ?? selectedFormatId;
+      const videoId = options?.videoId ?? selectedVideoId;
+
+      if (!formatId || !videoId) {
+        setSavedPlans([]);
+        setPlan(null);
+        setPlanId(null);
+        return;
+      }
+
+      setIsLoadingPlans(true);
+      try {
+        const response = await fetch(
+          `/api/video-agent/plans?collectionId=${encodeURIComponent(collectionId)}&formatId=${encodeURIComponent(formatId)}&videoId=${encodeURIComponent(videoId)}&limit=20`,
+          {
+            method: "GET",
+            cache: "no-store",
+          }
+        );
+
+        const data = (await response.json()) as PlansResponse;
+        if (!response.ok) {
+          throw new Error(data.error || "Failed to load saved recreation plans.");
+        }
+
+        const plans = Array.isArray(data.plans) ? data.plans : [];
+        setSavedPlans(plans);
+
+        const preferred =
+          (options?.preferredPlanId
+            ? plans.find((item) => item.id === options.preferredPlanId)
+            : null) || plans[0] || null;
+
+        if (!preferred) {
+          setPlan(null);
+          setPlanId(null);
+          return;
+        }
+
+        setPlan(preferred.plan);
+        setPlanId(preferred.id);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Failed to load saved recreation plans.");
+      } finally {
+        setIsLoadingPlans(false);
+      }
+    },
+    [collectionId, selectedFormatId, selectedVideoId]
+  );
+
   useEffect(() => {
     void loadLibrary();
-  }, [loadLibrary]);
-
-  useEffect(() => {
-    void loadCharacter();
-  }, [loadCharacter]);
-
-  const selectedFormat = useMemo(
-    () => library.find((format) => format.id === selectedFormatId) || null,
-    [library, selectedFormatId]
-  );
+    void loadCharacters();
+  }, [loadLibrary, loadCharacters]);
 
   useEffect(() => {
     if (!selectedFormat) {
@@ -340,93 +432,20 @@ export function VideoAgentView({ collectionId }: { collectionId: string }) {
     setSelectedVideoId(selectedFormat.videos[0]?.id || null);
   }, [selectedFormat, selectedVideoId]);
 
-  const selectedVideo = useMemo(
-    () => selectedFormat?.videos.find((video) => video.id === selectedVideoId) || null,
-    [selectedFormat, selectedVideoId]
-  );
-
-  const selectedUgcCharacter = useMemo(
-    () => ugcCharacters.find((item) => item.id === selectedUgcCharacterId) || null,
-    [ugcCharacters, selectedUgcCharacterId]
-  );
-
-  const loadSavedPlans = useCallback(
-    async (options?: {
-      formatId?: string | null;
-      videoId?: string | null;
-      preferredPlanId?: string | null;
-    }) => {
-      const effectiveFormatId = options?.formatId ?? selectedFormatId;
-      const effectiveVideoId = options?.videoId ?? selectedVideoId;
-
-      if (!effectiveFormatId || !effectiveVideoId) {
-        setSavedPlans([]);
-        setPlan(null);
-        setPlanId(null);
-        return;
-      }
-
-      setIsLoadingPlans(true);
-
-      try {
-        const url = `/api/video-agent/plans?collectionId=${encodeURIComponent(collectionId)}&formatId=${encodeURIComponent(effectiveFormatId)}&videoId=${encodeURIComponent(effectiveVideoId)}&limit=20`;
-
-        const response = await fetch(url, {
-          method: "GET",
-          cache: "no-store",
-        });
-
-        const data = (await response.json()) as PlansResponse;
-
-        if (!response.ok) {
-          throw new Error(data.error || "Failed to load saved recreation plans.");
-        }
-
-        const plans = Array.isArray(data.plans) ? data.plans : [];
-        setSavedPlans(plans);
-
-        const preferredPlan =
-          (options?.preferredPlanId
-            ? plans.find((item) => item.id === options.preferredPlanId)
-            : null) || plans[0] || null;
-
-        if (!preferredPlan) {
-          setPlan(null);
-          setPlanId(null);
-          return;
-        }
-
-        setPlan(preferredPlan.plan);
-        setPlanId(preferredPlan.id);
-      } catch (err) {
-        setError(err instanceof Error ? err.message : "Failed to load saved recreation plans.");
-      } finally {
-        setIsLoadingPlans(false);
-      }
-    },
-    [collectionId, selectedFormatId, selectedVideoId]
-  );
-
   useEffect(() => {
     void loadSavedPlans();
   }, [loadSavedPlans]);
 
   const scriptClipboardText = useMemo(() => {
     if (!plan) return "";
-
-    const beatLines = plan.script.beats
-      .map((beat, index) => {
-        return [
-          `Beat ${index + 1} (${beat.timecode})`,
-          `Visual: ${beat.visual}`,
-          `Narration: ${beat.narration}`,
-          `On-screen text: ${beat.onScreenText}`,
-          `Edit note: ${beat.editNote}`,
-        ].join("\n");
-      })
+    const beats = plan.script.beats
+      .map(
+        (beat, index) =>
+          `Beat ${index + 1} (${beat.timecode})\nVisual: ${beat.visual}\nNarration: ${beat.narration}\nOn-screen text: ${beat.onScreenText}\nEdit note: ${beat.editNote}`
+      )
       .join("\n\n");
 
-    return [`Hook: ${plan.script.hook}`, "", beatLines, "", `CTA: ${plan.script.cta}`].join("\n");
+    return [`Hook: ${plan.script.hook}`, "", beats, "", `CTA: ${plan.script.cta}`].join("\n");
   }, [plan]);
 
   const higgsfieldClipboardText = useMemo(() => {
@@ -434,7 +453,9 @@ export function VideoAgentView({ collectionId }: { collectionId: string }) {
     return plan.higgsfieldPrompts
       .map(
         (item, index) =>
-          `Scene ${index + 1} - ${item.scene}\nDuration: ${getPromptDuration(item)}\nModel: ${getPromptModel(item)}\nWhy: ${getPromptReason(item)}\nPrompt: ${item.prompt}`
+          `Scene ${index + 1} - ${item.scene}\nDuration: ${getPromptDuration(item)}\nModel: ${getPromptModel(
+            item
+          )}\nWhy: ${getPromptReason(item)}\nPrompt: ${item.prompt}`
       )
       .join("\n\n");
   }, [plan]);
@@ -448,8 +469,6 @@ export function VideoAgentView({ collectionId }: { collectionId: string }) {
     setIsAnalyzing(true);
     setError("");
     setSuccess("");
-    setPlan(null);
-    setPlanId(null);
 
     try {
       const response = await fetch("/api/video-agent/intake", {
@@ -464,30 +483,27 @@ export function VideoAgentView({ collectionId }: { collectionId: string }) {
       });
 
       const data = (await response.json()) as IntakeResponse;
-
       if (!response.ok) {
-        throw new Error(data.error || "Failed to analyze video format.");
+        throw new Error(data.error || "Failed to analyze and group video.");
       }
 
-      const selectedCountText =
+      setSourceUrl("");
+      const countText =
         typeof data.groupedVideoCount === "number"
-          ? ` (${data.groupedVideoCount} videos now in this format)`
+          ? ` (${data.groupedVideoCount} videos in group)`
           : "";
-
       setSuccess(
         data.createdNewFormat
-          ? `Created a new format group${selectedCountText}.`
-          : `Matched an existing format group${selectedCountText}.`
+          ? `New format created${countText}.`
+          : `Matched existing format${countText}.`
       );
-
-      setSourceUrl("");
 
       await loadLibrary({
         formatId: data.format?.id || null,
         videoId: data.video?.id || null,
       });
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to analyze video format.");
+      setError(err instanceof Error ? err.message : "Failed to analyze and group video.");
     } finally {
       setIsAnalyzing(false);
     }
@@ -495,12 +511,12 @@ export function VideoAgentView({ collectionId }: { collectionId: string }) {
 
   const handleGeneratePlan = async () => {
     if (!selectedFormat || !selectedVideo) {
-      setError("Select a format and a source video before generating a recreation plan.");
+      setError("Select a format and video first.");
       return;
     }
 
     if (selectedFormat.format_type === "ugc" && !selectedUgcCharacter) {
-      setError("Select a UGC character first (or create one in Characters section), then generate the plan.");
+      setError("This is a UGC format. Select a character from Character Studio first.");
       return;
     }
 
@@ -522,18 +538,17 @@ export function VideoAgentView({ collectionId }: { collectionId: string }) {
       });
 
       const data = (await response.json()) as RecreateResponse;
-
       if (!response.ok) {
         throw new Error(data.error || "Failed to generate recreation plan.");
       }
 
       if (!data.plan) {
-        throw new Error("No plan was returned.");
+        throw new Error("No plan returned.");
       }
 
       setPlan(data.plan);
       setPlanId(data.planId || null);
-      setSuccess("Generated your recreation plan and script.");
+      setSuccess("Recreation plan generated.");
 
       await loadSavedPlans({
         formatId: selectedFormat.id,
@@ -547,156 +562,260 @@ export function VideoAgentView({ collectionId }: { collectionId: string }) {
     }
   };
 
+  const selectedVideoAspectRatio = selectedVideo
+    ? clampAspectRatio(videoAspectRatios[selectedVideo.id] || 9 / 16)
+    : 9 / 16;
+
   return (
-    <div className="flex-1 overflow-y-auto px-6 py-6 md:px-8">
-      <div className="mx-auto grid w-full max-w-7xl gap-6 lg:grid-cols-[320px_1fr]">
-        <div className="space-y-4 lg:sticky lg:top-22 lg:h-fit">
-          <Button variant="ghost" size="sm" onClick={() => router.push(`/collections/${collectionId}`)}>
-            <ArrowLeft className="mr-2 h-4 w-4" />
-            Back to collection
-          </Button>
-
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-base">Video Pipeline</CardTitle>
-              <CardDescription>
-                Upload links, classify reusable video formats, then generate execution-ready plans for your app.
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-2 text-sm text-slate-600">
-              <StatusRow label="1. Analyze link" done={library.length > 0} />
-              <StatusRow label="2. Select format + source" done={Boolean(selectedFormat && selectedVideo)} />
-              <StatusRow label="3. Generate recreation plan" done={Boolean(plan)} />
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-base">App Context</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-2 text-sm text-slate-600">
-              <p>
-                <span className="font-medium text-slate-800">Target app:</span>{" "}
-                {activeCollection?.app_name || "Muslimah Pro"}
-              </p>
-              <p>{activeCollection?.app_description || "Add collection app description for better adaptation quality."}</p>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-base">UGC Characters</CardTitle>
-              <CardDescription>
-                {isLoadingCharacter
-                  ? "Loading characters..."
-                  : `${ugcCharacters.length} characters available`}
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-3">
-              {selectedUgcCharacter ? (
-                <div className="space-y-2 rounded-lg border border-slate-200 bg-slate-50 p-3">
-                  <div className="flex items-center gap-2">
-                    <Users className="h-4 w-4 text-rose-600" />
-                    <p className="text-sm font-semibold text-slate-800">{selectedUgcCharacter.characterName}</p>
-                  </div>
-                  {selectedUgcCharacter.referenceImageUrl ? (
-                    <img
-                      src={selectedUgcCharacter.referenceImageUrl}
-                      alt={selectedUgcCharacter.characterName}
-                      className="h-34 w-full rounded-md object-cover"
-                    />
-                  ) : null}
-                  <p className="text-xs text-slate-600">{selectedUgcCharacter.personaSummary}</p>
-                  <p className="text-[11px] text-slate-500">
-                    Model: {selectedUgcCharacter.imageModel || "gemini-3-pro-image-preview"}
-                  </p>
-                </div>
-              ) : (
-                <p className="text-xs text-slate-500">
-                  No characters yet. Create one in Character Studio, then select it in UGC plan generation.
-                </p>
-              )}
-
-              <Button variant="outline" onClick={() => router.push(`/collections/${collectionId}/characters`)}>
-                <Users className="mr-2 h-4 w-4" />
-                Open Character Studio
+    <div className="flex min-h-0 flex-1 overflow-hidden bg-slate-100">
+      <aside
+        className={`border-r border-slate-200 bg-white transition-all duration-200 ${
+          leftCollapsed ? "w-16" : "w-[360px]"
+        }`}
+      >
+        <div className="flex h-full min-h-0 flex-col">
+          <div className="flex items-center justify-between border-b border-slate-200 px-3 py-2">
+            {!leftCollapsed ? (
+              <Button variant="ghost" size="sm" onClick={() => router.push(`/collections/${collectionId}`)}>
+                <ArrowLeft className="mr-2 h-4 w-4" />
+                Back
               </Button>
-            </CardContent>
-          </Card>
+            ) : (
+              <Button variant="ghost" size="icon" onClick={() => router.push(`/collections/${collectionId}`)}>
+                <ArrowLeft className="h-4 w-4" />
+              </Button>
+            )}
+            <Button variant="ghost" size="icon" onClick={() => setLeftCollapsed((prev) => !prev)}>
+              {leftCollapsed ? <ChevronRight className="h-4 w-4" /> : <ChevronLeft className="h-4 w-4" />}
+            </Button>
+          </div>
 
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-base">Saved Formats</CardTitle>
-              <CardDescription>{isLoadingLibrary ? "Refreshing..." : `${library.length} grouped formats`}</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-2">
-              {library.length === 0 ? (
-                <p className="text-sm text-slate-500">No format groups yet. Analyze your first video link.</p>
-              ) : (
-                library.map((format) => (
-                  <button
-                    key={format.id}
-                    type="button"
-                    onClick={() => {
-                      setSelectedFormatId(format.id);
-                      setPlan(null);
-                      setPlanId(null);
-                    }}
-                    className={`w-full rounded-lg border px-3 py-2 text-left transition ${
-                      selectedFormatId === format.id
-                        ? "border-rose-300 bg-rose-50"
-                        : "border-slate-200 bg-white hover:border-slate-300"
-                    }`}
-                  >
-                    <p className={`truncate text-sm font-semibold ${selectedFormatId === format.id ? "text-rose-800" : "text-slate-800"}`}>
-                      {format.format_name}
-                    </p>
-                    <div className="mt-1 flex flex-wrap items-center gap-2">
-                      <Badge variant={formatTypeVariant(format.format_type)}>{format.format_type}</Badge>
-                      <Badge variant="default">{format.source_count} videos</Badge>
-                    </div>
-                  </button>
-                ))
-              )}
-            </CardContent>
-          </Card>
+          {leftCollapsed ? (
+            <div className="flex flex-1 flex-col items-center gap-2 py-3">
+              <Button variant="ghost" size="icon" onClick={() => setLeftCollapsed(false)}>
+                <Clapperboard className="h-4 w-4" />
+              </Button>
+            </div>
+          ) : (
+            <div className="min-h-0 flex-1 space-y-3 overflow-y-auto p-3">
+              <Card>
+                <CardHeader className="pb-3">
+                  <CardTitle className="text-base">Analyze Video</CardTitle>
+                  <CardDescription>Upload a link and auto-group by format.</CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-3">
+                  <Input
+                    icon={<Link2 className="h-4 w-4" />}
+                    placeholder="https://..."
+                    value={sourceUrl}
+                    onChange={(event) => setSourceUrl(event.target.value)}
+                  />
+                  <textarea
+                    value={userNotes}
+                    onChange={(event) => setUserNotes(event.target.value)}
+                    rows={2}
+                    placeholder="Optional notes..."
+                    className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800 outline-none transition focus:border-rose-400 focus:ring-2 focus:ring-rose-200"
+                  />
+                  <Button variant="primary" onClick={handleAnalyze} isLoading={isAnalyzing}>
+                    <Sparkles className="mr-2 h-4 w-4" />
+                    {isAnalyzing ? "Analyzing..." : "Analyze & Group"}
+                  </Button>
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardHeader className="pb-3">
+                  <CardTitle className="text-base">Formats</CardTitle>
+                  <CardDescription>
+                    {isLoadingLibrary ? "Loading..." : `${library.length} format groups`}
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-2">
+                  {library.length === 0 ? (
+                    <p className="text-sm text-slate-500">No formats yet.</p>
+                  ) : (
+                    library.map((format) => {
+                      const expanded = Boolean(expandedFormats[format.id]);
+                      return (
+                        <div key={format.id} className="rounded-lg border border-slate-200 bg-white">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setExpandedFormats((prev) => ({
+                                ...prev,
+                                [format.id]: !expanded,
+                              }));
+                              setSelectedFormatId(format.id);
+                            }}
+                            className="flex w-full items-center justify-between gap-2 px-3 py-2 text-left"
+                          >
+                            <div className="min-w-0">
+                              <p className="truncate text-sm font-semibold text-slate-800">{format.format_name}</p>
+                              <div className="mt-1 flex items-center gap-2">
+                                <Badge variant={formatTypeVariant(format.format_type)}>{format.format_type}</Badge>
+                                <Badge variant="default">{format.videos.length}</Badge>
+                              </div>
+                            </div>
+                            <ChevronDown
+                              className={`h-4 w-4 text-slate-500 transition-transform ${expanded ? "rotate-180" : ""}`}
+                            />
+                          </button>
+
+                          {expanded ? (
+                            <div className="space-y-2 border-t border-slate-200 p-2">
+                              {format.videos.map((video) => {
+                                const ratio = clampAspectRatio(videoAspectRatios[video.id] || 9 / 16);
+                                const isSelected = selectedVideoId === video.id;
+                                const directMediaUrl = getVideoDirectMediaUrl(video);
+
+                                return (
+                                  <div
+                                    key={video.id}
+                                    className={`rounded-md border p-2 ${
+                                      isSelected
+                                        ? "border-rose-300 bg-rose-50"
+                                        : "border-slate-200 bg-white hover:border-slate-300"
+                                    }`}
+                                  >
+                                    <div
+                                      role="button"
+                                      tabIndex={0}
+                                      onClick={() => {
+                                        setSelectedFormatId(format.id);
+                                        setSelectedVideoId(video.id);
+                                        if (directMediaUrl) {
+                                          setPlayingCardVideoId(video.id);
+                                        }
+                                        setRightCollapsed(false);
+                                      }}
+                                      onKeyDown={(event) => {
+                                        if (event.key === "Enter" || event.key === " ") {
+                                          setSelectedFormatId(format.id);
+                                          setSelectedVideoId(video.id);
+                                          if (directMediaUrl) {
+                                            setPlayingCardVideoId(video.id);
+                                          }
+                                          setRightCollapsed(false);
+                                        }
+                                      }}
+                                      className="cursor-pointer"
+                                    >
+                                      <div className="relative overflow-hidden rounded-md border border-slate-200" style={{ aspectRatio: ratio }}>
+                                        {directMediaUrl && playingCardVideoId === video.id ? (
+                                          <video
+                                            key={`${video.id}-left`}
+                                            src={directMediaUrl}
+                                            controls
+                                            autoPlay
+                                            muted
+                                            playsInline
+                                            preload="metadata"
+                                            poster={video.thumbnail_url || undefined}
+                                            className="h-full w-full object-cover"
+                                          />
+                                        ) : video.thumbnail_url ? (
+                                          <img
+                                            src={video.thumbnail_url}
+                                            alt={video.title || "Video thumbnail"}
+                                            className="h-full w-full object-cover"
+                                            onLoad={(event) => {
+                                              const { naturalWidth, naturalHeight } = event.currentTarget;
+                                              if (naturalWidth > 0 && naturalHeight > 0) {
+                                                setVideoAspectRatios((prev) => ({
+                                                  ...prev,
+                                                  [video.id]: naturalWidth / naturalHeight,
+                                                }));
+                                              }
+                                            }}
+                                          />
+                                        ) : (
+                                          <div className="flex h-full w-full items-center justify-center bg-slate-100 text-slate-500">
+                                            <Clapperboard className="h-5 w-5" />
+                                          </div>
+                                        )}
+                                        {directMediaUrl && playingCardVideoId !== video.id ? (
+                                          <div className="pointer-events-none absolute inset-0 flex items-center justify-center bg-black/15">
+                                            <div className="rounded-full bg-black/55 p-2 text-white">
+                                              <Play className="h-4 w-4" />
+                                            </div>
+                                          </div>
+                                        ) : null}
+                                      </div>
+                                      <p className="mt-1 truncate text-xs font-semibold text-slate-700">
+                                        {video.title || "Untitled source video"}
+                                      </p>
+                                    </div>
+
+                                    <div className="mt-2 flex items-center justify-between gap-2">
+                                      <div className="flex items-center gap-1.5">
+                                        <Badge variant="default">{video.platform}</Badge>
+                                        {(() => {
+                                          const method = getVideoAnalysisMethod(video);
+                                          const frameCount = getVideoFrameCount(video);
+                                          if (!method) return null;
+                                          return (
+                                            <Badge variant="default">
+                                              {method.replace(/_/g, " ")}
+                                              {typeof frameCount === "number" ? ` (${frameCount})` : ""}
+                                            </Badge>
+                                          );
+                                        })()}
+                                      </div>
+                                      <div className="flex items-center gap-1">
+                                        {directMediaUrl ? (
+                                          <Button
+                                            variant="ghost"
+                                            size="sm"
+                                            onClick={() => {
+                                              setSelectedFormatId(format.id);
+                                              setSelectedVideoId(video.id);
+                                              setPlayingCardVideoId(video.id);
+                                            }}
+                                          >
+                                            <Play className="mr-1 h-3.5 w-3.5" />
+                                            Play
+                                          </Button>
+                                        ) : null}
+                                        <Button
+                                          variant="ghost"
+                                          size="sm"
+                                          onClick={() => window.open(video.source_url, "_blank", "noopener,noreferrer")}
+                                        >
+                                          <ExternalLink className="mr-1 h-3.5 w-3.5" />
+                                          Open
+                                        </Button>
+                                      </div>
+                                    </div>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          ) : null}
+                        </div>
+                      );
+                    })
+                  )}
+                </CardContent>
+              </Card>
+            </div>
+          )}
         </div>
+      </aside>
 
-        <div className="space-y-4">
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-lg">Analyze New Video Link</CardTitle>
-              <CardDescription>
-                Paste a source link. The agent classifies its format and groups it into your reusable format library.
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="space-y-2">
-                <label className="text-sm font-semibold text-slate-800">Video URL</label>
-                <Input
-                  icon={<Link2 className="h-4 w-4" />}
-                  placeholder="https://www.instagram.com/reel/..."
-                  value={sourceUrl}
-                  onChange={(event) => {
-                    setSourceUrl(event.target.value);
-                    setError("");
-                  }}
-                />
-              </div>
+      <section className="min-w-0 flex-1 overflow-hidden">
+        <div className="flex h-full min-h-0 flex-col">
+          <div className="border-b border-slate-200 bg-white px-4 py-3">
+            <div className="flex flex-wrap items-center gap-2">
+              <p className="text-sm font-semibold text-slate-800">
+                {selectedFormat ? selectedFormat.format_name : "Select a format"}
+              </p>
+              {selectedFormat ? (
+                <Badge variant={formatTypeVariant(selectedFormat.format_type)}>{selectedFormat.format_type}</Badge>
+              ) : null}
+              <Badge variant="default">{activeCollection?.app_name || "Muslimah Pro"}</Badge>
 
-              <div className="space-y-2">
-                <label className="text-sm font-semibold text-slate-800">Notes (optional)</label>
-                <textarea
-                  value={userNotes}
-                  onChange={(event) => setUserNotes(event.target.value)}
-                  rows={3}
-                  placeholder="Add why this video stood out (hook, pacing, visuals, offer style)..."
-                  className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800 outline-none transition focus:border-rose-400 focus:ring-2 focus:ring-rose-200"
-                />
-              </div>
-
-              <div className="space-y-2">
-                <label className="text-sm font-semibold text-slate-800">Analysis Model</label>
+              <div className="ml-auto flex flex-wrap items-center gap-2">
                 <select
                   value={reasoningModel}
                   onChange={(event) => {
@@ -705,7 +824,7 @@ export function VideoAgentView({ collectionId }: { collectionId: string }) {
                       setReasoningModel(value);
                     }
                   }}
-                  className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800 outline-none transition focus:border-rose-400 focus:ring-2 focus:ring-rose-200"
+                  className="rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-xs text-slate-800 outline-none transition focus:border-rose-400 focus:ring-2 focus:ring-rose-200"
                 >
                   {REASONING_MODELS.map((model) => (
                     <option key={model.id} value={model.id}>
@@ -713,316 +832,403 @@ export function VideoAgentView({ collectionId }: { collectionId: string }) {
                     </option>
                   ))}
                 </select>
-              </div>
 
-              <Button variant="primary" onClick={handleAnalyze} isLoading={isAnalyzing}>
-                <Clapperboard className="mr-2 h-4 w-4" />
-                {isAnalyzing ? "Analyzing format..." : "Analyze & Group Video"}
-              </Button>
-
-              {error ? (
-                <div className="flex items-start gap-2 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">
-                  <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
-                  <span>{error}</span>
-                </div>
-              ) : null}
-
-              {success ? (
-                <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700">
-                  {success}
-                </div>
-              ) : null}
-            </CardContent>
-          </Card>
-
-          {selectedFormat ? (
-            <Card>
-              <CardHeader>
-                <CardTitle className="text-base">Selected Format: {selectedFormat.format_name}</CardTitle>
-                <CardDescription>
-                  Signature: <span className="font-mono text-xs">{selectedFormat.format_signature}</span>
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <div className="flex flex-wrap items-center gap-2">
-                  <Badge variant={formatTypeVariant(selectedFormat.format_type)}>{selectedFormat.format_type}</Badge>
-                  <Badge variant="default">{selectedFormat.source_count} videos grouped</Badge>
-                  {typeof selectedFormat.confidence === "number" ? (
-                    <Badge variant="default">confidence {Math.round(selectedFormat.confidence * 100)}%</Badge>
-                  ) : null}
-                </div>
-
-                <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700">
-                  {selectedFormat.summary}
-                </div>
-
-                {selectedFormat.format_type === "ugc" ? (
-                  <div className="space-y-2 rounded-lg border border-slate-200 bg-slate-50 p-3">
-                    <div className="flex items-center justify-between gap-3">
-                      <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">UGC Character Selection</p>
-                      <button
-                        type="button"
-                        onClick={() => router.push(`/collections/${collectionId}/characters`)}
-                        className="text-xs font-medium text-rose-700 hover:text-rose-600"
-                      >
-                        Manage characters
-                      </button>
-                    </div>
-                    {ugcCharacters.length === 0 ? (
-                      <p className="text-sm text-amber-800">
-                        No UGC character found. Create one in Character Studio before generating this plan.
-                      </p>
-                    ) : (
-                      <select
-                        value={selectedUgcCharacterId || ""}
-                        onChange={(event) => setSelectedUgcCharacterId(event.target.value || null)}
-                        className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800 outline-none transition focus:border-rose-400 focus:ring-2 focus:ring-rose-200"
-                      >
-                        {ugcCharacters.map((character) => (
-                          <option key={character.id} value={character.id}>
-                            {character.characterName}
-                            {character.isDefault ? " (Default)" : ""}
-                          </option>
-                        ))}
-                      </select>
-                    )}
-                  </div>
+                {selectedFormat?.format_type === "ugc" ? (
+                  <>
+                    <select
+                      value={selectedUgcCharacterId || ""}
+                      onChange={(event) => setSelectedUgcCharacterId(event.target.value || null)}
+                      disabled={isLoadingCharacters}
+                      className="rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-xs text-slate-800 outline-none transition focus:border-rose-400 focus:ring-2 focus:ring-rose-200"
+                    >
+                      <option value="">{isLoadingCharacters ? "Loading characters..." : "Select UGC character"}</option>
+                      {ugcCharacters.map((character) => (
+                        <option key={character.id} value={character.id}>
+                          {character.characterName}
+                          {character.isDefault ? " (Default)" : ""}
+                        </option>
+                      ))}
+                    </select>
+                    <Button variant="outline" size="sm" onClick={() => router.push(`/collections/${collectionId}/characters`)}>
+                      <Users className="mr-1.5 h-3.5 w-3.5" />
+                      Characters
+                    </Button>
+                  </>
                 ) : null}
 
-                <div className="grid gap-3 md:grid-cols-2">
-                  <SimpleList title="Hook Patterns" items={selectedFormat.hook_patterns} />
-                  <SimpleList title="Editing Style" items={selectedFormat.editing_style} />
-                </div>
+                <Button
+                  variant="primary"
+                  size="sm"
+                  onClick={handleGeneratePlan}
+                  isLoading={isGeneratingPlan}
+                  disabled={!selectedVideo}
+                >
+                  <Sparkles className="mr-1.5 h-3.5 w-3.5" />
+                  {isGeneratingPlan ? "Generating..." : "Generate Recreation Plan"}
+                </Button>
+              </div>
+            </div>
 
-                <SimpleList title="Shot Pattern" items={selectedFormat.shot_pattern} />
+            {error ? (
+              <div className="mt-2 flex items-start gap-2 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">
+                <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+                <span>{error}</span>
+              </div>
+            ) : null}
 
-                <div className="space-y-2">
-                  <p className="text-sm font-semibold text-slate-800">Videos in this format</p>
-                  {selectedFormat.videos.length === 0 ? (
-                    <p className="text-sm text-slate-500">No videos saved in this group yet.</p>
-                  ) : (
-                    <div className="grid gap-2 md:grid-cols-2">
-                      {selectedFormat.videos.map((video) => {
-                        const isActive = selectedVideoId === video.id;
-                        const analysisMethod = getVideoAnalysisMethod(video);
-                        const frameCount = getVideoFrameCount(video);
+            {success ? (
+              <div className="mt-2 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700">
+                {success}
+              </div>
+            ) : null}
+          </div>
 
-                        return (
-                          <button
-                            key={video.id}
-                            type="button"
-                            onClick={() => {
-                              setSelectedVideoId(video.id);
-                              setPlan(null);
-                              setPlanId(null);
-                            }}
-                            className={`rounded-lg border p-3 text-left transition ${
-                              isActive
-                                ? "border-rose-300 bg-rose-50"
-                                : "border-slate-200 bg-white hover:border-slate-300"
-                            }`}
-                          >
-                            <p className={`truncate text-sm font-semibold ${isActive ? "text-rose-800" : "text-slate-800"}`}>
-                              {video.title || "Untitled source video"}
-                            </p>
-                            <p className={`mt-1 line-clamp-2 text-xs ${isActive ? "text-rose-600" : "text-slate-500"}`}>
-                              {video.description || video.source_url}
-                            </p>
-                            <div className="mt-2 flex items-center gap-2">
-                              <Badge variant="default">{video.platform}</Badge>
-                              {analysisMethod ? (
-                                <Badge variant="default">
-                                  {analysisMethod.replace(/_/g, " ")}
-                                  {typeof frameCount === "number" ? ` (${frameCount} frames)` : ""}
-                                </Badge>
-                              ) : null}
-                              <a
-                                href={video.source_url}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                onClick={(event) => event.stopPropagation()}
-                                className="inline-flex items-center gap-1 text-xs text-rose-700 hover:text-rose-600"
-                              >
-                                <ExternalLink className="h-3.5 w-3.5" />
-                                Open
-                              </a>
-                            </div>
-                          </button>
-                        );
-                      })}
-                    </div>
-                  )}
-                </div>
-
-                <div className="flex flex-wrap gap-3">
-                  <Button variant="primary" onClick={handleGeneratePlan} isLoading={isGeneratingPlan}>
-                    <Sparkles className="mr-2 h-4 w-4" />
-                    {isGeneratingPlan ? "Generating plan..." : "Generate Recreation Plan"}
-                  </Button>
-                  {scriptClipboardText ? (
-                    <Button variant="outline" onClick={() => navigator.clipboard.writeText(scriptClipboardText)}>
-                      <Copy className="mr-2 h-4 w-4" />
-                      Copy Script
-                    </Button>
-                  ) : null}
-                  {higgsfieldClipboardText ? (
-                    <Button variant="outline" onClick={() => navigator.clipboard.writeText(higgsfieldClipboardText)}>
-                      <Copy className="mr-2 h-4 w-4" />
-                      Copy Higgsfield Prompts
-                    </Button>
-                  ) : null}
-                </div>
-
-                <div className="space-y-2 rounded-lg border border-slate-200 bg-slate-50 p-3">
-                  <div className="flex items-center justify-between gap-3">
-                    <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Saved Recreation Plans</p>
-                    <span className="text-xs text-slate-500">
-                      {isLoadingPlans ? "Loading..." : `${savedPlans.length} saved`}
-                    </span>
-                  </div>
-
-                  {savedPlans.length === 0 ? (
-                    <p className="text-xs text-slate-500">No saved plans for this source yet. Generate one to persist it.</p>
-                  ) : (
-                    <div className="space-y-2">
-                      {savedPlans.map((savedPlan) => {
-                        const isActivePlan = planId === savedPlan.id;
-
-                        return (
-                          <button
-                            key={savedPlan.id}
-                            type="button"
-                            onClick={() => {
-                              setPlan(savedPlan.plan);
-                              setPlanId(savedPlan.id);
-                              setSuccess("Loaded saved recreation plan.");
-                            }}
-                            className={`w-full rounded-md border px-3 py-2 text-left transition ${
-                              isActivePlan
-                                ? "border-rose-300 bg-rose-50"
-                                : "border-slate-200 bg-white hover:border-slate-300"
-                            }`}
-                          >
-                            <p className={`text-xs font-semibold ${isActivePlan ? "text-rose-700" : "text-slate-700"}`}>
-                              {savedPlan.plan.title || "Saved plan"}
-                            </p>
-                            <p className="mt-1 text-[11px] text-slate-500">
-                              {formatDateTime(savedPlan.generatedAt || savedPlan.created_at)}
-                              {savedPlan.reasoningModel ? ` · ${savedPlan.reasoningModel}` : ""}
-                            </p>
-                          </button>
-                        );
-                      })}
-                    </div>
-                  )}
-                </div>
-              </CardContent>
-            </Card>
-          ) : null}
-
-          {plan ? (
-            <Card>
-              <CardHeader>
-                <CardTitle className="text-base">Recreation Plan</CardTitle>
-                <CardDescription>
-                  {plan.title}
-                  {planId ? ` · Plan ID ${planId.slice(0, 8)}` : ""}
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-4 text-sm text-slate-700">
-                <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
-                  <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Strategy</p>
-                  <p className="mt-1">{plan.strategy}</p>
-                  <p className="mt-2 text-xs text-slate-500">Objective: {plan.objective}</p>
-                </div>
-
-                <div className="grid gap-3 md:grid-cols-2">
-                  <SimpleList
-                    title="Deliverable Spec"
-                    items={[
-                      `Duration: ${plan.deliverableSpec.duration}`,
-                      `Aspect ratio: ${plan.deliverableSpec.aspectRatio}`,
-                      `Platforms: ${plan.deliverableSpec.platforms.join(", ") || "N/A"}`,
-                      `Voice style: ${plan.deliverableSpec.voiceStyle}`,
-                    ]}
-                  />
-                  <SimpleList title="Production Steps" items={plan.productionSteps} />
-                </div>
-
-                <div className="rounded-lg border border-slate-200 bg-white p-3">
-                  <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Script Hook</p>
-                  <p className="mt-1 font-medium text-slate-800">{plan.script.hook}</p>
-                  <div className="mt-3 space-y-2">
-                    {plan.script.beats.map((beat, index) => (
-                      <div key={`${beat.timecode}-${index}`} className="rounded-lg border border-slate-200 bg-slate-50 p-2.5">
-                        <p className="text-xs font-semibold text-slate-600">{beat.timecode}</p>
-                        <p className="mt-1 text-sm text-slate-700"><span className="font-semibold">Visual:</span> {beat.visual}</p>
-                        <p className="mt-1 text-sm text-slate-700"><span className="font-semibold">Narration:</span> {beat.narration}</p>
-                        <p className="mt-1 text-sm text-slate-700"><span className="font-semibold">On-screen:</span> {beat.onScreenText}</p>
-                        <p className="mt-1 text-xs text-slate-500"><span className="font-semibold">Edit note:</span> {beat.editNote}</p>
-                      </div>
-                    ))}
-                  </div>
-                  <p className="mt-3 rounded-md border border-emerald-200 bg-emerald-50 px-2 py-1.5 text-sm text-emerald-800">
-                    CTA: {plan.script.cta}
-                  </p>
-                </div>
-
-                <div className="space-y-2 rounded-lg border border-slate-200 bg-slate-50 p-3">
-                  <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Higgsfield Prompts</p>
-                  <div className="space-y-2">
-                    {plan.higgsfieldPrompts.map((item, index) => (
-                      <div key={`${item.scene}-${index}`} className="rounded-md border border-slate-200 bg-white p-2.5">
-                        <p className="text-sm font-semibold text-slate-800">{index + 1}. {item.scene}</p>
-                        <div className="mt-1 flex flex-wrap items-center gap-2">
-                          <Badge variant="default">Duration: {getPromptDuration(item)}</Badge>
-                          <Badge variant="video">Model: {getPromptModel(item)}</Badge>
+          <div className="min-h-0 flex-1 overflow-y-auto p-4">
+            {!selectedVideo ? (
+              <div className="flex h-full items-center justify-center rounded-xl border border-dashed border-slate-300 bg-white p-8 text-center text-slate-500">
+                Select a video from the left format tree.
+              </div>
+            ) : (
+              <div className="space-y-4">
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="text-base">Selected Source Video</CardTitle>
+                    <CardDescription>
+                      {selectedVideo.title || "Untitled source"} · {selectedVideo.platform}
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="overflow-hidden rounded-xl border border-slate-200 bg-slate-100" style={{ aspectRatio: selectedVideoAspectRatio }}>
+                      {selectedVideoDirectUrl ? (
+                        <video
+                          key={selectedVideoDirectUrl}
+                          src={selectedVideoDirectUrl}
+                          controls
+                          playsInline
+                          preload="metadata"
+                          poster={selectedVideo.thumbnail_url || undefined}
+                          className="h-full w-full object-cover"
+                        />
+                      ) : selectedVideo.thumbnail_url ? (
+                        <img
+                          src={selectedVideo.thumbnail_url}
+                          alt={selectedVideo.title || "Source thumbnail"}
+                          className="h-full w-full object-cover"
+                          onLoad={(event) => {
+                            const { naturalWidth, naturalHeight } = event.currentTarget;
+                            if (naturalWidth > 0 && naturalHeight > 0) {
+                              setVideoAspectRatios((prev) => ({
+                                ...prev,
+                                [selectedVideo.id]: naturalWidth / naturalHeight,
+                              }));
+                            }
+                          }}
+                        />
+                      ) : (
+                        <div className="flex h-full w-full items-center justify-center text-slate-500">
+                          <Clapperboard className="h-8 w-8" />
                         </div>
-                        <p className="mt-1 text-xs text-slate-500">
-                          <span className="font-semibold">Why:</span> {getPromptReason(item)}
-                        </p>
-                        <p className="mt-1.5 text-sm text-slate-700">{item.prompt}</p>
+                      )}
+                    </div>
+
+                    <div className="mt-3 flex flex-wrap items-center gap-2">
+                      <Badge variant="default">{selectedVideo.platform}</Badge>
+                      {(() => {
+                        const method = getVideoAnalysisMethod(selectedVideo);
+                        const frameCount = getVideoFrameCount(selectedVideo);
+                        if (!method) return null;
+                        return (
+                          <Badge variant="default">
+                            {method.replace(/_/g, " ")}
+                            {typeof frameCount === "number" ? ` (${frameCount} frames)` : ""}
+                          </Badge>
+                        );
+                      })()}
+
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => window.open(selectedVideo.source_url, "_blank", "noopener,noreferrer")}
+                      >
+                        <ExternalLink className="mr-1.5 h-3.5 w-3.5" />
+                        Open source
+                      </Button>
+                    </div>
+
+                    {selectedFormat ? (
+                      <div className="mt-3 rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700">
+                        <p className="font-semibold text-slate-800">Format summary</p>
+                        <p className="mt-1">{selectedFormat.summary}</p>
                       </div>
-                    ))}
-                  </div>
-                </div>
+                    ) : null}
+                  </CardContent>
+                </Card>
 
-                <div className="grid gap-3 md:grid-cols-3">
-                  <SimpleList title="Editing Timeline" items={plan.editingTimeline} />
-                  <SimpleList title="Assets Checklist" items={plan.assetsChecklist} />
-                  <SimpleList title="QA Checklist" items={plan.qaChecklist} />
-                </div>
-              </CardContent>
-            </Card>
-          ) : null}
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="text-base">Videos in This Format</CardTitle>
+                    <CardDescription>Select any sample video to recreate from this format.</CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    {selectedFormat?.videos.length ? (
+                      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                        {selectedFormat.videos.map((video) => {
+                          const ratio = clampAspectRatio(videoAspectRatios[video.id] || 9 / 16);
+                          const isActive = video.id === selectedVideoId;
+                          const directMediaUrl = getVideoDirectMediaUrl(video);
+
+                          return (
+                            <div
+                              key={video.id}
+                              className={`rounded-lg border bg-white p-2 ${
+                                isActive ? "border-rose-300 ring-2 ring-rose-100" : "border-slate-200"
+                              }`}
+                            >
+                                <div
+                                  role="button"
+                                  tabIndex={0}
+                                  onClick={() => {
+                                    setSelectedVideoId(video.id);
+                                    if (directMediaUrl) {
+                                      setPlayingCardVideoId(video.id);
+                                    }
+                                  }}
+                                  onKeyDown={(event) => {
+                                    if (event.key === "Enter" || event.key === " ") {
+                                      setSelectedVideoId(video.id);
+                                      if (directMediaUrl) {
+                                        setPlayingCardVideoId(video.id);
+                                      }
+                                    }
+                                  }}
+                                  className="cursor-pointer"
+                                >
+                                <div className="relative overflow-hidden rounded-md border border-slate-200" style={{ aspectRatio: ratio }}>
+                                  {directMediaUrl && playingCardVideoId === video.id ? (
+                                    <video
+                                      key={`${video.id}-center`}
+                                      src={directMediaUrl}
+                                      controls
+                                      autoPlay
+                                      muted
+                                      playsInline
+                                      preload="metadata"
+                                      poster={video.thumbnail_url || undefined}
+                                      className="h-full w-full object-cover"
+                                    />
+                                  ) : video.thumbnail_url ? (
+                                    <img
+                                      src={video.thumbnail_url}
+                                      alt={video.title || "Video thumbnail"}
+                                      className="h-full w-full object-cover"
+                                      onLoad={(event) => {
+                                        const { naturalWidth, naturalHeight } = event.currentTarget;
+                                        if (naturalWidth > 0 && naturalHeight > 0) {
+                                          setVideoAspectRatios((prev) => ({
+                                            ...prev,
+                                            [video.id]: naturalWidth / naturalHeight,
+                                          }));
+                                        }
+                                      }}
+                                    />
+                                  ) : (
+                                    <div className="flex h-full w-full items-center justify-center bg-slate-100 text-slate-500">
+                                      <Clapperboard className="h-6 w-6" />
+                                    </div>
+                                  )}
+                                  {directMediaUrl && playingCardVideoId !== video.id ? (
+                                    <div className="pointer-events-none absolute inset-0 flex items-center justify-center bg-black/15">
+                                      <div className="rounded-full bg-black/55 p-2 text-white">
+                                        <Play className="h-4 w-4" />
+                                      </div>
+                                    </div>
+                                  ) : null}
+                                </div>
+                                <p className="mt-1 truncate text-xs font-semibold text-slate-800">
+                                  {video.title || "Untitled source"}
+                                </p>
+                              </div>
+                              <div className="mt-2 flex items-center justify-between gap-1">
+                                {directMediaUrl ? (
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    onClick={() => {
+                                      setSelectedVideoId(video.id);
+                                      setPlayingCardVideoId(video.id);
+                                    }}
+                                  >
+                                    <Play className="mr-1 h-3.5 w-3.5" />
+                                    Play
+                                  </Button>
+                                ) : <span />}
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  onClick={() => window.open(video.source_url, "_blank", "noopener,noreferrer")}
+                                >
+                                  <ExternalLink className="mr-1 h-3.5 w-3.5" />
+                                  Open
+                                </Button>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    ) : (
+                      <p className="text-sm text-slate-500">No videos in this format.</p>
+                    )}
+                  </CardContent>
+                </Card>
+              </div>
+            )}
+          </div>
         </div>
-      </div>
-    </div>
-  );
-}
+      </section>
 
-function StatusRow({ label, done }: { label: string; done: boolean }) {
-  return (
-    <div className="flex items-center gap-2">
-      {done ? <CheckCircle2 className="h-4 w-4 text-emerald-500" /> : <ListChecks className="h-4 w-4 text-slate-400" />}
-      <span className={done ? "text-slate-700" : "text-slate-500"}>{label}</span>
-    </div>
-  );
-}
+      <aside
+        className={`border-l border-slate-200 bg-white transition-all duration-200 ${
+          rightCollapsed ? "w-14" : "w-[430px]"
+        }`}
+      >
+        <div className="flex h-full min-h-0 flex-col">
+          <div className="flex items-center justify-between border-b border-slate-200 px-3 py-2">
+            {rightCollapsed ? null : <p className="text-sm font-semibold text-slate-700">Recreation Plan</p>}
+            <Button variant="ghost" size="icon" onClick={() => setRightCollapsed((prev) => !prev)}>
+              {rightCollapsed ? <ChevronLeft className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+            </Button>
+          </div>
 
-function SimpleList({ title, items }: { title: string; items: string[] }) {
-  return (
-    <div className="space-y-2 rounded-lg border border-slate-200 bg-slate-50 p-3">
-      <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">{title}</p>
-      {items.length === 0 ? (
-        <p className="text-xs text-slate-500">No items yet.</p>
-      ) : (
-        <ul className="space-y-1 text-sm text-slate-700">
-          {items.map((item, index) => (
-            <li key={`${title}-${index}`}>• {item}</li>
-          ))}
-        </ul>
-      )}
+          {rightCollapsed ? (
+            <div className="flex flex-1 flex-col items-center gap-2 py-3">
+              <Button variant="ghost" size="icon" onClick={() => setRightCollapsed(false)}>
+                <Sparkles className="h-4 w-4" />
+              </Button>
+            </div>
+          ) : (
+            <div className="min-h-0 flex-1 space-y-3 overflow-y-auto p-3">
+              <Card>
+                <CardHeader className="pb-3">
+                  <CardTitle className="text-sm">Saved Plans</CardTitle>
+                  <CardDescription>
+                    {isLoadingPlans ? "Loading..." : `${savedPlans.length} saved for selected video`}
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-2">
+                  {savedPlans.length === 0 ? (
+                    <p className="text-xs text-slate-500">No saved plans yet.</p>
+                  ) : (
+                    savedPlans.map((saved) => (
+                      <button
+                        key={saved.id}
+                        type="button"
+                        onClick={() => {
+                          setPlan(saved.plan);
+                          setPlanId(saved.id);
+                          setSuccess("Loaded saved plan.");
+                        }}
+                        className={`w-full rounded-md border px-2.5 py-2 text-left ${
+                          saved.id === planId
+                            ? "border-rose-300 bg-rose-50"
+                            : "border-slate-200 bg-white hover:border-slate-300"
+                        }`}
+                      >
+                        <p className="truncate text-xs font-semibold text-slate-700">{saved.plan.title || "Saved plan"}</p>
+                        <p className="mt-1 text-[11px] text-slate-500">
+                          {formatDateTime(saved.generatedAt || saved.created_at)}
+                          {saved.reasoningModel ? ` · ${saved.reasoningModel}` : ""}
+                        </p>
+                      </button>
+                    ))
+                  )}
+                </CardContent>
+              </Card>
+
+              {plan ? (
+                <Card>
+                  <CardHeader className="pb-3">
+                    <CardTitle className="text-sm">{plan.title}</CardTitle>
+                    <CardDescription>{plan.deliverableSpec.duration}</CardDescription>
+                  </CardHeader>
+                  <CardContent className="space-y-3 text-sm text-slate-700">
+                    <div>
+                      <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Strategy</p>
+                      <p className="mt-1 text-sm">{plan.strategy}</p>
+                    </div>
+
+                    {plan.integrationMode ? (
+                      <div className="rounded-md border border-slate-200 bg-slate-50 p-2 text-xs">
+                        <p>
+                          <span className="font-semibold">Integration mode:</span> {plan.integrationMode}
+                        </p>
+                        {plan.publicFigureNotes ? <p className="mt-1 text-slate-600">{plan.publicFigureNotes}</p> : null}
+                      </div>
+                    ) : null}
+
+                    <div>
+                      <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Script Hook</p>
+                      <p className="mt-1 rounded-md border border-slate-200 bg-slate-50 p-2">{plan.script.hook}</p>
+                    </div>
+
+                    <div className="space-y-2">
+                      {plan.script.beats.map((beat, index) => (
+                        <div key={`${beat.timecode}-${index}`} className="rounded-md border border-slate-200 bg-white p-2">
+                          <p className="text-[11px] font-semibold text-slate-500">{beat.timecode}</p>
+                          <p className="text-xs"><span className="font-semibold">Visual:</span> {beat.visual}</p>
+                          <p className="mt-1 text-xs"><span className="font-semibold">Narration:</span> {beat.narration}</p>
+                          <p className="mt-1 text-xs"><span className="font-semibold">On-screen:</span> {beat.onScreenText}</p>
+                        </div>
+                      ))}
+                    </div>
+
+                    <div className="rounded-md border border-emerald-200 bg-emerald-50 p-2 text-xs text-emerald-800">
+                      CTA: {plan.script.cta}
+                    </div>
+
+                    <div className="space-y-2">
+                      <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Higgsfield Shots</p>
+                      {plan.higgsfieldPrompts.map((item, index) => (
+                        <div key={`${item.scene}-${index}`} className="rounded-md border border-slate-200 bg-slate-50 p-2">
+                          <p className="text-xs font-semibold text-slate-700">
+                            {index + 1}. {item.scene}
+                          </p>
+                          <div className="mt-1 flex flex-wrap gap-1.5">
+                            <Badge variant="default">Duration: {getPromptDuration(item)}</Badge>
+                            <Badge variant="video">Model: {getPromptModel(item)}</Badge>
+                          </div>
+                          <p className="mt-1 text-[11px] text-slate-500">Why: {getPromptReason(item)}</p>
+                          <p className="mt-1 text-xs text-slate-700">{item.prompt}</p>
+                        </div>
+                      ))}
+                    </div>
+
+                    <div className="flex flex-wrap gap-2">
+                      <Button variant="outline" size="sm" onClick={() => navigator.clipboard.writeText(scriptClipboardText)}>
+                        <Copy className="mr-1.5 h-3.5 w-3.5" />
+                        Copy Script
+                      </Button>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => navigator.clipboard.writeText(higgsfieldClipboardText)}
+                      >
+                        <Copy className="mr-1.5 h-3.5 w-3.5" />
+                        Copy Higgsfield
+                      </Button>
+                    </div>
+                  </CardContent>
+                </Card>
+              ) : (
+                <Card>
+                  <CardContent className="py-8 text-center text-sm text-slate-500">
+                    Generate or select a plan to view it here.
+                  </CardContent>
+                </Card>
+              )}
+            </div>
+          )}
+        </div>
+      </aside>
     </div>
   );
 }
