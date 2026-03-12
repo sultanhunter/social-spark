@@ -153,16 +153,9 @@ type CharacterResponse = {
   error?: string;
 };
 
-type FormatNodeData = {
-  format: LibraryFormat;
-  expanded: boolean;
-  selectedFormatId: string | null;
-  onToggle: (formatId: string) => void;
-  onSelect: (formatId: string) => void;
-};
-
 type VideoNodeData = {
   formatId: string;
+  formatName: string;
   video: LibraryVideo;
   ratio: number;
   selectedVideoId: string | null;
@@ -270,41 +263,13 @@ function buildHiggsfieldClipboardText(plan: VideoPlan): string {
     .join("\n\n");
 }
 
-function FormatCanvasNode({ data }: NodeProps<Node<FormatNodeData>>) {
-  const isActive = data.selectedFormatId === data.format.id;
-
-  return (
-    <div className={`min-w-[260px] rounded-2xl border bg-white px-3 py-2 shadow-sm ${isActive ? "border-rose-300" : "border-slate-200"}`}>
-      <Handle type="target" position={Position.Top} className="!h-2 !w-2 !bg-violet-300" />
-      <button
-        type="button"
-        onClick={() => {
-          data.onSelect(data.format.id);
-          data.onToggle(data.format.id);
-        }}
-        className="nodrag flex w-full items-center justify-between gap-2 text-left"
-      >
-        <div className="min-w-0">
-          <p className="truncate text-sm font-semibold text-slate-800">{data.format.format_name}</p>
-          <div className="mt-1 flex items-center gap-2">
-            <Badge variant={formatTypeVariant(data.format.format_type)}>{data.format.format_type}</Badge>
-            <Badge variant="default">{data.format.videos.length} videos</Badge>
-          </div>
-        </div>
-        <ChevronDown className={`h-4 w-4 text-slate-500 transition-transform ${data.expanded ? "rotate-180" : ""}`} />
-      </button>
-      <Handle type="source" position={Position.Right} className="!h-2 !w-2 !bg-violet-300" />
-    </div>
-  );
-}
-
 function VideoCanvasNode({ data }: NodeProps<Node<VideoNodeData>>) {
   const isSelected = data.selectedVideoId === data.video.id;
   const isPlaying = data.directMediaUrl && data.playingVideoId === data.video.id;
 
   return (
     <div className={`w-[230px] rounded-2xl border bg-white p-2.5 shadow-sm ${isSelected ? "border-rose-300 ring-2 ring-rose-100" : "border-slate-200"}`}>
-      <Handle type="target" position={Position.Left} className="!h-2 !w-2 !bg-violet-300" />
+      <Handle type="target" position={Position.Top} className="!h-2 !w-2 !bg-violet-300" />
 
       <div
         role="button"
@@ -370,6 +335,7 @@ function VideoCanvasNode({ data }: NodeProps<Node<VideoNodeData>>) {
 
       <p className="mt-1.5 truncate text-xs font-semibold text-slate-800">{data.video.title || "Untitled source"}</p>
       <div className="mt-1 flex flex-wrap items-center gap-1.5">
+        <Badge variant="default" className="max-w-[140px] truncate">{data.formatName}</Badge>
         <Badge variant="default">{data.video.platform}</Badge>
         {(() => {
           const method = getVideoAnalysisMethod(data.video);
@@ -471,7 +437,6 @@ function FormatTypeCanvasNode({ data }: NodeProps<Node<FormatTypeNodeData>>) {
 const nodeTypes = {
   intakeNode: IntakeCanvasNode,
   typeNode: FormatTypeCanvasNode,
-  formatNode: FormatCanvasNode,
   videoNode: VideoCanvasNode,
 };
 
@@ -485,7 +450,6 @@ export function VideoAgentView({ collectionId }: { collectionId: string }) {
 
   const [library, setLibrary] = useState<LibraryFormat[]>([]);
   const [expandedType, setExpandedType] = useState<string | null>(null);
-  const [expandedFormats, setExpandedFormats] = useState<Record<string, boolean>>({});
   const [selectedFormatId, setSelectedFormatId] = useState<string | null>(null);
   const [selectedVideoId, setSelectedVideoId] = useState<string | null>(null);
   const [playingVideoId, setPlayingVideoId] = useState<string | null>(null);
@@ -547,26 +511,22 @@ export function VideoAgentView({ collectionId }: { collectionId: string }) {
   const handleSelectType = useCallback(
     (type: string) => {
       const formats = formatsByType.get(type) || [];
-      const preferredFormat =
-        (selectedFormatId && formats.find((item) => item.id === selectedFormatId)) || formats[0] || null;
+      const currentFormatInType =
+        (selectedFormatId && formats.find((item) => item.id === selectedFormatId)) || null;
 
       setExpandedType(type);
 
-      if (!preferredFormat) {
+      if (!currentFormatInType) {
         setSelectedFormatId(null);
         setSelectedVideoId(null);
         return;
       }
 
-      setSelectedFormatId(preferredFormat.id);
+      setSelectedFormatId(currentFormatInType.id);
       setSelectedVideoId((current) => {
-        if (current && preferredFormat.videos.some((video) => video.id === current)) return current;
+        if (current && currentFormatInType.videos.some((video) => video.id === current)) return current;
         return null;
       });
-
-      setExpandedFormats((prev) => ({
-        [preferredFormat.id]: prev[preferredFormat.id] ?? true,
-      }));
     },
     [formatsByType, selectedFormatId]
   );
@@ -636,14 +596,6 @@ export function VideoAgentView({ collectionId }: { collectionId: string }) {
         setSelectedFormatId(nextFormatId);
         setSelectedVideoId(nextVideoId);
         setExpandedType(nextType);
-
-        setExpandedFormats((prev) => {
-          const next: Record<string, boolean> = {};
-          if (nextFormatId) {
-            next[nextFormatId] = prev[nextFormatId] ?? true;
-          }
-          return next;
-        });
       } catch (err) {
         setError(err instanceof Error ? err.message : "Failed to load video format library.");
       } finally {
@@ -891,7 +843,7 @@ export function VideoAgentView({ collectionId }: { collectionId: string }) {
     });
 
     const typeStartX = 100;
-    const typeSpacingX = 280;
+    const typeSpacingX = 320;
     const typeY = 260;
 
     orderedTypes.forEach((type, typeIndex) => {
@@ -930,93 +882,57 @@ export function VideoAgentView({ collectionId }: { collectionId: string }) {
 
       if (!typeExpanded) return;
 
-      let formatCursorY = typeY + 150;
+      const videosForType = formats.flatMap((format) =>
+        format.videos.map((video) => ({
+          formatId: format.id,
+          formatName: format.format_name,
+          video,
+        }))
+      );
 
-      formats.forEach((format) => {
-        const formatNodeId = `format-${format.id}`;
-        const formatExpanded = Boolean(expandedFormats[format.id]);
-        const videoColumns = 2;
-        const videoRows = formatExpanded ? Math.max(1, Math.ceil(format.videos.length / videoColumns)) : 0;
-        const formatHeight = formatExpanded ? 170 + videoRows * 270 : 130;
-        const formatY = formatCursorY;
+      if (videosForType.length === 0) return;
+
+      const videoY = typeY + 210;
+      const videoSpacingX = 260;
+      const videoRowWidth = (videosForType.length - 1) * videoSpacingX;
+      const videoStartX = typeX - videoRowWidth / 2;
+
+      videosForType.forEach((item, index) => {
+        const videoNodeId = `video-${item.video.id}`;
 
         nodes.push({
-          id: formatNodeId,
-          type: "formatNode",
-          position: { x: typeX, y: formatY },
+          id: videoNodeId,
+          type: "videoNode",
+          position: {
+            x: videoStartX + index * videoSpacingX,
+            y: videoY,
+          },
           data: {
-            format,
-            expanded: formatExpanded,
-            selectedFormatId,
-            onToggle: (formatId: string) => {
-              setExpandedFormats((prev) => ({
-                [formatId]: !prev[formatId],
-              }));
-            },
-            onSelect: (formatId: string) => {
-              setSelectedFormatId(formatId);
-            },
-          } satisfies FormatNodeData,
+            formatId: item.formatId,
+            formatName: item.formatName,
+            video: item.video,
+            ratio: clampAspectRatio(videoAspectRatios[item.video.id] || 9 / 16),
+            selectedVideoId,
+            playingVideoId,
+            directMediaUrl: getVideoDirectMediaUrl(item.video),
+            onSelect: handleSelectVideo,
+            onPlay: handlePlayVideo,
+            onOpen: handleOpenSource,
+            onAspect: handleAspect,
+          } satisfies VideoNodeData,
         });
 
         edges.push({
-          id: `${typeNodeId}->${formatNodeId}`,
+          id: `${typeNodeId}->${videoNodeId}`,
           source: typeNodeId,
-          target: formatNodeId,
+          target: videoNodeId,
           type: "smoothstep",
           style: {
             stroke: "#c4b5fd",
             strokeWidth: 1.5,
+            strokeDasharray: "4 4",
           },
         });
-
-        if (formatExpanded) {
-          const videoStartX = typeX + 330;
-          const videoStartY = formatY + 10;
-          const videoSpacingX = 250;
-          const videoSpacingY = 270;
-
-          format.videos.forEach((video, videoIndex) => {
-            const col = videoIndex % videoColumns;
-            const row = Math.floor(videoIndex / videoColumns);
-            const videoNodeId = `video-${video.id}`;
-
-            nodes.push({
-              id: videoNodeId,
-              type: "videoNode",
-              position: {
-                x: videoStartX + col * videoSpacingX,
-                y: videoStartY + row * videoSpacingY,
-              },
-              data: {
-                formatId: format.id,
-                video,
-                ratio: clampAspectRatio(videoAspectRatios[video.id] || 9 / 16),
-                selectedVideoId,
-                playingVideoId,
-                directMediaUrl: getVideoDirectMediaUrl(video),
-                onSelect: handleSelectVideo,
-                onPlay: handlePlayVideo,
-                onOpen: handleOpenSource,
-                onAspect: handleAspect,
-              } satisfies VideoNodeData,
-            });
-
-            edges.push({
-              id: `${formatNodeId}->${videoNodeId}`,
-              source: formatNodeId,
-              target: videoNodeId,
-              type: "smoothstep",
-              style: {
-                stroke: "#c4b5fd",
-                strokeWidth: 1.4,
-                strokeDasharray: "4 4",
-              },
-            });
-          });
-        }
-
-        formatCursorY += formatHeight + 24;
       });
     });
 
@@ -1030,8 +946,6 @@ export function VideoAgentView({ collectionId }: { collectionId: string }) {
     expandedType,
     selectedFormatType,
     handleSelectType,
-    expandedFormats,
-    selectedFormatId,
     selectedVideoId,
     playingVideoId,
     videoAspectRatios,
