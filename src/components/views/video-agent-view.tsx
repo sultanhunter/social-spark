@@ -22,6 +22,7 @@ import {
   Controls,
   Handle,
   MiniMap,
+  PanOnScrollMode,
   Position,
   type Edge,
   type Node,
@@ -183,44 +184,13 @@ type IntakeNodeData = {
   onAnalyze: () => void;
 };
 
-type PlanNodeData = {
-  savedPlan: SavedPlan;
-  selectedPlanId: string | null;
-  onSelect: (planId: string) => void;
-};
-
-type ControlsNodeData = {
-  appName: string;
+type FormatTypeNodeData = {
+  formatType: string;
   formatCount: number;
-  isLoadingLibrary: boolean;
-  selectedFormatType: string | null;
-  selectedVideoTitle: string | null;
-  selectedVideoPlatform: string | null;
-  selectedVideoSourceUrl: string | null;
-  reasoningModel: ReasoningModel;
-  onReasoningModelChange: (value: string) => void;
-  isUgcSelected: boolean;
-  isLoadingCharacters: boolean;
-  selectedUgcCharacterId: string | null;
-  ugcCharacters: UgcCharacter[];
-  onCharacterChange: (value: string | null) => void;
-  onOpenCharacterStudio: () => void;
-  onGeneratePlan: () => void;
-  isGeneratingPlan: boolean;
-  hasSelectedVideo: boolean;
-  isLoadingPlans: boolean;
-  savedPlanCount: number;
-  error: string;
-  success: string;
-  onOpenSelectedSource: (url: string) => void;
-};
-
-type PlanDetailNodeData = {
-  plan: VideoPlan;
-  isExpanded: boolean;
-  onToggleExpanded: () => void;
-  onCopyScript: () => void;
-  onCopyHiggsfield: () => void;
+  expandedType: string | null;
+  selectedType: string | null;
+  onToggleType: (type: string) => void;
+  onSelectType: (type: string) => void;
 };
 
 function formatTypeVariant(type: string): "default" | "video" | "success" {
@@ -305,7 +275,7 @@ function FormatCanvasNode({ data }: NodeProps<Node<FormatNodeData>>) {
   const isActive = data.selectedFormatId === data.format.id;
 
   return (
-    <div className={`min-w-[260px] rounded-2xl border bg-white px-3 py-2 shadow-sm ${isActive ? "border-rose-300" : "border-slate-200"}`}>
+    <div className={`nopan min-w-[260px] rounded-2xl border bg-white px-3 py-2 shadow-sm ${isActive ? "border-rose-300" : "border-slate-200"}`}>
       <Handle type="target" position={Position.Top} className="!h-2 !w-2 !bg-violet-300" />
       <button
         type="button"
@@ -334,7 +304,7 @@ function VideoCanvasNode({ data }: NodeProps<Node<VideoNodeData>>) {
   const isPlaying = data.directMediaUrl && data.playingVideoId === data.video.id;
 
   return (
-    <div className={`w-[230px] rounded-2xl border bg-white p-2.5 shadow-sm ${isSelected ? "border-rose-300 ring-2 ring-rose-100" : "border-slate-200"}`}>
+    <div className={`nopan w-[230px] rounded-2xl border bg-white p-2.5 shadow-sm ${isSelected ? "border-rose-300 ring-2 ring-rose-100" : "border-slate-200"}`}>
       <Handle type="target" position={Position.Top} className="!h-2 !w-2 !bg-violet-300" />
 
       <div
@@ -423,14 +393,14 @@ function VideoCanvasNode({ data }: NodeProps<Node<VideoNodeData>>) {
               data.onSelect(data.formatId, data.video.id);
               data.onPlay(data.formatId, data.video.id);
             }}
-            className="nodrag"
+            className="nodrag nopan"
           >
             <Play className="mr-1 h-3.5 w-3.5" />
             Play
           </Button>
         ) : <span />}
 
-        <Button variant="ghost" size="sm" onClick={() => data.onOpen(data.video.source_url)} className="nodrag">
+        <Button variant="ghost" size="sm" onClick={() => data.onOpen(data.video.source_url)} className="nodrag nopan">
           <ExternalLink className="mr-1 h-3.5 w-3.5" />
           Open
         </Button>
@@ -441,7 +411,7 @@ function VideoCanvasNode({ data }: NodeProps<Node<VideoNodeData>>) {
 
 function IntakeCanvasNode({ data }: NodeProps<Node<IntakeNodeData>>) {
   return (
-    <div className="w-[360px] rounded-2xl border border-rose-200 bg-white p-3 shadow-sm">
+    <div className="nopan w-[360px] rounded-2xl border border-rose-200 bg-white p-3 shadow-sm">
       <Handle type="source" position={Position.Bottom} className="!h-2 !w-2 !bg-rose-300" />
 
       <div className="mb-2 flex items-center gap-2">
@@ -466,9 +436,9 @@ function IntakeCanvasNode({ data }: NodeProps<Node<IntakeNodeData>>) {
           onChange={(event) => data.onNotesChange(event.target.value)}
           rows={2}
           placeholder="Optional notes..."
-          className="nodrag w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800 outline-none transition focus:border-rose-400 focus:ring-2 focus:ring-rose-200"
+          className="nodrag nopan w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800 outline-none transition focus:border-rose-400 focus:ring-2 focus:ring-rose-200"
         />
-        <Button variant="primary" onClick={data.onAnalyze} isLoading={data.isAnalyzing} className="nodrag w-full">
+        <Button variant="primary" onClick={data.onAnalyze} isLoading={data.isAnalyzing} className="nodrag nopan w-full">
           <Sparkles className="mr-2 h-4 w-4" />
           {data.isAnalyzing ? "Analyzing..." : "Analyze & Group"}
         </Button>
@@ -477,219 +447,37 @@ function IntakeCanvasNode({ data }: NodeProps<Node<IntakeNodeData>>) {
   );
 }
 
-function PlanCanvasNode({ data }: NodeProps<Node<PlanNodeData>>) {
-  const selected = data.selectedPlanId === data.savedPlan.id;
+function FormatTypeCanvasNode({ data }: NodeProps<Node<FormatTypeNodeData>>) {
+  const isExpanded = data.expandedType === data.formatType;
+  const isSelected = data.selectedType === data.formatType;
 
   return (
-    <div
-      role="button"
-      tabIndex={0}
-      onClick={() => data.onSelect(data.savedPlan.id)}
-      onKeyDown={(event) => {
-        if (event.key === "Enter" || event.key === " ") {
-          data.onSelect(data.savedPlan.id);
-        }
-      }}
-      className={`w-[260px] cursor-pointer rounded-xl border bg-white p-2.5 shadow-sm ${
-        selected ? "border-rose-300 ring-2 ring-rose-100" : "border-slate-200"
-      }`}
-    >
-      <Handle type="target" position={Position.Left} className="!h-2 !w-2 !bg-violet-300" />
-      <p className="truncate text-xs font-semibold text-slate-800">{data.savedPlan.plan.title || "Saved plan"}</p>
-      <p className="mt-1 text-[11px] text-slate-500">
-        {formatDateTime(data.savedPlan.generatedAt || data.savedPlan.created_at)}
-      </p>
-      {data.savedPlan.reasoningModel ? (
-        <Badge variant="default" className="mt-1.5">
-          {data.savedPlan.reasoningModel}
-        </Badge>
-      ) : null}
-    </div>
-  );
-}
-
-function ControlsCanvasNode({ data }: NodeProps<Node<ControlsNodeData>>) {
-  return (
-    <div className="w-[360px] rounded-2xl border border-slate-200 bg-white p-3 shadow-sm">
-      <Handle type="target" position={Position.Left} className="!h-2 !w-2 !bg-violet-300" />
+    <div className={`nopan min-w-[220px] rounded-2xl border bg-white px-3 py-2 shadow-sm ${isSelected ? "border-rose-300" : "border-slate-200"}`}>
+      <Handle type="target" position={Position.Top} className="!h-2 !w-2 !bg-violet-300" />
       <Handle type="source" position={Position.Bottom} className="!h-2 !w-2 !bg-violet-300" />
-
-      <div className="mb-2 flex items-center justify-between gap-2">
-        <p className="text-sm font-semibold text-slate-800">Plan Controls</p>
-        <Badge variant="default" className="max-w-[170px] truncate">{data.appName}</Badge>
-      </div>
-
-      <div className="space-y-2">
-        <div className="flex flex-wrap gap-1.5">
-          <Badge variant="default">
-            {data.isLoadingLibrary ? "Loading..." : `${data.formatCount} formats`}
-          </Badge>
-          {data.selectedFormatType ? (
-            <Badge variant={formatTypeVariant(data.selectedFormatType)}>{data.selectedFormatType}</Badge>
-          ) : null}
+      <button
+        type="button"
+        onClick={() => {
+          data.onSelectType(data.formatType);
+          data.onToggleType(data.formatType);
+        }}
+        className="nodrag nopan flex w-full items-center justify-between gap-2 text-left"
+      >
+        <div>
+          <p className="text-sm font-semibold text-slate-800">{data.formatType.replace(/_/g, " ")}</p>
+          <Badge variant="default" className="mt-1">{data.formatCount} formats</Badge>
         </div>
-
-        <select
-          value={data.reasoningModel}
-          onChange={(event) => data.onReasoningModelChange(event.target.value)}
-          className="nodrag w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800 outline-none transition focus:border-rose-400 focus:ring-2 focus:ring-rose-200"
-        >
-          {REASONING_MODELS.map((model) => (
-            <option key={model.id} value={model.id}>
-              {model.label}
-            </option>
-          ))}
-        </select>
-
-        {data.isUgcSelected ? (
-          <>
-            <select
-              value={data.selectedUgcCharacterId || ""}
-              onChange={(event) => data.onCharacterChange(event.target.value || null)}
-              disabled={data.isLoadingCharacters}
-              className="nodrag w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800 outline-none transition focus:border-rose-400 focus:ring-2 focus:ring-rose-200"
-            >
-              <option value="">{data.isLoadingCharacters ? "Loading characters..." : "Select UGC character"}</option>
-              {data.ugcCharacters.map((character) => (
-                <option key={character.id} value={character.id}>
-                  {character.characterName}
-                  {character.isDefault ? " (Default)" : ""}
-                </option>
-              ))}
-            </select>
-
-            <Button variant="outline" size="sm" onClick={data.onOpenCharacterStudio} className="nodrag w-full">
-              <Users className="mr-1.5 h-3.5 w-3.5" />
-              Character Studio
-            </Button>
-          </>
-        ) : null}
-
-        {data.selectedVideoTitle ? (
-          <div className="rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-2 text-xs text-slate-600">
-            <p className="truncate font-semibold text-slate-800">{data.selectedVideoTitle}</p>
-            <p className="mt-1">{data.selectedVideoPlatform || "Unknown platform"}</p>
-            {data.selectedVideoSourceUrl ? (
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => data.onOpenSelectedSource(data.selectedVideoSourceUrl || "")}
-                className="nodrag mt-1 h-7 px-2"
-              >
-                <ExternalLink className="mr-1 h-3.5 w-3.5" />
-                Open source
-              </Button>
-            ) : null}
-          </div>
-        ) : (
-          <p className="rounded-lg border border-dashed border-slate-300 bg-slate-50 px-2.5 py-2 text-xs text-slate-500">
-            Select a video node to generate a plan.
-          </p>
-        )}
-
-        <Button
-          variant="primary"
-          onClick={data.onGeneratePlan}
-          isLoading={data.isGeneratingPlan}
-          disabled={!data.hasSelectedVideo}
-          className="nodrag w-full"
-        >
-          <Sparkles className="mr-2 h-4 w-4" />
-          {data.isGeneratingPlan ? "Generating..." : "Generate Plan"}
-        </Button>
-
-        <p className="text-xs text-slate-500">
-          {data.isLoadingPlans
-            ? "Loading saved plans..."
-            : data.savedPlanCount > 0
-            ? `${data.savedPlanCount} saved plans. Select plan nodes to switch.`
-            : "No saved plans yet for selected video."}
-        </p>
-
-        {data.error ? (
-          <div className="flex items-start gap-2 rounded-lg border border-rose-200 bg-rose-50 px-2.5 py-2 text-xs text-rose-700">
-            <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-            <span>{data.error}</span>
-          </div>
-        ) : null}
-
-        {data.success ? (
-          <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-2.5 py-2 text-xs text-emerald-700">
-            {data.success}
-          </div>
-        ) : null}
-      </div>
-    </div>
-  );
-}
-
-function PlanDetailCanvasNode({ data }: NodeProps<Node<PlanDetailNodeData>>) {
-  return (
-    <div
-      className={`rounded-2xl border border-slate-200 bg-white p-3 shadow-sm ${
-        data.isExpanded ? "w-[430px]" : "w-[300px]"
-      }`}
-    >
-      <Handle type="target" position={Position.Left} className="!h-2 !w-2 !bg-indigo-300" />
-
-      <div className="mb-2 flex items-start justify-between gap-2">
-        <div className="min-w-0">
-          <p className="truncate text-sm font-semibold text-slate-800">{data.plan.title}</p>
-          <p className="text-xs text-slate-500">{data.plan.deliverableSpec.duration}</p>
-        </div>
-        <Button variant="outline" size="sm" className="nodrag h-7 px-2" onClick={data.onToggleExpanded}>
-          {data.isExpanded ? "Collapse" : "Expand"}
-        </Button>
-      </div>
-
-      <div className="mb-2 flex gap-2">
-        <Button variant="outline" size="sm" onClick={data.onCopyScript} className="nodrag h-7 px-2">
-          <Copy className="mr-1 h-3.5 w-3.5" />
-          Script
-        </Button>
-        <Button variant="outline" size="sm" onClick={data.onCopyHiggsfield} className="nodrag h-7 px-2">
-          <Copy className="mr-1 h-3.5 w-3.5" />
-          Higgsfield
-        </Button>
-      </div>
-
-      {data.isExpanded ? (
-        <div className="max-h-[420px] space-y-2 overflow-y-auto pr-1 text-xs text-slate-700">
-          <div>
-            <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Strategy</p>
-            <p className="mt-1">{data.plan.strategy}</p>
-          </div>
-
-          <div>
-            <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Script Hook</p>
-            <p className="mt-1 rounded-md border border-slate-200 bg-slate-50 p-2">{data.plan.script.hook}</p>
-          </div>
-
-          <div className="space-y-1.5">
-            {data.plan.script.beats.map((beat, index) => (
-              <div key={`${beat.timecode}-${index}`} className="rounded-md border border-slate-200 bg-white p-2">
-                <p className="text-[11px] font-semibold text-slate-500">{beat.timecode}</p>
-                <p><span className="font-semibold">Visual:</span> {beat.visual}</p>
-                <p className="mt-0.5"><span className="font-semibold">Narration:</span> {beat.narration}</p>
-                <p className="mt-0.5"><span className="font-semibold">On-screen:</span> {beat.onScreenText}</p>
-              </div>
-            ))}
-          </div>
-        </div>
-      ) : (
-        <p className="text-xs text-slate-500">Expand this node to inspect the full plan details.</p>
-      )}
+        <ChevronDown className={`h-4 w-4 text-slate-500 transition-transform ${isExpanded ? "rotate-180" : ""}`} />
+      </button>
     </div>
   );
 }
 
 const nodeTypes = {
   intakeNode: IntakeCanvasNode,
-  controlsNode: ControlsCanvasNode,
+  typeNode: FormatTypeCanvasNode,
   formatNode: FormatCanvasNode,
   videoNode: VideoCanvasNode,
-  planNode: PlanCanvasNode,
-  planDetailNode: PlanDetailCanvasNode,
 };
 
 export function VideoAgentView({ collectionId }: { collectionId: string }) {
@@ -701,6 +489,7 @@ export function VideoAgentView({ collectionId }: { collectionId: string }) {
   const [reasoningModel, setReasoningModel] = useState<ReasoningModel>(DEFAULT_REASONING_MODEL);
 
   const [library, setLibrary] = useState<LibraryFormat[]>([]);
+  const [expandedType, setExpandedType] = useState<string | null>(null);
   const [expandedFormats, setExpandedFormats] = useState<Record<string, boolean>>({});
   const [selectedFormatId, setSelectedFormatId] = useState<string | null>(null);
   const [selectedVideoId, setSelectedVideoId] = useState<string | null>(null);
@@ -713,7 +502,6 @@ export function VideoAgentView({ collectionId }: { collectionId: string }) {
   const [savedPlans, setSavedPlans] = useState<SavedPlan[]>([]);
   const [plan, setPlan] = useState<VideoPlan | null>(null);
   const [planId, setPlanId] = useState<string | null>(null);
-  const [isPlanDetailExpanded, setIsPlanDetailExpanded] = useState(false);
   const [flowInstance, setFlowInstance] = useState<ReactFlowInstance<Node, Edge> | null>(null);
 
   const [isLoadingLibrary, setIsLoadingLibrary] = useState(false);
@@ -730,6 +518,23 @@ export function VideoAgentView({ collectionId }: { collectionId: string }) {
     [library, selectedFormatId]
   );
 
+  const selectedFormatType = selectedFormat?.format_type || null;
+
+  const formatsByType = useMemo(() => {
+    const grouped = new Map<string, LibraryFormat[]>();
+    for (const format of library) {
+      const key = (format.format_type || "other").trim() || "other";
+      const current = grouped.get(key) || [];
+      current.push(format);
+      grouped.set(key, current);
+    }
+    return grouped;
+  }, [library]);
+
+  const orderedTypes = useMemo(() => {
+    return Array.from(formatsByType.keys()).sort((a, b) => a.localeCompare(b));
+  }, [formatsByType]);
+
   const selectedVideo = useMemo(
     () => selectedFormat?.videos.find((video) => video.id === selectedVideoId) || null,
     [selectedFormat, selectedVideoId]
@@ -744,6 +549,33 @@ export function VideoAgentView({ collectionId }: { collectionId: string }) {
     setSelectedFormatId(formatId);
     setSelectedVideoId(videoId);
   }, []);
+
+  const handleSelectType = useCallback(
+    (type: string) => {
+      const formats = formatsByType.get(type) || [];
+      const preferredFormat =
+        (selectedFormatId && formats.find((item) => item.id === selectedFormatId)) || formats[0] || null;
+
+      setExpandedType(type);
+
+      if (!preferredFormat) {
+        setSelectedFormatId(null);
+        setSelectedVideoId(null);
+        return;
+      }
+
+      setSelectedFormatId(preferredFormat.id);
+      setSelectedVideoId((current) => {
+        if (current && preferredFormat.videos.some((video) => video.id === current)) return current;
+        return preferredFormat.videos[0]?.id || null;
+      });
+
+      setExpandedFormats((prev) => ({
+        [preferredFormat.id]: prev[preferredFormat.id] ?? true,
+      }));
+    },
+    [formatsByType, selectedFormatId]
+  );
 
   const handlePlayVideo = useCallback((formatId: string, videoId: string) => {
     setSelectedFormatId(formatId);
@@ -797,6 +629,7 @@ export function VideoAgentView({ collectionId }: { collectionId: string }) {
           null;
 
         const nextFormat = formats.find((item) => item.id === nextFormatId) || null;
+        const nextType = nextFormat?.format_type || formats[0]?.format_type || null;
 
         const nextVideoId =
           (preferred?.videoId && formats.some((item) => item.videos.some((video) => video.id === preferred.videoId))
@@ -810,12 +643,12 @@ export function VideoAgentView({ collectionId }: { collectionId: string }) {
 
         setSelectedFormatId(nextFormatId);
         setSelectedVideoId(nextVideoId);
+        setExpandedType(nextType);
 
         setExpandedFormats((prev) => {
-          const next = { ...prev };
-          if (nextFormatId) next[nextFormatId] = true;
-          if (formats.length > 0 && !Object.values(next).some(Boolean)) {
-            next[formats[0].id] = true;
+          const next: Record<string, boolean> = {};
+          if (nextFormatId) {
+            next[nextFormatId] = prev[nextFormatId] ?? true;
           }
           return next;
         });
@@ -1031,7 +864,6 @@ export function VideoAgentView({ collectionId }: { collectionId: string }) {
 
       setPlan(data.plan);
       setPlanId(data.planId || null);
-      setIsPlanDetailExpanded(true);
       setSuccess("Recreation plan generated.");
 
       await loadSavedPlans({
@@ -1049,13 +881,11 @@ export function VideoAgentView({ collectionId }: { collectionId: string }) {
   const canvasGraph = useMemo(() => {
     const nodes: Node[] = [];
     const edges: Edge[] = [];
-    const videoPositions: Record<string, { x: number; y: number }> = {};
-    const planNodePositions: Record<string, { x: number; y: number; nodeId: string }> = {};
 
     nodes.push({
       id: "intake-node",
       type: "intakeNode",
-      position: { x: 120, y: 40 },
+      position: { x: 100, y: 40 },
       data: {
         sourceUrl,
         userNotes,
@@ -1068,283 +898,160 @@ export function VideoAgentView({ collectionId }: { collectionId: string }) {
       } satisfies IntakeNodeData,
     });
 
-    nodes.push({
-      id: "controls-node",
-      type: "controlsNode",
-      position: { x: 520, y: 40 },
-      data: {
-        appName: activeCollection?.app_name || "Muslimah Pro",
-        formatCount: library.length,
-        isLoadingLibrary,
-        selectedFormatType: selectedFormat?.format_type || null,
-        selectedVideoTitle: selectedVideo?.title || null,
-        selectedVideoPlatform: selectedVideo?.platform || null,
-        selectedVideoSourceUrl: selectedVideo?.source_url || null,
-        reasoningModel,
-        onReasoningModelChange: (value: string) => {
-          if (isReasoningModel(value)) setReasoningModel(value);
-        },
-        isUgcSelected: selectedFormat?.format_type === "ugc",
-        isLoadingCharacters,
-        selectedUgcCharacterId,
-        ugcCharacters,
-        onCharacterChange: (value: string | null) => setSelectedUgcCharacterId(value),
-        onOpenCharacterStudio: () => router.push(`/collections/${collectionId}/characters`),
-        onGeneratePlan: () => {
-          void handleGeneratePlan();
-        },
-        isGeneratingPlan,
-        hasSelectedVideo: Boolean(selectedVideo),
-        isLoadingPlans,
-        savedPlanCount: savedPlans.length,
-        error,
-        success,
-        onOpenSelectedSource: handleOpenSource,
-      } satisfies ControlsNodeData,
-    });
+    const typeStartX = 100;
+    const typeSpacingX = 280;
+    const typeY = 260;
 
-    edges.push({
-      id: "intake->controls",
-      source: "intake-node",
-      target: "controls-node",
-      type: "smoothstep",
-      style: {
-        stroke: "#c4b5fd",
-        strokeWidth: 1.6,
-      },
-    });
-
-    let cursorY = 270;
-
-    for (const format of library) {
-      const expanded = Boolean(expandedFormats[format.id]);
-      const formatNodeId = `format-${format.id}`;
+    orderedTypes.forEach((type, typeIndex) => {
+      const typeNodeId = `type-${type}`;
+      const typeX = typeStartX + typeIndex * typeSpacingX;
+      const formats = formatsByType.get(type) || [];
+      const typeExpanded = expandedType === type;
 
       nodes.push({
-        id: formatNodeId,
-        type: "formatNode",
-        position: { x: 120, y: cursorY },
+        id: typeNodeId,
+        type: "typeNode",
+        position: { x: typeX, y: typeY },
         data: {
-          format,
-          expanded,
-          selectedFormatId,
-          onToggle: (id: string) => {
-            setExpandedFormats((prev) => ({
-              ...prev,
-              [id]: !prev[id],
-            }));
+          formatType: type,
+          formatCount: formats.length,
+          expandedType,
+          selectedType: selectedFormatType,
+          onToggleType: (nextType: string) => {
+            setExpandedType((prev) => (prev === nextType ? null : nextType));
           },
-          onSelect: (id: string) => setSelectedFormatId(id),
-        } satisfies FormatNodeData,
+          onSelectType: handleSelectType,
+        } satisfies FormatTypeNodeData,
       });
 
       edges.push({
-        id: `intake->${formatNodeId}`,
+        id: `intake->${typeNodeId}`,
         source: "intake-node",
-        target: formatNodeId,
+        target: typeNodeId,
         type: "smoothstep",
         style: {
-          stroke: "#fda4af",
-          strokeWidth: 1.6,
+          stroke: "#d8b4fe",
+          strokeWidth: 1.5,
           strokeDasharray: "4 4",
         },
       });
 
-      if (!expanded) {
-        cursorY += 170;
-        continue;
-      }
+      if (!typeExpanded) return;
 
-      const columns = 4;
-      const spacingX = 270;
-      const spacingY = 300;
-
-      format.videos.forEach((video, index) => {
-        const row = Math.floor(index / columns);
-        const col = index % columns;
-        const videoNodeId = `video-${video.id}`;
+      formats.forEach((format, formatIndex) => {
+        const formatNodeId = `format-${format.id}`;
+        const formatY = typeY + 150 + formatIndex * 170;
+        const formatExpanded = Boolean(expandedFormats[format.id]);
 
         nodes.push({
-          id: videoNodeId,
-          type: "videoNode",
-          position: {
-            x: 70 + col * spacingX,
-            y: cursorY + 170 + row * spacingY,
-          },
+          id: formatNodeId,
+          type: "formatNode",
+          position: { x: typeX, y: formatY },
           data: {
-            formatId: format.id,
-            video,
-            ratio: clampAspectRatio(videoAspectRatios[video.id] || 9 / 16),
-            selectedVideoId,
-            playingVideoId,
-            directMediaUrl: getVideoDirectMediaUrl(video),
-            onSelect: handleSelectVideo,
-            onPlay: handlePlayVideo,
-            onOpen: handleOpenSource,
-            onAspect: handleAspect,
-          } satisfies VideoNodeData,
+            format,
+            expanded: formatExpanded,
+            selectedFormatId,
+            onToggle: (formatId: string) => {
+              setExpandedFormats((prev) => ({
+                [formatId]: !prev[formatId],
+              }));
+            },
+            onSelect: (formatId: string) => {
+              setSelectedFormatId(formatId);
+              const selected = library.find((item) => item.id === formatId) || null;
+              setSelectedVideoId(selected?.videos[0]?.id || null);
+            },
+          } satisfies FormatNodeData,
         });
 
-        videoPositions[video.id] = {
-          x: 70 + col * spacingX,
-          y: cursorY + 170 + row * spacingY,
-        };
-
         edges.push({
-          id: `${formatNodeId}->${videoNodeId}`,
-          source: formatNodeId,
-          target: videoNodeId,
+          id: `${typeNodeId}->${formatNodeId}`,
+          source: typeNodeId,
+          target: formatNodeId,
           type: "smoothstep",
           style: {
             stroke: "#c4b5fd",
-            strokeWidth: 1.6,
-            strokeDasharray: "4 4",
+            strokeWidth: 1.5,
           },
         });
-      });
 
-      const rows = Math.max(1, Math.ceil(format.videos.length / columns));
-      cursorY += 190 + rows * spacingY;
-    }
+        if (!formatExpanded) return;
 
-    if (selectedVideoId && videoPositions[selectedVideoId] && savedPlans.length > 0) {
-      const anchor = videoPositions[selectedVideoId];
+        const videoStartX = typeX + 300;
+        const videoSpacingX = 250;
+        const videoSpacingY = 300;
+        const columns = 3;
 
-      savedPlans.forEach((saved, index) => {
-        const planNodeId = `plan-${saved.id}`;
+        format.videos.forEach((video, videoIndex) => {
+          const col = videoIndex % columns;
+          const row = Math.floor(videoIndex / columns);
+          const videoNodeId = `video-${video.id}`;
 
-        nodes.push({
-          id: planNodeId,
-          type: "planNode",
-          position: {
-            x: anchor.x + 320,
-            y: anchor.y + index * 120,
-          },
-          data: {
-            savedPlan: saved,
-            selectedPlanId: planId,
-            onSelect: (selectedPlan) => {
-              const match = savedPlans.find((item) => item.id === selectedPlan);
-              if (!match) return;
-              setPlan(match.plan);
-              setPlanId(match.id);
-              setIsPlanDetailExpanded(true);
-              setSuccess("Loaded saved plan.");
+          nodes.push({
+            id: videoNodeId,
+            type: "videoNode",
+            position: {
+              x: videoStartX + col * videoSpacingX,
+              y: formatY - 20 + row * videoSpacingY,
             },
-          } satisfies PlanNodeData,
+            data: {
+              formatId: format.id,
+              video,
+              ratio: clampAspectRatio(videoAspectRatios[video.id] || 9 / 16),
+              selectedVideoId,
+              playingVideoId,
+              directMediaUrl: getVideoDirectMediaUrl(video),
+              onSelect: handleSelectVideo,
+              onPlay: handlePlayVideo,
+              onOpen: handleOpenSource,
+              onAspect: handleAspect,
+            } satisfies VideoNodeData,
+          });
+
+          edges.push({
+            id: `${formatNodeId}->${videoNodeId}`,
+            source: formatNodeId,
+            target: videoNodeId,
+            type: "smoothstep",
+            style: {
+              stroke: "#c4b5fd",
+              strokeWidth: 1.4,
+              strokeDasharray: "4 4",
+            },
+          });
         });
-
-        planNodePositions[saved.id] = {
-          x: anchor.x + 320,
-          y: anchor.y + index * 120,
-          nodeId: planNodeId,
-        };
-
-        edges.push({
-          id: `video-${selectedVideoId}->${planNodeId}`,
-          source: `video-${selectedVideoId}`,
-          target: planNodeId,
-          type: "smoothstep",
-          style: {
-            stroke: "#a5b4fc",
-            strokeWidth: 1.4,
-          },
-        });
       });
-    }
-
-    if (plan && selectedVideoId && videoPositions[selectedVideoId]) {
-      const selectedPlanPosition = planId ? planNodePositions[planId] : null;
-      const fallbackAnchor = videoPositions[selectedVideoId];
-      const detailX = selectedPlanPosition ? selectedPlanPosition.x + 300 : fallbackAnchor.x + 620;
-      const detailY = selectedPlanPosition
-        ? selectedPlanPosition.y - (isPlanDetailExpanded ? 60 : 20)
-        : fallbackAnchor.y - (isPlanDetailExpanded ? 60 : 20);
-
-      nodes.push({
-        id: "plan-detail-node",
-        type: "planDetailNode",
-        position: {
-          x: detailX,
-          y: detailY,
-        },
-        data: {
-          plan,
-          isExpanded: isPlanDetailExpanded,
-          onToggleExpanded: () => setIsPlanDetailExpanded((prev) => !prev),
-          onCopyScript: () => {
-            void navigator.clipboard.writeText(buildScriptClipboardText(plan));
-          },
-          onCopyHiggsfield: () => {
-            void navigator.clipboard.writeText(buildHiggsfieldClipboardText(plan));
-          },
-        } satisfies PlanDetailNodeData,
-      });
-
-      const sourceNode = selectedPlanPosition ? selectedPlanPosition.nodeId : `video-${selectedVideoId}`;
-
-      edges.push({
-        id: `${sourceNode}->plan-detail-node`,
-        source: sourceNode,
-        target: "plan-detail-node",
-        type: "smoothstep",
-        style: {
-          stroke: "#818cf8",
-          strokeWidth: 1.5,
-        },
-      });
-    }
+    });
 
     return { nodes, edges };
   }, [
-    activeCollection?.app_name,
-    collectionId,
-    error,
-    library,
-    expandedFormats,
-    handleGeneratePlan,
     sourceUrl,
     userNotes,
     isAnalyzing,
-    isLoadingLibrary,
-    isLoadingPlans,
-    isLoadingCharacters,
-    isGeneratingPlan,
+    orderedTypes,
+    formatsByType,
+    expandedType,
+    selectedFormatType,
+    handleSelectType,
+    expandedFormats,
     selectedFormatId,
-    selectedFormat,
     selectedVideoId,
-    selectedVideo,
-    selectedUgcCharacterId,
-    ugcCharacters,
-    reasoningModel,
-    success,
     playingVideoId,
-    savedPlans,
-    plan,
-    planId,
-    isPlanDetailExpanded,
     videoAspectRatios,
-    router,
     handleSelectVideo,
     handlePlayVideo,
     handleOpenSource,
     handleAspect,
     handleAnalyze,
+    library,
   ]);
 
   useEffect(() => {
     if (!flowInstance || !selectedVideoId) return;
 
     const focusIds = [`video-${selectedVideoId}`];
-    if (selectedFormatId) {
-      focusIds.push(`format-${selectedFormatId}`);
-    }
-    for (const saved of savedPlans) {
-      focusIds.push(`plan-${saved.id}`);
-    }
-    if (plan) {
-      focusIds.push("plan-detail-node");
-    }
+    if (selectedFormatId) focusIds.push(`format-${selectedFormatId}`);
+    if (selectedFormatType) focusIds.push(`type-${selectedFormatType}`);
 
     const focusNodes = canvasGraph.nodes.filter((node) => focusIds.includes(node.id));
     if (focusNodes.length === 0) return;
@@ -1352,15 +1059,15 @@ export function VideoAgentView({ collectionId }: { collectionId: string }) {
     const timeoutId = window.setTimeout(() => {
       void flowInstance.fitView({
         nodes: focusNodes.map((node) => ({ id: node.id })),
-        padding: 0.35,
-        duration: 380,
-        minZoom: 0.3,
+        padding: 0.32,
+        duration: 300,
+        minZoom: 0.25,
         maxZoom: 1.1,
       });
     }, 80);
 
     return () => window.clearTimeout(timeoutId);
-  }, [flowInstance, selectedVideoId, selectedFormatId, savedPlans, plan, canvasGraph.nodes]);
+  }, [flowInstance, selectedVideoId, selectedFormatId, selectedFormatType, canvasGraph.nodes]);
 
   return (
     <div className="flex min-h-0 flex-1 overflow-hidden bg-[#eef2f7]">
@@ -1382,7 +1089,10 @@ export function VideoAgentView({ collectionId }: { collectionId: string }) {
             nodesConnectable={false}
             elementsSelectable={false}
             panOnDrag
-            zoomOnScroll
+            panOnScroll
+            panOnScrollMode={PanOnScrollMode.Free}
+            zoomOnScroll={false}
+            zoomOnDoubleClick={false}
             className="bg-[#eff3f8]"
             onInit={(instance) => setFlowInstance(instance)}
           >
@@ -1409,6 +1119,141 @@ export function VideoAgentView({ collectionId }: { collectionId: string }) {
             <ArrowLeft className="mr-1.5 h-4 w-4" />
             Back
           </Button>
+        </div>
+
+        <div className="pointer-events-none absolute right-4 top-4 z-10 w-[330px] space-y-2">
+          <div className="pointer-events-auto rounded-xl border border-slate-200 bg-white/95 p-3 shadow-sm backdrop-blur">
+            <div className="mb-2 flex items-center justify-between gap-2">
+              <p className="text-sm font-semibold text-slate-800">Plan Controls</p>
+              <Badge variant="default" className="max-w-[170px] truncate">
+                {activeCollection?.app_name || "Muslimah Pro"}
+              </Badge>
+            </div>
+
+            <div className="space-y-2">
+              <div className="flex flex-wrap gap-1.5">
+                <Badge variant="default">{isLoadingLibrary ? "Loading..." : `${library.length} formats`}</Badge>
+                {selectedFormatType ? (
+                  <Badge variant={formatTypeVariant(selectedFormatType)}>{selectedFormatType}</Badge>
+                ) : null}
+              </div>
+
+              <select
+                value={reasoningModel}
+                onChange={(event) => {
+                  const value = event.target.value;
+                  if (isReasoningModel(value)) setReasoningModel(value);
+                }}
+                className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800 outline-none transition focus:border-rose-400 focus:ring-2 focus:ring-rose-200"
+              >
+                {REASONING_MODELS.map((model) => (
+                  <option key={model.id} value={model.id}>
+                    {model.label}
+                  </option>
+                ))}
+              </select>
+
+              {selectedFormat?.format_type === "ugc" ? (
+                <>
+                  <select
+                    value={selectedUgcCharacterId || ""}
+                    onChange={(event) => setSelectedUgcCharacterId(event.target.value || null)}
+                    disabled={isLoadingCharacters}
+                    className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800 outline-none transition focus:border-rose-400 focus:ring-2 focus:ring-rose-200"
+                  >
+                    <option value="">{isLoadingCharacters ? "Loading characters..." : "Select UGC character"}</option>
+                    {ugcCharacters.map((character) => (
+                      <option key={character.id} value={character.id}>
+                        {character.characterName}
+                        {character.isDefault ? " (Default)" : ""}
+                      </option>
+                    ))}
+                  </select>
+                  <Button variant="outline" size="sm" onClick={() => router.push(`/collections/${collectionId}/characters`)}>
+                    <Users className="mr-1.5 h-3.5 w-3.5" />
+                    Character Studio
+                  </Button>
+                </>
+              ) : null}
+
+              <Button
+                variant="primary"
+                onClick={handleGeneratePlan}
+                isLoading={isGeneratingPlan}
+                disabled={!selectedVideo}
+                className="w-full"
+              >
+                <Sparkles className="mr-2 h-4 w-4" />
+                {isGeneratingPlan ? "Generating..." : "Generate Plan"}
+              </Button>
+
+              {error ? (
+                <div className="flex items-start gap-2 rounded-lg border border-rose-200 bg-rose-50 px-2.5 py-2 text-xs text-rose-700">
+                  <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                  <span>{error}</span>
+                </div>
+              ) : null}
+
+              {success ? (
+                <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-2.5 py-2 text-xs text-emerald-700">
+                  {success}
+                </div>
+              ) : null}
+            </div>
+          </div>
+
+          {savedPlans.length > 0 ? (
+            <div className="pointer-events-auto rounded-xl border border-slate-200 bg-white/95 p-3 shadow-sm backdrop-blur">
+              <p className="text-xs font-semibold text-slate-700">
+                Saved Plans{isLoadingPlans ? " (loading...)" : ""}
+              </p>
+              <div className="mt-2 max-h-36 space-y-1.5 overflow-y-auto">
+                {savedPlans.map((saved) => (
+                  <button
+                    key={saved.id}
+                    type="button"
+                    onClick={() => {
+                      setPlan(saved.plan);
+                      setPlanId(saved.id);
+                      setSuccess("Loaded saved plan.");
+                    }}
+                    className={`w-full rounded-md border px-2 py-1.5 text-left text-xs ${
+                      planId === saved.id ? "border-rose-300 bg-rose-50" : "border-slate-200 bg-white"
+                    }`}
+                  >
+                    <p className="truncate font-semibold text-slate-700">{saved.plan.title || "Saved plan"}</p>
+                    <p className="text-[11px] text-slate-500">{formatDateTime(saved.generatedAt || saved.created_at)}</p>
+                  </button>
+                ))}
+              </div>
+            </div>
+          ) : null}
+
+          {plan ? (
+            <div className="pointer-events-auto rounded-xl border border-slate-200 bg-white/95 p-3 shadow-sm backdrop-blur">
+              <p className="text-sm font-semibold text-slate-800">{plan.title}</p>
+              <p className="mt-1 text-xs text-slate-500">{plan.deliverableSpec.duration}</p>
+              <p className="mt-2 line-clamp-4 text-xs text-slate-700">{plan.strategy}</p>
+              <div className="mt-2 flex gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => navigator.clipboard.writeText(buildScriptClipboardText(plan))}
+                >
+                  <Copy className="mr-1 h-3.5 w-3.5" />
+                  Script
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => navigator.clipboard.writeText(buildHiggsfieldClipboardText(plan))}
+                >
+                  <Copy className="mr-1 h-3.5 w-3.5" />
+                  Higgsfield
+                </Button>
+              </div>
+            </div>
+          ) : null}
         </div>
       </section>
     </div>
