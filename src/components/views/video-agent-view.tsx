@@ -567,14 +567,14 @@ export function VideoAgentView({ collectionId }: { collectionId: string }) {
     : 9 / 16;
 
   return (
-    <div className="flex min-h-0 flex-1 overflow-hidden bg-slate-100">
+    <div className="flex min-h-0 flex-1 overflow-hidden bg-[#e9edf3]">
       <aside
         className={`border-r border-slate-200 bg-white transition-all duration-200 ${
-          leftCollapsed ? "w-16" : "w-[360px]"
+          leftCollapsed ? "w-14" : "w-[320px]"
         }`}
       >
         <div className="flex h-full min-h-0 flex-col">
-          <div className="flex items-center justify-between border-b border-slate-200 px-3 py-2">
+          <div className="flex items-center justify-between border-b border-slate-200 px-2.5 py-2">
             {!leftCollapsed ? (
               <Button variant="ghost" size="sm" onClick={() => router.push(`/collections/${collectionId}`)}>
                 <ArrowLeft className="mr-2 h-4 w-4" />
@@ -600,8 +600,8 @@ export function VideoAgentView({ collectionId }: { collectionId: string }) {
             <div className="min-h-0 flex-1 space-y-3 overflow-y-auto p-3">
               <Card>
                 <CardHeader className="pb-3">
-                  <CardTitle className="text-base">Analyze Video</CardTitle>
-                  <CardDescription>Upload a link and auto-group by format.</CardDescription>
+                  <CardTitle className="text-sm">Canvas Controls</CardTitle>
+                  <CardDescription>Analyze links and set generation options.</CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-3">
                   <Input
@@ -617,6 +617,47 @@ export function VideoAgentView({ collectionId }: { collectionId: string }) {
                     placeholder="Optional notes..."
                     className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800 outline-none transition focus:border-rose-400 focus:ring-2 focus:ring-rose-200"
                   />
+                  <select
+                    value={reasoningModel}
+                    onChange={(event) => {
+                      const value = event.target.value;
+                      if (isReasoningModel(value)) setReasoningModel(value);
+                    }}
+                    className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800 outline-none transition focus:border-rose-400 focus:ring-2 focus:ring-rose-200"
+                  >
+                    {REASONING_MODELS.map((model) => (
+                      <option key={model.id} value={model.id}>
+                        {model.label}
+                      </option>
+                    ))}
+                  </select>
+                  {selectedFormat?.format_type === "ugc" ? (
+                    <>
+                      <select
+                        value={selectedUgcCharacterId || ""}
+                        onChange={(event) => setSelectedUgcCharacterId(event.target.value || null)}
+                        disabled={isLoadingCharacters}
+                        className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800 outline-none transition focus:border-rose-400 focus:ring-2 focus:ring-rose-200"
+                      >
+                        <option value="">{isLoadingCharacters ? "Loading characters..." : "Select UGC character"}</option>
+                        {ugcCharacters.map((character) => (
+                          <option key={character.id} value={character.id}>
+                            {character.characterName}
+                            {character.isDefault ? " (Default)" : ""}
+                          </option>
+                        ))}
+                      </select>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => router.push(`/collections/${collectionId}/characters`)}
+                      >
+                        <Users className="mr-1.5 h-3.5 w-3.5" />
+                        Open Character Studio
+                      </Button>
+                    </>
+                  ) : null}
+
                   <Button variant="primary" onClick={handleAnalyze} isLoading={isAnalyzing}>
                     <Sparkles className="mr-2 h-4 w-4" />
                     {isAnalyzing ? "Analyzing..." : "Analyze & Group"}
@@ -625,177 +666,27 @@ export function VideoAgentView({ collectionId }: { collectionId: string }) {
               </Card>
 
               <Card>
-                <CardHeader className="pb-3">
-                  <CardTitle className="text-base">Formats</CardTitle>
-                  <CardDescription>
-                    {isLoadingLibrary ? "Loading..." : `${library.length} format groups`}
-                  </CardDescription>
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-sm">Selection</CardTitle>
                 </CardHeader>
-                <CardContent className="space-y-2">
-                  {library.length === 0 ? (
-                    <p className="text-sm text-slate-500">No formats yet.</p>
-                  ) : (
-                    library.map((format) => {
-                      const expanded = Boolean(expandedFormats[format.id]);
-                      return (
-                        <div key={format.id} className="rounded-lg border border-slate-200 bg-white">
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setExpandedFormats((prev) => ({
-                                ...prev,
-                                [format.id]: !expanded,
-                              }));
-                              setSelectedFormatId(format.id);
-                            }}
-                            className="flex w-full items-center justify-between gap-2 px-3 py-2 text-left"
-                          >
-                            <div className="min-w-0">
-                              <p className="truncate text-sm font-semibold text-slate-800">{format.format_name}</p>
-                              <div className="mt-1 flex items-center gap-2">
-                                <Badge variant={formatTypeVariant(format.format_type)}>{format.format_type}</Badge>
-                                <Badge variant="default">{format.videos.length}</Badge>
-                              </div>
-                            </div>
-                            <ChevronDown
-                              className={`h-4 w-4 text-slate-500 transition-transform ${expanded ? "rotate-180" : ""}`}
-                            />
-                          </button>
-
-                          {expanded ? (
-                            <div className="space-y-2 border-t border-slate-200 p-2">
-                              {format.videos.map((video) => {
-                                const ratio = clampAspectRatio(videoAspectRatios[video.id] || 9 / 16);
-                                const isSelected = selectedVideoId === video.id;
-                                const directMediaUrl = getVideoDirectMediaUrl(video);
-
-                                return (
-                                  <div
-                                    key={video.id}
-                                    className={`rounded-md border p-2 ${
-                                      isSelected
-                                        ? "border-rose-300 bg-rose-50"
-                                        : "border-slate-200 bg-white hover:border-slate-300"
-                                    }`}
-                                  >
-                                    <div
-                                      role="button"
-                                      tabIndex={0}
-                                      onClick={() => {
-                                        setSelectedFormatId(format.id);
-                                        setSelectedVideoId(video.id);
-                                        if (directMediaUrl) {
-                                          setPlayingCardVideoId(video.id);
-                                        }
-                                        setRightCollapsed(false);
-                                      }}
-                                      onKeyDown={(event) => {
-                                        if (event.key === "Enter" || event.key === " ") {
-                                          setSelectedFormatId(format.id);
-                                          setSelectedVideoId(video.id);
-                                          if (directMediaUrl) {
-                                            setPlayingCardVideoId(video.id);
-                                          }
-                                          setRightCollapsed(false);
-                                        }
-                                      }}
-                                      className="cursor-pointer"
-                                    >
-                                      <div className="relative overflow-hidden rounded-md border border-slate-200" style={{ aspectRatio: ratio }}>
-                                        {directMediaUrl && playingCardVideoId === video.id ? (
-                                          <video
-                                            key={`${video.id}-left`}
-                                            src={directMediaUrl}
-                                            controls
-                                            autoPlay
-                                            muted
-                                            playsInline
-                                            preload="metadata"
-                                            poster={video.thumbnail_url || undefined}
-                                            className="h-full w-full object-cover"
-                                          />
-                                        ) : video.thumbnail_url ? (
-                                          <img
-                                            src={video.thumbnail_url}
-                                            alt={video.title || "Video thumbnail"}
-                                            className="h-full w-full object-cover"
-                                            onLoad={(event) => {
-                                              const { naturalWidth, naturalHeight } = event.currentTarget;
-                                              if (naturalWidth > 0 && naturalHeight > 0) {
-                                                setVideoAspectRatios((prev) => ({
-                                                  ...prev,
-                                                  [video.id]: naturalWidth / naturalHeight,
-                                                }));
-                                              }
-                                            }}
-                                          />
-                                        ) : (
-                                          <div className="flex h-full w-full items-center justify-center bg-slate-100 text-slate-500">
-                                            <Clapperboard className="h-5 w-5" />
-                                          </div>
-                                        )}
-                                        {directMediaUrl && playingCardVideoId !== video.id ? (
-                                          <div className="pointer-events-none absolute inset-0 flex items-center justify-center bg-black/15">
-                                            <div className="rounded-full bg-black/55 p-2 text-white">
-                                              <Play className="h-4 w-4" />
-                                            </div>
-                                          </div>
-                                        ) : null}
-                                      </div>
-                                      <p className="mt-1 truncate text-xs font-semibold text-slate-700">
-                                        {video.title || "Untitled source video"}
-                                      </p>
-                                    </div>
-
-                                    <div className="mt-2 flex items-center justify-between gap-2">
-                                      <div className="flex items-center gap-1.5">
-                                        <Badge variant="default">{video.platform}</Badge>
-                                        {(() => {
-                                          const method = getVideoAnalysisMethod(video);
-                                          const frameCount = getVideoFrameCount(video);
-                                          if (!method) return null;
-                                          return (
-                                            <Badge variant="default">
-                                              {method.replace(/_/g, " ")}
-                                              {typeof frameCount === "number" ? ` (${frameCount})` : ""}
-                                            </Badge>
-                                          );
-                                        })()}
-                                      </div>
-                                      <div className="flex items-center gap-1">
-                                        {directMediaUrl ? (
-                                          <Button
-                                            variant="ghost"
-                                            size="sm"
-                                            onClick={() => {
-                                              setSelectedFormatId(format.id);
-                                              setSelectedVideoId(video.id);
-                                              setPlayingCardVideoId(video.id);
-                                            }}
-                                          >
-                                            <Play className="mr-1 h-3.5 w-3.5" />
-                                            Play
-                                          </Button>
-                                        ) : null}
-                                        <Button
-                                          variant="ghost"
-                                          size="sm"
-                                          onClick={() => window.open(video.source_url, "_blank", "noopener,noreferrer")}
-                                        >
-                                          <ExternalLink className="mr-1 h-3.5 w-3.5" />
-                                          Open
-                                        </Button>
-                                      </div>
-                                    </div>
-                                  </div>
-                                );
-                              })}
-                            </div>
-                          ) : null}
-                        </div>
-                      );
-                    })
-                  )}
+                <CardContent className="space-y-2 text-xs text-slate-600">
+                  <p>
+                    <span className="font-semibold text-slate-700">Format:</span> {selectedFormat?.format_name || "None"}
+                  </p>
+                  <p>
+                    <span className="font-semibold text-slate-700">Video:</span> {selectedVideo?.title || "None"}
+                  </p>
+                  <Button
+                    variant="primary"
+                    size="sm"
+                    onClick={handleGeneratePlan}
+                    isLoading={isGeneratingPlan}
+                    disabled={!selectedVideo}
+                    className="w-full"
+                  >
+                    <Sparkles className="mr-1.5 h-3.5 w-3.5" />
+                    {isGeneratingPlan ? "Generating..." : "Generate Plan"}
+                  </Button>
                 </CardContent>
               </Card>
             </div>
@@ -803,59 +694,31 @@ export function VideoAgentView({ collectionId }: { collectionId: string }) {
         </div>
       </aside>
 
-      <section className="min-w-0 flex-1 overflow-hidden">
-        <div className="flex h-full min-h-0 flex-col">
-          <div className="border-b border-slate-200 bg-white px-4 py-3">
-            <div className="flex flex-wrap items-center gap-2">
-              <p className="text-sm font-semibold text-slate-800">
-                {selectedFormat ? selectedFormat.format_name : "Select a format"}
-              </p>
-              {selectedFormat ? (
-                <Badge variant={formatTypeVariant(selectedFormat.format_type)}>{selectedFormat.format_type}</Badge>
-              ) : null}
+      <section className="relative min-w-0 flex-1 overflow-auto">
+        <div
+          className="min-h-full px-6 py-6"
+          style={{
+            backgroundImage:
+              "linear-gradient(to right, rgba(148,163,184,0.15) 1px, transparent 1px), linear-gradient(to bottom, rgba(148,163,184,0.15) 1px, transparent 1px)",
+            backgroundSize: "24px 24px",
+          }}
+        >
+          <div className="mx-auto w-full max-w-[1700px] rounded-[28px] border border-slate-300 bg-white/95 p-5 shadow-[0_20px_50px_rgba(15,23,42,0.14)]">
+            <div className="mb-4 flex flex-wrap items-center gap-2 rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2.5">
+              <p className="text-sm font-semibold text-slate-800">Video Canvas</p>
               <Badge variant="default">{activeCollection?.app_name || "Muslimah Pro"}</Badge>
-
-              <div className="ml-auto flex flex-wrap items-center gap-2">
-                <select
-                  value={reasoningModel}
-                  onChange={(event) => {
-                    const value = event.target.value;
-                    if (isReasoningModel(value)) {
-                      setReasoningModel(value);
-                    }
-                  }}
-                  className="rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-xs text-slate-800 outline-none transition focus:border-rose-400 focus:ring-2 focus:ring-rose-200"
-                >
-                  {REASONING_MODELS.map((model) => (
-                    <option key={model.id} value={model.id}>
-                      {model.label}
-                    </option>
-                  ))}
-                </select>
-
-                {selectedFormat?.format_type === "ugc" ? (
-                  <>
-                    <select
-                      value={selectedUgcCharacterId || ""}
-                      onChange={(event) => setSelectedUgcCharacterId(event.target.value || null)}
-                      disabled={isLoadingCharacters}
-                      className="rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-xs text-slate-800 outline-none transition focus:border-rose-400 focus:ring-2 focus:ring-rose-200"
-                    >
-                      <option value="">{isLoadingCharacters ? "Loading characters..." : "Select UGC character"}</option>
-                      {ugcCharacters.map((character) => (
-                        <option key={character.id} value={character.id}>
-                          {character.characterName}
-                          {character.isDefault ? " (Default)" : ""}
-                        </option>
-                      ))}
-                    </select>
-                    <Button variant="outline" size="sm" onClick={() => router.push(`/collections/${collectionId}/characters`)}>
-                      <Users className="mr-1.5 h-3.5 w-3.5" />
-                      Characters
-                    </Button>
-                  </>
-                ) : null}
-
+              {selectedFormat ? (
+                <>
+                  <Badge variant={formatTypeVariant(selectedFormat.format_type)}>{selectedFormat.format_type}</Badge>
+                  <Badge variant="default">{selectedFormat.videos.length} videos</Badge>
+                </>
+              ) : null}
+              <div className="ml-auto flex items-center gap-2">
+                {selectedVideo ? (
+                  <p className="max-w-[420px] truncate text-xs text-slate-500">Selected: {selectedVideo.title || "Untitled source"}</p>
+                ) : (
+                  <p className="text-xs text-slate-500">Select any video card from the canvas</p>
+                )}
                 <Button
                   variant="primary"
                   size="sm"
@@ -864,74 +727,63 @@ export function VideoAgentView({ collectionId }: { collectionId: string }) {
                   disabled={!selectedVideo}
                 >
                   <Sparkles className="mr-1.5 h-3.5 w-3.5" />
-                  {isGeneratingPlan ? "Generating..." : "Generate Recreation Plan"}
+                  {isGeneratingPlan ? "Generating..." : "Generate Plan"}
                 </Button>
               </div>
             </div>
 
             {error ? (
-              <div className="mt-2 flex items-start gap-2 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">
+              <div className="mb-3 flex items-start gap-2 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">
                 <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
                 <span>{error}</span>
               </div>
             ) : null}
 
             {success ? (
-              <div className="mt-2 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700">
+              <div className="mb-3 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700">
                 {success}
               </div>
             ) : null}
-          </div>
 
-          <div className="min-h-0 flex-1 overflow-y-auto p-4">
-            {!selectedVideo ? (
-              <div className="flex h-full items-center justify-center rounded-xl border border-dashed border-slate-300 bg-white p-8 text-center text-slate-500">
-                Select a video from the left format tree.
-              </div>
-            ) : (
-              <div className="space-y-4">
-                <Card>
-                  <CardHeader>
-                    <CardTitle className="text-base">Selected Source Video</CardTitle>
-                    <CardDescription>
-                      {selectedVideo.title || "Untitled source"} · {selectedVideo.platform}
-                    </CardDescription>
-                  </CardHeader>
-                  <CardContent>
-                    <div className="overflow-hidden rounded-xl border border-slate-200 bg-slate-100" style={{ aspectRatio: selectedVideoAspectRatio }}>
-                      {selectedVideoDirectUrl ? (
-                        <video
-                          key={selectedVideoDirectUrl}
-                          src={selectedVideoDirectUrl}
-                          controls
-                          playsInline
-                          preload="metadata"
-                          poster={selectedVideo.thumbnail_url || undefined}
-                          className="h-full w-full object-cover"
-                        />
-                      ) : selectedVideo.thumbnail_url ? (
-                        <img
-                          src={selectedVideo.thumbnail_url}
-                          alt={selectedVideo.title || "Source thumbnail"}
-                          className="h-full w-full object-cover"
-                          onLoad={(event) => {
-                            const { naturalWidth, naturalHeight } = event.currentTarget;
-                            if (naturalWidth > 0 && naturalHeight > 0) {
-                              setVideoAspectRatios((prev) => ({
-                                ...prev,
-                                [selectedVideo.id]: naturalWidth / naturalHeight,
-                              }));
-                            }
-                          }}
-                        />
-                      ) : (
-                        <div className="flex h-full w-full items-center justify-center text-slate-500">
-                          <Clapperboard className="h-8 w-8" />
-                        </div>
-                      )}
-                    </div>
-
-                    <div className="mt-3 flex flex-wrap items-center gap-2">
+            {selectedVideo ? (
+              <div className="mb-4 overflow-hidden rounded-2xl border border-slate-200 bg-slate-50 p-3">
+                <div className="grid gap-3 md:grid-cols-[minmax(0,340px)_1fr]">
+                  <div className="overflow-hidden rounded-xl border border-slate-200 bg-slate-100" style={{ aspectRatio: selectedVideoAspectRatio }}>
+                    {selectedVideoDirectUrl ? (
+                      <video
+                        key={selectedVideoDirectUrl}
+                        src={selectedVideoDirectUrl}
+                        controls
+                        playsInline
+                        preload="metadata"
+                        poster={selectedVideo.thumbnail_url || undefined}
+                        className="h-full w-full object-cover"
+                      />
+                    ) : selectedVideo.thumbnail_url ? (
+                      <img
+                        src={selectedVideo.thumbnail_url}
+                        alt={selectedVideo.title || "Selected source thumbnail"}
+                        className="h-full w-full object-cover"
+                        onLoad={(event) => {
+                          const { naturalWidth, naturalHeight } = event.currentTarget;
+                          if (naturalWidth > 0 && naturalHeight > 0) {
+                            setVideoAspectRatios((prev) => ({
+                              ...prev,
+                              [selectedVideo.id]: naturalWidth / naturalHeight,
+                            }));
+                          }
+                        }}
+                      />
+                    ) : (
+                      <div className="flex h-full w-full items-center justify-center text-slate-500">
+                        <Clapperboard className="h-8 w-8" />
+                      </div>
+                    )}
+                  </div>
+                  <div className="space-y-2 text-sm text-slate-700">
+                    <p className="font-semibold text-slate-800">{selectedVideo.title || "Untitled source"}</p>
+                    <p className="line-clamp-2 text-xs text-slate-600">{selectedVideo.description || selectedVideo.source_url}</p>
+                    <div className="flex flex-wrap items-center gap-2">
                       <Badge variant="default">{selectedVideo.platform}</Badge>
                       {(() => {
                         const method = getVideoAnalysisMethod(selectedVideo);
@@ -944,7 +796,6 @@ export function VideoAgentView({ collectionId }: { collectionId: string }) {
                           </Badge>
                         );
                       })()}
-
                       <Button
                         variant="outline"
                         size="sm"
@@ -954,132 +805,170 @@ export function VideoAgentView({ collectionId }: { collectionId: string }) {
                         Open source
                       </Button>
                     </div>
+                    {selectedFormat ? <p className="text-xs text-slate-600">{selectedFormat.summary}</p> : null}
+                  </div>
+                </div>
+              </div>
+            ) : null}
 
-                    {selectedFormat ? (
-                      <div className="mt-3 rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700">
-                        <p className="font-semibold text-slate-800">Format summary</p>
-                        <p className="mt-1">{selectedFormat.summary}</p>
-                      </div>
-                    ) : null}
-                  </CardContent>
-                </Card>
+            {isLoadingLibrary ? (
+              <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-6 text-center text-sm text-slate-500">
+                Loading formats...
+              </div>
+            ) : library.length === 0 ? (
+              <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50 px-4 py-10 text-center text-sm text-slate-500">
+                No format groups yet. Analyze your first video link.
+              </div>
+            ) : (
+              <div className="space-y-4">
+                {library.map((format) => {
+                  const expanded = Boolean(expandedFormats[format.id]);
+                  return (
+                    <div key={format.id} className="rounded-2xl border border-slate-200 bg-slate-50/60 p-3">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setExpandedFormats((prev) => ({
+                            ...prev,
+                            [format.id]: !expanded,
+                          }));
+                          setSelectedFormatId(format.id);
+                        }}
+                        className="flex w-full items-center justify-between gap-2 rounded-xl bg-white px-3 py-2 text-left"
+                      >
+                        <div className="min-w-0">
+                          <p className="truncate text-sm font-semibold text-slate-800">{format.format_name}</p>
+                          <div className="mt-1 flex items-center gap-2">
+                            <Badge variant={formatTypeVariant(format.format_type)}>{format.format_type}</Badge>
+                            <Badge variant="default">{format.videos.length} videos</Badge>
+                          </div>
+                        </div>
+                        <ChevronDown
+                          className={`h-4 w-4 text-slate-500 transition-transform ${expanded ? "rotate-180" : ""}`}
+                        />
+                      </button>
 
-                <Card>
-                  <CardHeader>
-                    <CardTitle className="text-base">Videos in This Format</CardTitle>
-                    <CardDescription>Select any sample video to recreate from this format.</CardDescription>
-                  </CardHeader>
-                  <CardContent>
-                    {selectedFormat?.videos.length ? (
-                      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-                        {selectedFormat.videos.map((video) => {
-                          const ratio = clampAspectRatio(videoAspectRatios[video.id] || 9 / 16);
-                          const isActive = video.id === selectedVideoId;
-                          const directMediaUrl = getVideoDirectMediaUrl(video);
+                      {expanded ? (
+                        <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+                          {format.videos.map((video) => {
+                            const ratio = clampAspectRatio(videoAspectRatios[video.id] || 9 / 16);
+                            const isSelected = selectedVideoId === video.id;
+                            const directMediaUrl = getVideoDirectMediaUrl(video);
 
-                          return (
-                            <div
-                              key={video.id}
-                              className={`rounded-lg border bg-white p-2 ${
-                                isActive ? "border-rose-300 ring-2 ring-rose-100" : "border-slate-200"
-                              }`}
-                            >
+                            return (
+                              <div
+                                key={video.id}
+                                className={`rounded-xl border bg-white p-2.5 shadow-sm transition ${
+                                  isSelected ? "border-rose-300 ring-2 ring-rose-100" : "border-slate-200"
+                                }`}
+                              >
                                 <div
                                   role="button"
                                   tabIndex={0}
                                   onClick={() => {
+                                    setSelectedFormatId(format.id);
                                     setSelectedVideoId(video.id);
-                                    if (directMediaUrl) {
-                                      setPlayingCardVideoId(video.id);
-                                    }
+                                    if (directMediaUrl) setPlayingCardVideoId(video.id);
                                   }}
                                   onKeyDown={(event) => {
                                     if (event.key === "Enter" || event.key === " ") {
+                                      setSelectedFormatId(format.id);
                                       setSelectedVideoId(video.id);
-                                      if (directMediaUrl) {
-                                        setPlayingCardVideoId(video.id);
-                                      }
+                                      if (directMediaUrl) setPlayingCardVideoId(video.id);
                                     }
                                   }}
                                   className="cursor-pointer"
                                 >
-                                <div className="relative overflow-hidden rounded-md border border-slate-200" style={{ aspectRatio: ratio }}>
-                                  {directMediaUrl && playingCardVideoId === video.id ? (
-                                    <video
-                                      key={`${video.id}-center`}
-                                      src={directMediaUrl}
-                                      controls
-                                      autoPlay
-                                      muted
-                                      playsInline
-                                      preload="metadata"
-                                      poster={video.thumbnail_url || undefined}
-                                      className="h-full w-full object-cover"
-                                    />
-                                  ) : video.thumbnail_url ? (
-                                    <img
-                                      src={video.thumbnail_url}
-                                      alt={video.title || "Video thumbnail"}
-                                      className="h-full w-full object-cover"
-                                      onLoad={(event) => {
-                                        const { naturalWidth, naturalHeight } = event.currentTarget;
-                                        if (naturalWidth > 0 && naturalHeight > 0) {
-                                          setVideoAspectRatios((prev) => ({
-                                            ...prev,
-                                            [video.id]: naturalWidth / naturalHeight,
-                                          }));
-                                        }
-                                      }}
-                                    />
-                                  ) : (
-                                    <div className="flex h-full w-full items-center justify-center bg-slate-100 text-slate-500">
-                                      <Clapperboard className="h-6 w-6" />
-                                    </div>
-                                  )}
-                                  {directMediaUrl && playingCardVideoId !== video.id ? (
-                                    <div className="pointer-events-none absolute inset-0 flex items-center justify-center bg-black/15">
-                                      <div className="rounded-full bg-black/55 p-2 text-white">
-                                        <Play className="h-4 w-4" />
+                                  <div className="relative overflow-hidden rounded-lg border border-slate-200" style={{ aspectRatio: ratio }}>
+                                    {directMediaUrl && playingCardVideoId === video.id ? (
+                                      <video
+                                        key={`${video.id}-canvas`}
+                                        src={directMediaUrl}
+                                        controls
+                                        autoPlay
+                                        muted
+                                        playsInline
+                                        preload="metadata"
+                                        poster={video.thumbnail_url || undefined}
+                                        className="h-full w-full object-cover"
+                                      />
+                                    ) : video.thumbnail_url ? (
+                                      <img
+                                        src={video.thumbnail_url}
+                                        alt={video.title || "Video thumbnail"}
+                                        className="h-full w-full object-cover"
+                                        onLoad={(event) => {
+                                          const { naturalWidth, naturalHeight } = event.currentTarget;
+                                          if (naturalWidth > 0 && naturalHeight > 0) {
+                                            setVideoAspectRatios((prev) => ({
+                                              ...prev,
+                                              [video.id]: naturalWidth / naturalHeight,
+                                            }));
+                                          }
+                                        }}
+                                      />
+                                    ) : (
+                                      <div className="flex h-full w-full items-center justify-center bg-slate-100 text-slate-500">
+                                        <Clapperboard className="h-6 w-6" />
                                       </div>
-                                    </div>
-                                  ) : null}
+                                    )}
+                                    {directMediaUrl && playingCardVideoId !== video.id ? (
+                                      <div className="pointer-events-none absolute inset-0 flex items-center justify-center bg-black/20">
+                                        <div className="rounded-full bg-black/55 p-2 text-white">
+                                          <Play className="h-4 w-4" />
+                                        </div>
+                                      </div>
+                                    ) : null}
+                                  </div>
                                 </div>
-                                <p className="mt-1 truncate text-xs font-semibold text-slate-800">
+
+                                <p className="mt-1.5 truncate text-xs font-semibold text-slate-800">
                                   {video.title || "Untitled source"}
                                 </p>
-                              </div>
-                              <div className="mt-2 flex items-center justify-between gap-1">
-                                {directMediaUrl ? (
+
+                                <div className="mt-1 flex flex-wrap items-center gap-1.5">
+                                  <Badge variant="default">{video.platform}</Badge>
+                                  {(() => {
+                                    const method = getVideoAnalysisMethod(video);
+                                    if (!method) return null;
+                                    return <Badge variant="default">{method.replace(/_/g, " ")}</Badge>;
+                                  })()}
+                                </div>
+
+                                <div className="mt-2 flex items-center justify-between">
+                                  {directMediaUrl ? (
+                                    <Button
+                                      variant="ghost"
+                                      size="sm"
+                                      onClick={() => {
+                                        setSelectedFormatId(format.id);
+                                        setSelectedVideoId(video.id);
+                                        setPlayingCardVideoId(video.id);
+                                      }}
+                                    >
+                                      <Play className="mr-1 h-3.5 w-3.5" />
+                                      Play
+                                    </Button>
+                                  ) : (
+                                    <span />
+                                  )}
                                   <Button
                                     variant="ghost"
                                     size="sm"
-                                    onClick={() => {
-                                      setSelectedVideoId(video.id);
-                                      setPlayingCardVideoId(video.id);
-                                    }}
+                                    onClick={() => window.open(video.source_url, "_blank", "noopener,noreferrer")}
                                   >
-                                    <Play className="mr-1 h-3.5 w-3.5" />
-                                    Play
+                                    <ExternalLink className="mr-1 h-3.5 w-3.5" />
+                                    Open
                                   </Button>
-                                ) : <span />}
-                                <Button
-                                  variant="ghost"
-                                  size="sm"
-                                  onClick={() => window.open(video.source_url, "_blank", "noopener,noreferrer")}
-                                >
-                                  <ExternalLink className="mr-1 h-3.5 w-3.5" />
-                                  Open
-                                </Button>
+                                </div>
                               </div>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    ) : (
-                      <p className="text-sm text-slate-500">No videos in this format.</p>
-                    )}
-                  </CardContent>
-                </Card>
+                            );
+                          })}
+                        </div>
+                      ) : null}
+                    </div>
+                  );
+                })}
               </div>
             )}
           </div>
@@ -1156,15 +1045,6 @@ export function VideoAgentView({ collectionId }: { collectionId: string }) {
                       <p className="mt-1 text-sm">{plan.strategy}</p>
                     </div>
 
-                    {plan.integrationMode ? (
-                      <div className="rounded-md border border-slate-200 bg-slate-50 p-2 text-xs">
-                        <p>
-                          <span className="font-semibold">Integration mode:</span> {plan.integrationMode}
-                        </p>
-                        {plan.publicFigureNotes ? <p className="mt-1 text-slate-600">{plan.publicFigureNotes}</p> : null}
-                      </div>
-                    ) : null}
-
                     <div>
                       <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Script Hook</p>
                       <p className="mt-1 rounded-md border border-slate-200 bg-slate-50 p-2">{plan.script.hook}</p>
@@ -1176,22 +1056,15 @@ export function VideoAgentView({ collectionId }: { collectionId: string }) {
                           <p className="text-[11px] font-semibold text-slate-500">{beat.timecode}</p>
                           <p className="text-xs"><span className="font-semibold">Visual:</span> {beat.visual}</p>
                           <p className="mt-1 text-xs"><span className="font-semibold">Narration:</span> {beat.narration}</p>
-                          <p className="mt-1 text-xs"><span className="font-semibold">On-screen:</span> {beat.onScreenText}</p>
                         </div>
                       ))}
-                    </div>
-
-                    <div className="rounded-md border border-emerald-200 bg-emerald-50 p-2 text-xs text-emerald-800">
-                      CTA: {plan.script.cta}
                     </div>
 
                     <div className="space-y-2">
                       <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Higgsfield Shots</p>
                       {plan.higgsfieldPrompts.map((item, index) => (
                         <div key={`${item.scene}-${index}`} className="rounded-md border border-slate-200 bg-slate-50 p-2">
-                          <p className="text-xs font-semibold text-slate-700">
-                            {index + 1}. {item.scene}
-                          </p>
+                          <p className="text-xs font-semibold text-slate-700">{index + 1}. {item.scene}</p>
                           <div className="mt-1 flex flex-wrap gap-1.5">
                             <Badge variant="default">Duration: {getPromptDuration(item)}</Badge>
                             <Badge variant="video">Model: {getPromptModel(item)}</Badge>
@@ -1207,11 +1080,7 @@ export function VideoAgentView({ collectionId }: { collectionId: string }) {
                         <Copy className="mr-1.5 h-3.5 w-3.5" />
                         Copy Script
                       </Button>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => navigator.clipboard.writeText(higgsfieldClipboardText)}
-                      >
+                      <Button variant="outline" size="sm" onClick={() => navigator.clipboard.writeText(higgsfieldClipboardText)}>
                         <Copy className="mr-1.5 h-3.5 w-3.5" />
                         Copy Higgsfield
                       </Button>
