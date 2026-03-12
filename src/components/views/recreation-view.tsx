@@ -35,6 +35,7 @@ type ScriptVersion = {
   usesAppContext: boolean;
   script: string;
   slidePlans: SlidePlan[];
+  recreatedPostId?: string;
 };
 
 type GeneratedVersionResult = {
@@ -45,6 +46,15 @@ type GeneratedVersionResult = {
   script: string;
   plans: SlidePlan[];
   images: string[];
+  recreatedPostId?: string;
+  generatedCount?: number;
+  totalAssets?: number;
+};
+
+type QueuedAsset = {
+  index: number;
+  prompt: string;
+  label: string;
 };
 
 type RecreationStep = "prepare" | "script" | "complete";
@@ -88,6 +98,10 @@ function sanitizeScriptVersions(payload: unknown): ScriptVersion[] {
         usesAppContext: adaptationMode === "app_context",
         script,
         slidePlans: Array.isArray(row.slidePlans) ? (row.slidePlans as SlidePlan[]) : [],
+        recreatedPostId:
+          typeof row.recreatedPostId === "string" && row.recreatedPostId.trim().length > 0
+            ? row.recreatedPostId
+            : undefined,
       };
     })
     .filter((version): version is ScriptVersion => Boolean(version));
@@ -95,6 +109,35 @@ function sanitizeScriptVersions(payload: unknown): ScriptVersion[] {
 
 function toPercent(value: number): string {
   return `${Math.round(value * 100)}%`;
+}
+
+function buildAssetQueue(slidePlans: SlidePlan[]): QueuedAsset[] {
+  const queue: QueuedAsset[] = [];
+  let index = 0;
+
+  for (const plan of slidePlans) {
+    if (!Array.isArray(plan.assetPrompts) || plan.assetPrompts.length === 0) {
+      queue.push({
+        index,
+        prompt:
+          "Clean abstract background with soft pink-to-blush gradients, suitable as a design asset for a social slide.",
+        label: `Slide: ${plan.headline || `Slide ${index + 1}`}`,
+      });
+      index += 1;
+      continue;
+    }
+
+    for (const asset of plan.assetPrompts) {
+      queue.push({
+        index,
+        prompt: asset.prompt,
+        label: asset.description || `Asset ${index + 1}`,
+      });
+      index += 1;
+    }
+  }
+
+  return queue;
 }
 
 export function RecreationView() {
@@ -152,6 +195,11 @@ export function RecreationView() {
   const [nicheState, setNicheState] = useState<NicheState>(null);
   const [isGeneratingScript, setIsGeneratingScript] = useState(false);
   const [isGeneratingImages, setIsGeneratingImages] = useState(false);
+  const [imageProgress, setImageProgress] = useState<{ done: number; total: number; current: string }>({
+    done: 0,
+    total: 0,
+    current: "",
+  });
   const [error, setError] = useState("");
 
   const referenceImages = useMemo(() => {
@@ -170,6 +218,7 @@ export function RecreationView() {
       setGeneratedVersions([]);
       setSelectedReferenceImages([]);
       setNicheState(null);
+      setImageProgress({ done: 0, total: 0, current: "" });
       setError("");
       return;
     }
@@ -229,6 +278,10 @@ export function RecreationView() {
               usesAppContext: fallbackMode === "app_context",
               script: fallbackScript,
               slidePlans: Array.isArray(data.slidePlans) ? (data.slidePlans as SlidePlan[]) : [],
+              recreatedPostId:
+                typeof data.recreatedPostId === "string" && data.recreatedPostId.trim().length > 0
+                  ? data.recreatedPostId
+                  : undefined,
             },
           ];
         })();
@@ -245,6 +298,7 @@ export function RecreationView() {
           : data.primaryVersionId || versions[0].id
       );
       setGeneratedVersions([]);
+      setImageProgress({ done: 0, total: 0, current: "" });
       setNicheState({
         isRelevant: Boolean(data.isAppNicheRelevant),
         confidence: typeof data.relevanceConfidence === "number" ? data.relevanceConfidence : 0,
@@ -270,48 +324,122 @@ export function RecreationView() {
     setError("");
 
     try {
-      const fallbackScript = activeVersion?.script || scriptVersions[0]?.script || "";
-      const fallbackPlans = activeVersion?.slidePlans || scriptVersions[0]?.slidePlans || [];
+      const baseResults: GeneratedVersionResult[] = scriptVersions.map((version) => ({
+        id: version.id,
+        label: version.label,
+        adaptationMode: version.adaptationMode,
+        usesAppContext: version.usesAppContext,
+        script: version.script,
+        plans: version.slidePlans,
+        images: [],
+        recreatedPostId: version.recreatedPostId,
+        generatedCount: 0,
+        totalAssets: buildAssetQueue(version.slidePlans).length,
+      }));
 
-      const response = await fetch("/api/recreate/generate", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          script: fallbackScript,
-          slidePlans: fallbackPlans,
-          versions: scriptVersions,
-          collectionId: activeCollection.id,
-          postId: selectedPost.id,
-          appName: activeCollection.app_name,
-        }),
+      setGeneratedVersions(baseResults);
+      setStep("complete");
+
+      const totalAssets = baseResults.reduce((sum, version) => sum + (version.totalAssets || 0), 0);
+      let completedAssets = 0;
+      const failures: string[] = [];
+
+      setImageProgress({
+        done: 0,
+        total: totalAssets,
+        current: totalAssets > 0 ? "Preparing generation queue..." : "No assets to generate.",
       });
 
-      const data = await response.json();
-      if (!response.ok) {
-        throw new Error(data.error || "Failed to generate images");
+      for (const version of scriptVersions) {
+        const queue = buildAssetQueue(version.slidePlans);
+
+        if (!version.recreatedPostId) {
+          failures.push(`${version.label}: missing recreated post id.`);
+          completedAssets += queue.length;
+          continue;
+        }
+
+        for (let index = 0; index < queue.length; index += 1) {
+          const asset = queue[index];
+          const currentLabel = `${version.label} · ${asset.label}`;
+
+          setImageProgress({
+            done: completedAssets,
+            total: totalAssets,
+            current: `Generating ${currentLabel}`,
+          });
+
+          try {
+            const response = await fetch("/api/recreate/regenerate-asset", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                collectionId: activeCollection.id,
+                postId: selectedPost.id,
+                recreatedPostId: version.recreatedPostId,
+                assetPrompt: asset.prompt,
+                assetIndex: asset.index,
+                totalAssets: queue.length,
+                isFinalAsset: index === queue.length - 1,
+                appName: activeCollection.app_name,
+              }),
+            });
+
+            const data = (await response.json()) as {
+              error?: string;
+              generatedMediaUrls?: unknown;
+              generatedCount?: number;
+              totalAssets?: number;
+            };
+
+            if (!response.ok) {
+              throw new Error(data.error || "Failed to generate image asset.");
+            }
+
+            const nextImages = Array.isArray(data.generatedMediaUrls)
+              ? data.generatedMediaUrls.map((item) => (typeof item === "string" ? item : ""))
+              : [];
+
+            setGeneratedVersions((prev) =>
+              prev.map((item) =>
+                item.id === version.id
+                  ? {
+                    ...item,
+                    images: nextImages,
+                    generatedCount:
+                      typeof data.generatedCount === "number"
+                        ? data.generatedCount
+                        : nextImages.filter((url) => typeof url === "string" && url.trim().length > 0)
+                          .length,
+                    totalAssets:
+                      typeof data.totalAssets === "number" ? data.totalAssets : item.totalAssets,
+                  }
+                  : item
+              )
+            );
+          } catch (assetError) {
+            failures.push(
+              `${currentLabel}: ${
+                assetError instanceof Error ? assetError.message : "Asset generation failed"
+              }`
+            );
+          } finally {
+            completedAssets += 1;
+            setImageProgress({
+              done: completedAssets,
+              total: totalAssets,
+              current:
+                completedAssets >= totalAssets
+                  ? "Generation complete."
+                  : `Completed ${completedAssets}/${totalAssets}`,
+            });
+          }
+        }
       }
 
-      const results = Array.isArray(data.versionResults)
-        ? (data.versionResults as GeneratedVersionResult[])
-        : [];
-
-      if (results.length === 0 && Array.isArray(data.images)) {
-        setGeneratedVersions([
-          {
-            id: "fallback",
-            label: activeVersion?.label || "Generated Output",
-            adaptationMode: activeVersion?.adaptationMode || "variant_only",
-            usesAppContext: Boolean(activeVersion?.usesAppContext),
-            script: fallbackScript,
-            plans: fallbackPlans,
-            images: data.images,
-          },
-        ]);
-      } else {
-        setGeneratedVersions(results);
+      if (failures.length > 0) {
+        setError(`Some assets failed: ${failures.slice(0, 3).join(" | ")}`);
       }
-
-      setStep("complete");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Image generation failed");
     } finally {
@@ -470,9 +598,18 @@ export function RecreationView() {
                   disabled={scriptVersions.length === 0}
                 >
                   <Sparkles className="mr-2 h-4 w-4" />
-                  {isGeneratingImages ? "Generating images..." : "Generate All Versions"}
+                  {isGeneratingImages ? "Generating asset-by-asset..." : "Generate All Versions"}
                 </Button>
               </div>
+
+              {imageProgress.total > 0 ? (
+                <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700">
+                  <p>
+                    Progress: {imageProgress.done}/{imageProgress.total}
+                  </p>
+                  {imageProgress.current ? <p className="text-xs text-slate-500">{imageProgress.current}</p> : null}
+                </div>
+              ) : null}
 
               {error ? (
                 <div className="flex items-start gap-2 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">
@@ -563,7 +700,14 @@ export function RecreationView() {
                     <div key={result.id} className="space-y-3 rounded-xl border border-slate-200 bg-slate-50 p-4">
                       <div className="flex flex-wrap items-center gap-2">
                         <Badge variant={result.usesAppContext ? "success" : "default"}>{result.label}</Badge>
-                        <Badge variant="default">{result.images.length} images</Badge>
+                        <Badge variant="default">
+                          {result.images.filter((url) => typeof url === "string" && url.trim().length > 0).length} images
+                        </Badge>
+                        {typeof result.generatedCount === "number" && typeof result.totalAssets === "number" ? (
+                          <Badge variant="default">
+                            {result.generatedCount}/{result.totalAssets} assets
+                          </Badge>
+                        ) : null}
                       </div>
                       <div className="grid grid-cols-2 gap-3 md:grid-cols-3">
                         {(() => {
@@ -578,6 +722,7 @@ export function RecreationView() {
                             }
                           }
                           return result.images.map((url, index) => {
+                            if (!url || !url.trim()) return null;
                             const bgKey = `${result.id}-${index}`;
                             const isRemoving = removeBgLoading[bgKey];
                             const assetName = assetNames[index] || `Asset ${index + 1}`;

@@ -26,6 +26,10 @@ function asNonNegativeInteger(value: unknown): number | null {
   return typeof value === "number" && Number.isInteger(value) && value >= 0 ? value : null;
 }
 
+function asPositiveInteger(value: unknown): number | null {
+  return typeof value === "number" && Number.isInteger(value) && value > 0 ? value : null;
+}
+
 function normalizeMediaUrls(value: unknown): string[] {
   if (!Array.isArray(value)) return [];
   return value.filter((url): url is string => typeof url === "string" && url.trim().length > 0);
@@ -52,6 +56,8 @@ export async function POST(request: NextRequest) {
     const recreatedPostId = asNonEmptyString(body.recreatedPostId);
     const assetPrompt = asNonEmptyString(body.assetPrompt);
     const assetIndex = asNonNegativeInteger(body.assetIndex);
+    const totalAssets = asPositiveInteger(body.totalAssets);
+    const isFinalAsset = body.isFinalAsset === true;
     const explicitAppName = asNonEmptyString(body.appName);
     const imageGenerationModel = isImageGenerationModel(body.imageGenerationModel)
       ? body.imageGenerationModel
@@ -110,13 +116,9 @@ export async function POST(request: NextRequest) {
       throw new Error("Recreated post set not found for this collection/post pair");
     }
 
-    const generatedMediaUrls = normalizeMediaUrls(recreatedPost.generated_media_urls);
-    if (assetIndex >= generatedMediaUrls.length) {
-      return NextResponse.json(
-        { error: "Asset index is out of range for this recreated set" },
-        { status: 400 }
-      );
-    }
+    const generatedMediaUrls = Array.isArray(recreatedPost.generated_media_urls)
+      ? recreatedPost.generated_media_urls.map((item) => (typeof item === "string" ? item : ""))
+      : [];
 
     const platform = asNonEmptyString(originalPost?.platform) || "unknown";
     const thumbnailUrl = asNonEmptyString(originalPost?.thumbnail_url);
@@ -148,18 +150,49 @@ export async function POST(request: NextRequest) {
     });
 
     const nextMediaUrls = [...generatedMediaUrls];
+    if (assetIndex >= nextMediaUrls.length) {
+      nextMediaUrls.push(...Array.from({ length: assetIndex - nextMediaUrls.length + 1 }, () => ""));
+    }
     nextMediaUrls[assetIndex] = imageUrl;
 
-    const { error: updateError } = await supabase
+    const generatedCount = nextMediaUrls.filter(
+      (item): item is string => typeof item === "string" && item.trim().length > 0
+    ).length;
+    const effectiveTotal = totalAssets || nextMediaUrls.length;
+    const status = isFinalAsset || generatedCount >= effectiveTotal ? "completed" : "generating";
+
+    const updatePayload: Record<string, unknown> = {
+      generated_media_urls: nextMediaUrls,
+      status,
+      generation_state: {
+        generatedAssets: generatedCount,
+        totalAssets: effectiveTotal,
+        lastAssetIndex: assetIndex,
+        updatedAt: new Date().toISOString(),
+      },
+      updated_at: new Date().toISOString(),
+    };
+
+    let { error: updateError } = await supabase
       .from("recreated_posts")
-      .update({
-        generated_media_urls: nextMediaUrls,
-        status: "completed",
-        updated_at: new Date().toISOString(),
-      })
+      .update(updatePayload)
       .eq("id", recreatedPostId)
       .eq("original_post_id", postId)
       .eq("collection_id", collectionId);
+
+    if (updateError && /generation_state/i.test(updateError.message || "")) {
+      const fallbackPayload = { ...updatePayload };
+      delete fallbackPayload.generation_state;
+
+      const fallbackUpdate = await supabase
+        .from("recreated_posts")
+        .update(fallbackPayload)
+        .eq("id", recreatedPostId)
+        .eq("original_post_id", postId)
+        .eq("collection_id", collectionId);
+
+      updateError = fallbackUpdate.error;
+    }
 
     if (updateError) throw updateError;
 
@@ -168,6 +201,9 @@ export async function POST(request: NextRequest) {
       assetIndex,
       imageUrl,
       generatedMediaUrls: nextMediaUrls,
+      generatedCount,
+      totalAssets: effectiveTotal,
+      status,
       imageGenerationModel,
       reasoningModel,
     });
