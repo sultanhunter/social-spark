@@ -30,6 +30,23 @@ function asPositiveInteger(value: unknown): number | null {
   return typeof value === "number" && Number.isInteger(value) && value > 0 ? value : null;
 }
 
+function isMissingColumnError(error: unknown, columnName: string): boolean {
+  if (!error || typeof error !== "object") return false;
+  const row = error as Record<string, unknown>;
+  const message = typeof row.message === "string" ? row.message.toLowerCase() : "";
+  const details = typeof row.details === "string" ? row.details.toLowerCase() : "";
+  const combined = `${message} ${details}`;
+  return combined.includes("column") && combined.includes(columnName.toLowerCase());
+}
+
+function formatSupabaseError(error: unknown): string {
+  if (!error || typeof error !== "object") return "unknown error";
+  const row = error as Record<string, unknown>;
+  const message = typeof row.message === "string" ? row.message : "unknown error";
+  const code = typeof row.code === "string" ? row.code : null;
+  return code ? `${message} (code: ${code})` : message;
+}
+
 function normalizeMediaUrls(value: unknown): string[] {
   if (!Array.isArray(value)) return [];
   return value.filter((url): url is string => typeof url === "string" && url.trim().length > 0);
@@ -94,14 +111,36 @@ export async function POST(request: NextRequest) {
       .eq("collection_id", collectionId)
       .single();
 
-    const { data: collection, error: collectionError } = await supabase
+    let collectionResult = await supabase
       .from("collections")
       .select("app_name, app_description, app_context")
       .eq("id", collectionId)
       .single();
 
+    if (collectionResult.error && isMissingColumnError(collectionResult.error, "app_context")) {
+      collectionResult = await supabase
+        .from("collections")
+        .select("app_name, app_description")
+        .eq("id", collectionId)
+        .single();
+    }
+
+    const collection = collectionResult.data;
+    const collectionError = collectionResult.error;
+
     if (postError || collectionError) {
-      throw new Error("Could not load post context for single-asset regeneration");
+      const details = [
+        postError ? `post: ${formatSupabaseError(postError)}` : null,
+        collectionError ? `collection: ${formatSupabaseError(collectionError)}` : null,
+      ]
+        .filter(Boolean)
+        .join(" | ");
+
+      throw new Error(
+        details
+          ? `Could not load post context for single-asset regeneration (${details})`
+          : "Could not load post context for single-asset regeneration"
+      );
     }
 
     const { data: recreatedPost, error: recreatedPostError } = await supabase
