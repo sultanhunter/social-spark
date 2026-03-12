@@ -162,15 +162,36 @@ export function VideoCharactersView({ collectionId }: { collectionId: string }) 
           characterId,
           imageGenerationModel: imageModel,
           replaceExisting: true,
+          angleCount: 3,
         }),
       });
 
-      const data = (await response.json()) as { error?: string };
+      const data = (await response.json()) as {
+        error?: string;
+        warnings?: string[];
+        generatedCount?: number;
+        requestedCount?: number;
+      };
       if (!response.ok) {
-        throw new Error(data.error || "Failed to generate character angles.");
+        const details = Array.isArray(data.warnings) && data.warnings.length > 0
+          ? ` ${data.warnings.join(" | ")}`
+          : "";
+        throw new Error((data.error || "Failed to generate character angles.") + details);
       }
 
-      setSuccess("Generated angle pack for selected character.");
+      const generatedCount = typeof data.generatedCount === "number" ? data.generatedCount : null;
+      const requestedCount = typeof data.requestedCount === "number" ? data.requestedCount : null;
+      const baseMessage =
+        generatedCount && requestedCount
+          ? `Generated ${generatedCount}/${requestedCount} character angles.`
+          : "Generated angle pack for selected character.";
+
+      const warningMessage =
+        Array.isArray(data.warnings) && data.warnings.length > 0
+          ? ` Some angles failed: ${data.warnings.join(" | ")}`
+          : "";
+
+      setSuccess(baseMessage + warningMessage);
       await loadCharacters();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to generate character angles.");
@@ -286,7 +307,7 @@ export function VideoCharactersView({ collectionId }: { collectionId: string }) 
                       ) : (
                         <>
                           <Camera className="mr-2 h-4 w-4" />
-                          {character.angles && character.angles.length > 0 ? "Regenerate Angles" : "Generate Angles"}
+                          {character.angles && character.angles.length > 0 ? "Regenerate Angles (3)" : "Generate Angles (3)"}
                         </>
                       )}
                     </Button>

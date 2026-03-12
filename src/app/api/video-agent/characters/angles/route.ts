@@ -7,6 +7,7 @@ import {
 } from "@/lib/image-generation-model";
 
 export const runtime = "nodejs";
+export const maxDuration = 300;
 
 type CharacterRow = {
   id: string;
@@ -28,6 +29,12 @@ const ANGLES: Array<{ key: string; label: string; direction: string }> = [
   { key: "side_profile", label: "Side Profile", direction: "clean side profile with natural expression" },
   { key: "waist_up_talking", label: "Waist-up Talking", direction: "waist-up conversational framing with light hand gesture" },
 ];
+
+function asPositiveInt(value: unknown, fallback: number, min: number, max: number): number {
+  const parsed = typeof value === "number" ? value : Number.parseInt(String(value || ""), 10);
+  if (!Number.isFinite(parsed)) return fallback;
+  return Math.max(min, Math.min(max, parsed));
+}
 
 function asText(value: unknown): string {
   return typeof value === "string" ? value.trim() : "";
@@ -55,6 +62,7 @@ export async function POST(request: NextRequest) {
     const collectionId = asText(body.collectionId);
     const characterId = asText(body.characterId);
     const replaceExisting = asBoolean(body.replaceExisting, true);
+    const angleCount = asPositiveInt(body.angleCount, 3, 1, ANGLES.length);
     const imageModel = isImageGenerationModel(body.imageGenerationModel)
       ? body.imageGenerationModel
       : DEFAULT_IMAGE_GENERATION_MODEL;
@@ -92,8 +100,10 @@ export async function POST(request: NextRequest) {
     }
 
     const angleRows: Array<Record<string, unknown>> = [];
+    const warnings: string[] = [];
+    const selectedAngles = ANGLES.slice(0, angleCount);
 
-    for (const angle of ANGLES) {
+    for (const angle of selectedAngles) {
       const anglePrompt = [
         `Create a photorealistic character reference image for ${character.character_name}.`,
         `Angle requirement: ${angle.direction}.`,
@@ -106,24 +116,39 @@ export async function POST(request: NextRequest) {
         "NEGATIVE: plastic skin, hyper-symmetry, uncanny perfection, CGI sheen.",
       ].join(" ");
 
-      const imageUrl = await generateImage(anglePrompt, {
-        collectionId,
-        platform: "instagram",
-        imageModel,
-        referenceImageUrls: character.reference_image_url ? [character.reference_image_url] : [],
-        uiGenerationMode: "reference_exact",
-      });
+      try {
+        const imageUrl = await generateImage(anglePrompt, {
+          collectionId,
+          platform: "instagram",
+          imageModel,
+          referenceImageUrls: character.reference_image_url ? [character.reference_image_url] : [],
+          uiGenerationMode: "reference_exact",
+        });
 
-      angleRows.push({
-        collection_id: collectionId,
-        character_id: characterId,
-        angle_key: angle.key,
-        angle_label: angle.label,
-        angle_prompt: anglePrompt,
-        image_url: imageUrl,
-        image_model: imageModel,
-        updated_at: new Date().toISOString(),
-      });
+        angleRows.push({
+          collection_id: collectionId,
+          character_id: characterId,
+          angle_key: angle.key,
+          angle_label: angle.label,
+          angle_prompt: anglePrompt,
+          image_url: imageUrl,
+          image_model: imageModel,
+          updated_at: new Date().toISOString(),
+        });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "Unknown image generation error";
+        warnings.push(`${angle.label}: ${message}`);
+      }
+    }
+
+    if (angleRows.length === 0) {
+      return NextResponse.json(
+        {
+          error: "Failed to generate character angles.",
+          details: warnings,
+        },
+        { status: 500 }
+      );
     }
 
     const { data: inserted, error: insertError } = await supabase
@@ -144,7 +169,12 @@ export async function POST(request: NextRequest) {
       throw insertError;
     }
 
-    return NextResponse.json({ angles: inserted || [] });
+    return NextResponse.json({
+      angles: inserted || [],
+      warnings,
+      generatedCount: angleRows.length,
+      requestedCount: selectedAngles.length,
+    });
   } catch (err) {
     return NextResponse.json(
       { error: err instanceof Error ? err.message : "Failed to generate character angles." },
