@@ -48,6 +48,8 @@ type CharactersResponse = {
   error?: string;
 };
 
+const MAX_UPLOAD_SIZE_BYTES = 10 * 1024 * 1024;
+
 export function VideoCharactersView({ collectionId }: { collectionId: string }) {
   const router = useRouter();
   const [characters, setCharacters] = useState<UgcCharacter[]>([]);
@@ -63,6 +65,19 @@ export function VideoCharactersView({ collectionId }: { collectionId: string }) 
   const [characterNameInput, setCharacterNameInput] = useState("");
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
+
+  const parseApiResponse = useCallback(async (response: Response) => {
+    const text = await response.text();
+    if (!text) {
+      return { data: null as Record<string, unknown> | null, text: "" };
+    }
+
+    try {
+      return { data: JSON.parse(text) as Record<string, unknown>, text };
+    } catch {
+      return { data: null as Record<string, unknown> | null, text };
+    }
+  }, []);
 
   const loadCharacters = useCallback(async () => {
     setIsLoading(true);
@@ -140,6 +155,11 @@ export function VideoCharactersView({ collectionId }: { collectionId: string }) 
       return;
     }
 
+    if (uploadedCharacterFile.size > MAX_UPLOAD_SIZE_BYTES) {
+      setError("Image is too large. Please use an image under 10MB.");
+      return;
+    }
+
     setIsUploadingCreate(true);
     setError("");
     setSuccess("");
@@ -154,9 +174,27 @@ export function VideoCharactersView({ collectionId }: { collectionId: string }) 
         body: formData,
       });
 
-      const uploadData = (await uploadResponse.json()) as { imageUrl?: string; error?: string };
-      if (!uploadResponse.ok || !uploadData.imageUrl) {
-        throw new Error(uploadData.error || "Failed to upload character image.");
+      const uploadParsed = await parseApiResponse(uploadResponse);
+      const uploadImageUrl =
+        uploadParsed.data && typeof uploadParsed.data.imageUrl === "string"
+          ? uploadParsed.data.imageUrl
+          : null;
+
+      if (!uploadResponse.ok || !uploadImageUrl) {
+        const rawMessage =
+          (uploadParsed.data && typeof uploadParsed.data.error === "string"
+            ? uploadParsed.data.error
+            : uploadParsed.text) || `Upload failed (${uploadResponse.status}).`;
+
+        if (
+          uploadResponse.status === 413 ||
+          /request entity too large/i.test(rawMessage) ||
+          /payload too large/i.test(rawMessage)
+        ) {
+          throw new Error("Image upload too large. Please use an image under 10MB.");
+        }
+
+        throw new Error(rawMessage);
       }
 
       const createResponse = await fetch("/api/video-agent/characters", {
@@ -167,14 +205,18 @@ export function VideoCharactersView({ collectionId }: { collectionId: string }) 
           reasoningModel,
           imageGenerationModel: imageModel,
           setAsDefault: true,
-          referenceImageUrl: uploadData.imageUrl,
+          referenceImageUrl: uploadImageUrl,
           characterName: characterNameInput.trim() || undefined,
         }),
       });
 
-      const createData = (await createResponse.json()) as CharactersResponse;
+      const createParsed = await parseApiResponse(createResponse);
       if (!createResponse.ok) {
-        throw new Error(createData.error || "Failed to create character from uploaded image.");
+        const createError =
+          (createParsed.data && typeof createParsed.data.error === "string"
+            ? createParsed.data.error
+            : createParsed.text) || "Failed to create character from uploaded image.";
+        throw new Error(createError);
       }
 
       setUploadedCharacterFile(null);
@@ -341,6 +383,18 @@ export function VideoCharactersView({ collectionId }: { collectionId: string }) 
                   accept="image/*"
                   onChange={(event) => {
                     const file = event.target.files?.[0] || null;
+
+                    if (uploadedCharacterPreview) {
+                      URL.revokeObjectURL(uploadedCharacterPreview);
+                    }
+
+                    if (file && file.size > MAX_UPLOAD_SIZE_BYTES) {
+                      setUploadedCharacterFile(null);
+                      setUploadedCharacterPreview(null);
+                      setError("Image is too large. Please use an image under 10MB.");
+                      return;
+                    }
+
                     setUploadedCharacterFile(file);
                     setUploadedCharacterPreview(file ? URL.createObjectURL(file) : null);
                   }}

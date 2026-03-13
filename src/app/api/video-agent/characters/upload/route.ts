@@ -32,10 +32,10 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Only image files are allowed." }, { status: 400 });
     }
 
-    const maxBytes = 15 * 1024 * 1024;
+    const maxBytes = 10 * 1024 * 1024;
     if (file.size > maxBytes) {
       return NextResponse.json(
-        { error: "Image is too large. Max size is 15MB." },
+        { error: "Image is too large. Max size is 10MB." },
         { status: 400 }
       );
     }
