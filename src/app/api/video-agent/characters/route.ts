@@ -1,5 +1,4 @@
 import { NextRequest, NextResponse } from "next/server";
-import { GoogleGenerativeAI } from "@google/generative-ai";
 import { supabase } from "@/lib/supabase";
 import {
   DEFAULT_REASONING_MODEL,
@@ -11,7 +10,6 @@ import {
   isImageGenerationModel,
   type ImageGenerationModel,
 } from "@/lib/image-generation-model";
-import { generateImage } from "@/lib/gemini-image";
 
 type GeminiInlineImagePart = {
   inlineData: {
@@ -21,8 +19,6 @@ type GeminiInlineImagePart = {
 };
 
 export const runtime = "nodejs";
-
-const genAI = new GoogleGenerativeAI(process.env.GOOGLE_GEMINI_API_KEY || "");
 const DEFAULT_UGC_IMAGE_MODEL: ImageGenerationModel = "gemini-3-pro-image-preview";
 
 type CollectionRow = {
@@ -193,6 +189,8 @@ async function generateCharacterProfile(
     throw new Error("GOOGLE_GEMINI_API_KEY is missing.");
   }
 
+  const { GoogleGenerativeAI } = await import("@google/generative-ai");
+  const genAI = new GoogleGenerativeAI(process.env.GOOGLE_GEMINI_API_KEY || "");
   const model = genAI.getGenerativeModel({ model: reasoningModel });
 
   const referenceImagePart = referenceImageUrl ? await loadRemoteImagePart(referenceImageUrl) : null;
@@ -306,26 +304,35 @@ function toCharacterResponse(row: VideoUgcCharacterRow, angles: VideoUgcCharacte
 export async function GET(request: NextRequest) {
   try {
     const collectionId = request.nextUrl.searchParams.get("collectionId")?.trim();
+    const includeAngles = request.nextUrl.searchParams.get("includeAngles") === "true";
     if (!collectionId) {
       return NextResponse.json({ error: "collectionId is required." }, { status: 400 });
     }
 
-    let queryResult = await supabase
+    const primaryQuery = await supabase
       .from("video_ugc_characters")
-      .select("*")
+      .select(
+        "id, collection_id, character_name, persona_summary, visual_style, wardrobe_notes, voice_tone, prompt_template, reference_image_url, image_model, is_default, created_at, updated_at"
+      )
       .eq("collection_id", collectionId)
       .order("is_default", { ascending: false })
       .order("updated_at", { ascending: false });
 
-    if (queryResult.error && isMissingColumnError(queryResult.error, "is_default")) {
-      queryResult = await supabase
+    let data: unknown = primaryQuery.data;
+    let error = primaryQuery.error;
+
+    if (error && isMissingColumnError(error, "is_default")) {
+      const fallbackQuery = await supabase
         .from("video_ugc_characters")
-        .select("*")
+        .select(
+          "id, collection_id, character_name, persona_summary, visual_style, wardrobe_notes, voice_tone, prompt_template, reference_image_url, image_model, created_at, updated_at"
+        )
         .eq("collection_id", collectionId)
         .order("updated_at", { ascending: false });
-    }
 
-    const { data, error } = queryResult;
+      data = fallbackQuery.data;
+      error = fallbackQuery.error;
+    }
 
     if (error) {
       if (isMissingTableError(error)) {
@@ -342,17 +349,24 @@ export async function GET(request: NextRequest) {
 
     const rows = Array.isArray(data) ? (data as unknown as VideoUgcCharacterRow[]) : [];
 
-    const { data: angleData, error: angleError } = await supabase
-      .from("video_ugc_character_angles")
-      .select("*")
-      .eq("collection_id", collectionId)
-      .order("created_at", { ascending: false });
+    const angles: VideoUgcCharacterAngleRow[] = [];
+    if (includeAngles) {
+      const { data: angleData, error: angleError } = await supabase
+        .from("video_ugc_character_angles")
+        .select(
+          "id, collection_id, character_id, angle_key, angle_label, angle_prompt, image_url, image_model, created_at, updated_at"
+        )
+        .eq("collection_id", collectionId)
+        .order("created_at", { ascending: false });
 
-    if (angleError && !isMissingTableError(angleError)) {
-      throw angleError;
+      if (angleError && !isMissingTableError(angleError)) {
+        throw angleError;
+      }
+
+      if (Array.isArray(angleData)) {
+        angles.push(...(angleData as unknown as VideoUgcCharacterAngleRow[]));
+      }
     }
-
-    const angles = Array.isArray(angleData) ? (angleData as unknown as VideoUgcCharacterAngleRow[]) : [];
     const anglesByCharacter = new Map<string, VideoUgcCharacterAngleRow[]>();
 
     for (const angle of angles) {
@@ -413,6 +427,7 @@ export async function POST(request: NextRequest) {
     const referenceImageUrl = providedReferenceImageUrl
       ? providedReferenceImageUrl
       : await (async () => {
+        const { generateImage } = await import("@/lib/gemini-image");
         const imagePrompt = [
           `Create a high-quality photorealistic portrait reference image for a recurring UGC creator persona named ${profile.characterName}.`,
           profile.promptTemplate,

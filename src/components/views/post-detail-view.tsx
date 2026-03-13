@@ -421,6 +421,8 @@ export function PostDetailView({ postId }: PostDetailViewProps) {
   const [visualVariantPreference, setVisualVariantPreference] = useState<VisualVariantPreference>("both");
   const [ugcCharacters, setUgcCharacters] = useState<UgcCharacter[]>([]);
   const [selectedUgcCharacterId, setSelectedUgcCharacterId] = useState<string | null>(null);
+  const [isLoadingUgcCharacters, setIsLoadingUgcCharacters] = useState(false);
+  const [ugcCharactersError, setUgcCharactersError] = useState("");
   const [history, setHistory] = useState<RecreatedHistoryItem[]>([]);
   const [isHistoryLoading, setIsHistoryLoading] = useState(false);
   const [generatingHistoryBySetId, setGeneratingHistoryBySetId] = useState<Record<string, boolean>>({});
@@ -997,12 +999,16 @@ export function PostDetailView({ postId }: PostDetailViewProps) {
     if (!activeCollection) {
       setUgcCharacters([]);
       setSelectedUgcCharacterId(null);
+      setUgcCharactersError("");
       return;
     }
 
+    setIsLoadingUgcCharacters(true);
+    setUgcCharactersError("");
+
     try {
       const response = await fetch(
-        `/api/video-agent/characters?collectionId=${encodeURIComponent(activeCollection.id)}`,
+        `/api/video-agent/characters?collectionId=${encodeURIComponent(activeCollection.id)}&includeAngles=false`,
         { method: "GET", cache: "no-store" }
       );
 
@@ -1023,9 +1029,12 @@ export function PostDetailView({ postId }: PostDetailViewProps) {
         const defaultCharacter = characters.find((item) => item.isDefault) || null;
         return defaultCharacter?.id || characters[0]?.id || null;
       });
-    } catch {
+    } catch (err) {
       setUgcCharacters([]);
       setSelectedUgcCharacterId(null);
+      setUgcCharactersError(err instanceof Error ? err.message : "Failed to load UGC characters.");
+    } finally {
+      setIsLoadingUgcCharacters(false);
     }
   }, [activeCollection]);
 
@@ -1606,10 +1615,9 @@ export function PostDetailView({ postId }: PostDetailViewProps) {
                 <select
                   value={selectedUgcCharacterId || ""}
                   onChange={(event) => setSelectedUgcCharacterId(event.target.value || null)}
-                  disabled={!shouldUseCharacterLock}
                   className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700 outline-none transition focus:border-rose-400 focus:ring-2 focus:ring-rose-200"
                 >
-                  <option value="">No character lock</option>
+                  <option value="">{isLoadingUgcCharacters ? "Loading characters..." : "No character lock"}</option>
                   {ugcCharacters.map((character) => (
                     <option key={character.id} value={character.id}>
                       {character.characterName}
@@ -1620,8 +1628,9 @@ export function PostDetailView({ postId }: PostDetailViewProps) {
                 <p className="text-xs text-slate-500">
                   {shouldUseCharacterLock
                     ? "When selected, all UGC-real character assets will reuse this Character Studio identity."
-                    : "Character lock is disabled in Brand Optimized mode."}
+                    : "Character selection is loaded but only applied to UGC Real variants."}
                 </p>
+                {ugcCharactersError ? <p className="text-xs text-rose-600">{ugcCharactersError}</p> : null}
               </div>
 
               {isRecreationBlocked ? (

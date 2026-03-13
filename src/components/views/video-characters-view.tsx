@@ -174,7 +174,7 @@ export function VideoCharactersView({ collectionId }: { collectionId: string }) 
     setIsLoading(true);
     try {
       const response = await fetch(
-        `/api/video-agent/characters?collectionId=${encodeURIComponent(collectionId)}`,
+        `/api/video-agent/characters?collectionId=${encodeURIComponent(collectionId)}&includeAngles=true`,
         { method: "GET", cache: "no-store" }
       );
 
