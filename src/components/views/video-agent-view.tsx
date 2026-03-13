@@ -2,11 +2,9 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
-  AlertCircle,
   ArrowLeft,
   ChevronDown,
   Clapperboard,
-  Copy,
   ExternalLink,
   Play,
   Sparkles,
@@ -23,12 +21,12 @@ import {
   PanOnScrollMode,
   Position,
   type Edge,
+  type NodeChange,
   type Node,
   type NodeProps,
 } from "@xyflow/react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { useAppStore } from "@/store/app-store";
 import {
   DEFAULT_REASONING_MODEL,
   REASONING_MODELS,
@@ -108,23 +106,6 @@ type VideoPlan = {
 
 type RecreateResponse = {
   plan?: VideoPlan;
-  planId?: string | null;
-  generatedAt?: string;
-  error?: string;
-};
-
-type SavedPlan = {
-  id: string;
-  format_id: string;
-  source_video_id: string;
-  reasoningModel?: string | null;
-  generatedAt?: string;
-  created_at: string;
-  plan: VideoPlan;
-};
-
-type PlansResponse = {
-  plans?: SavedPlan[];
   error?: string;
 };
 
@@ -180,19 +161,12 @@ type FormatTypeNodeData = {
   expandedType: string | null;
   selectedType: string | null;
   onToggleType: (type: string) => void;
-  onSelectType: (type: string) => void;
 };
 
 function formatTypeVariant(type: string): "default" | "video" | "success" {
   if (type === "ugc") return "video";
   if (type === "ai_video") return "success";
   return "default";
-}
-
-function formatDateTime(value: string): string {
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return value;
-  return date.toLocaleString();
 }
 
 function clampAspectRatio(value: number): number {
@@ -224,41 +198,6 @@ function getVideoDirectMediaUrl(video: LibraryVideo): string | null {
   const analysis = getVideoFormatAnalysis(video);
   const url = analysis?.directMediaUrl;
   return typeof url === "string" && url.trim().length > 0 ? url : null;
-}
-
-function getPromptModel(item: HiggsfieldPrompt): string {
-  const value = typeof item.recommendedModel === "string" ? item.recommendedModel.trim() : "";
-  return value || "Higgsfield Realistic Character";
-}
-
-function getPromptReason(item: HiggsfieldPrompt): string {
-  const value = typeof item.modelReason === "string" ? item.modelReason.trim() : "";
-  return value || "Best for natural human motion and identity consistency.";
-}
-
-function getPromptDuration(item: HiggsfieldPrompt): string {
-  const value = typeof item.shotDuration === "string" ? item.shotDuration.trim() : "";
-  return value || "4s";
-}
-
-function buildScriptClipboardText(plan: VideoPlan): string {
-  const beats = plan.script.beats
-    .map(
-      (beat, index) =>
-        `Beat ${index + 1} (${beat.timecode})\nVisual: ${beat.visual}\nNarration: ${beat.narration}\nOn-screen text: ${beat.onScreenText}\nEdit note: ${beat.editNote}`
-    )
-    .join("\n\n");
-
-  return [`Hook: ${plan.script.hook}`, "", beats, "", `CTA: ${plan.script.cta}`].join("\n");
-}
-
-function buildHiggsfieldClipboardText(plan: VideoPlan): string {
-  return plan.higgsfieldPrompts
-    .map(
-      (item, index) =>
-        `Scene ${index + 1} - ${item.scene}\nDuration: ${getPromptDuration(item)}\nModel: ${getPromptModel(item)}\nWhy: ${getPromptReason(item)}\nPrompt: ${item.prompt}`
-    )
-    .join("\n\n");
 }
 
 function FormatCanvasNode({ data }: NodeProps<Node<FormatNodeData>>) {
@@ -461,10 +400,7 @@ function FormatTypeCanvasNode({ data }: NodeProps<Node<FormatTypeNodeData>>) {
       <Handle type="source" position={Position.Bottom} className="!h-2 !w-2 !bg-violet-300" />
       <button
         type="button"
-        onClick={() => {
-          data.onSelectType(data.formatType);
-          data.onToggleType(data.formatType);
-        }}
+        onClick={() => data.onToggleType(data.formatType)}
         className="nodrag nopan flex w-full items-center justify-between gap-2 text-left"
       >
         <div>
@@ -485,7 +421,6 @@ const nodeTypes = {
 
 export function VideoAgentView({ collectionId }: { collectionId: string }) {
   const router = useRouter();
-  const { activeCollection } = useAppStore();
 
   const [reasoningModel, setReasoningModel] = useState<ReasoningModel>(DEFAULT_REASONING_MODEL);
 
@@ -499,24 +434,18 @@ export function VideoAgentView({ collectionId }: { collectionId: string }) {
   const [ugcCharacters, setUgcCharacters] = useState<UgcCharacter[]>([]);
   const [selectedUgcCharacterId, setSelectedUgcCharacterId] = useState<string | null>(null);
 
-  const [savedPlans, setSavedPlans] = useState<SavedPlan[]>([]);
-  const [plan, setPlan] = useState<VideoPlan | null>(null);
-  const [planId, setPlanId] = useState<string | null>(null);
-
-  const [isLoadingLibrary, setIsLoadingLibrary] = useState(false);
+  const [, setIsLoadingLibrary] = useState(false);
   const [isLoadingCharacters, setIsLoadingCharacters] = useState(false);
-  const [isLoadingPlans, setIsLoadingPlans] = useState(false);
   const [isGeneratingPlan, setIsGeneratingPlan] = useState(false);
 
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
+  const [nodePositions, setNodePositions] = useState<Record<string, { x: number; y: number }>>({});
 
   const selectedFormat = useMemo(
     () => library.find((format) => format.id === selectedFormatId) || null,
     [library, selectedFormatId]
   );
-
-  const selectedFormatType = selectedFormat?.format_type || null;
 
   const formatsByType = useMemo(() => {
     const grouped = new Map<string, LibraryFormat[]>();
@@ -548,27 +477,40 @@ export function VideoAgentView({ collectionId }: { collectionId: string }) {
     setSelectedVideoId(videoId);
   }, []);
 
-  const handleSelectType = useCallback(
+  const handleToggleType = useCallback(
     (type: string) => {
+      const isCollapsing = expandedType === type;
+
+      if (isCollapsing) {
+        setExpandedType(null);
+        setSelectedFormatId(null);
+        setSelectedVideoId(null);
+        setPlayingVideoId(null);
+        return;
+      }
+
       const formats = formatsByType.get(type) || [];
-      const currentFormatInType =
+      const nextFormat =
         (selectedFormatId && formats.find((item) => item.id === selectedFormatId)) || null;
 
       setExpandedType(type);
 
-      if (!currentFormatInType) {
-        setSelectedFormatId(null);
+      if (!nextFormat) {
+        const fallbackFormat = formats[0] || null;
+        setSelectedFormatId(fallbackFormat?.id || null);
         setSelectedVideoId(null);
+        setPlayingVideoId(null);
         return;
       }
 
-      setSelectedFormatId(currentFormatInType.id);
+      setSelectedFormatId(nextFormat.id);
       setSelectedVideoId((current) => {
-        if (current && currentFormatInType.videos.some((video) => video.id === current)) return current;
+        if (current && nextFormat.videos.some((video) => video.id === current)) return current;
         return null;
       });
+      setPlayingVideoId(null);
     },
-    [formatsByType, selectedFormatId]
+    [expandedType, formatsByType, selectedFormatId]
   );
 
   const handlePlayVideo = useCallback((formatId: string, videoId: string) => {
@@ -682,62 +624,6 @@ export function VideoAgentView({ collectionId }: { collectionId: string }) {
     }
   }, [collectionId]);
 
-  const loadSavedPlans = useCallback(
-    async (options?: {
-      formatId?: string | null;
-      videoId?: string | null;
-      preferredPlanId?: string | null;
-    }) => {
-      const formatId = options?.formatId ?? selectedFormatId;
-      const videoId = options?.videoId ?? selectedVideoId;
-
-      if (!formatId || !videoId) {
-        setSavedPlans([]);
-        setPlan(null);
-        setPlanId(null);
-        return;
-      }
-
-      setIsLoadingPlans(true);
-      try {
-        const response = await fetch(
-          `/api/video-agent/plans?collectionId=${encodeURIComponent(collectionId)}&formatId=${encodeURIComponent(formatId)}&videoId=${encodeURIComponent(videoId)}&limit=20`,
-          {
-            method: "GET",
-            cache: "no-store",
-          }
-        );
-
-        const data = (await response.json()) as PlansResponse;
-        if (!response.ok) {
-          throw new Error(data.error || "Failed to load saved recreation plans.");
-        }
-
-        const plans = Array.isArray(data.plans) ? data.plans : [];
-        setSavedPlans(plans);
-
-        const preferred =
-          (options?.preferredPlanId
-            ? plans.find((item) => item.id === options.preferredPlanId)
-            : null) || plans[0] || null;
-
-        if (!preferred) {
-          setPlan(null);
-          setPlanId(null);
-          return;
-        }
-
-        setPlan(preferred.plan);
-        setPlanId(preferred.id);
-      } catch (err) {
-        setError(err instanceof Error ? err.message : "Failed to load saved recreation plans.");
-      } finally {
-        setIsLoadingPlans(false);
-      }
-    },
-    [collectionId, selectedFormatId, selectedVideoId]
-  );
-
   useEffect(() => {
     void loadLibrary();
     void loadCharacters();
@@ -755,10 +641,6 @@ export function VideoAgentView({ collectionId }: { collectionId: string }) {
 
     setSelectedVideoId(null);
   }, [selectedFormat, selectedVideoId]);
-
-  useEffect(() => {
-    void loadSavedPlans();
-  }, [loadSavedPlans]);
 
   useEffect(() => {
     const onSourceAdded = (event: Event) => {
@@ -819,21 +701,30 @@ export function VideoAgentView({ collectionId }: { collectionId: string }) {
         throw new Error("No plan returned.");
       }
 
-      setPlan(data.plan);
-      setPlanId(data.planId || null);
       setSuccess("Recreation plan generated.");
-
-      await loadSavedPlans({
-        formatId: targetFormat.id,
-        videoId: targetVideo.id,
-        preferredPlanId: data.planId || null,
-      });
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to generate recreation plan.");
     } finally {
       setIsGeneratingPlan(false);
     }
-  }, [collectionId, library, selectedFormat, selectedVideo, selectedUgcCharacter, reasoningModel, loadSavedPlans]);
+  }, [collectionId, library, selectedFormat, selectedVideo, selectedUgcCharacter, reasoningModel]);
+
+  const handleNodesChange = useCallback((changes: NodeChange<Node>[]) => {
+    setNodePositions((prev) => {
+      const next = { ...prev };
+
+      for (const change of changes) {
+        if (change.type === "position" && change.position) {
+          next[change.id] = change.position;
+        }
+        if (change.type === "remove") {
+          delete next[change.id];
+        }
+      }
+
+      return next;
+    });
+  }, []);
 
   const canvasGraph = useMemo(() => {
     const nodes: Node[] = [];
@@ -857,11 +748,8 @@ export function VideoAgentView({ collectionId }: { collectionId: string }) {
           formatType: type,
           formatCount: formats.length,
           expandedType,
-          selectedType: selectedFormatType,
-          onToggleType: (nextType: string) => {
-            setExpandedType((prev) => (prev === nextType ? null : nextType));
-          },
-          onSelectType: handleSelectType,
+          selectedType: expandedType,
+          onToggleType: handleToggleType,
         } satisfies FormatTypeNodeData,
       });
 
@@ -973,14 +861,22 @@ export function VideoAgentView({ collectionId }: { collectionId: string }) {
       });
     });
 
-    return { nodes, edges };
+    const positionedNodes = nodes.map((node) => {
+      const override = nodePositions[node.id];
+      if (!override) return node;
+      return {
+        ...node,
+        position: override,
+      };
+    });
+
+    return { nodes: positionedNodes, edges };
   }, [
     collectionId,
     orderedTypes,
     formatsByType,
     expandedType,
-    selectedFormatType,
-    handleSelectType,
+    handleToggleType,
     selectedFormatId,
     selectedVideoId,
     playingVideoId,
@@ -998,6 +894,7 @@ export function VideoAgentView({ collectionId }: { collectionId: string }) {
     handleOpenSource,
     handleAspect,
     handleGeneratePlan,
+    nodePositions,
   ]);
 
   return (
@@ -1008,6 +905,7 @@ export function VideoAgentView({ collectionId }: { collectionId: string }) {
             nodes={canvasGraph.nodes}
             edges={canvasGraph.edges}
             nodeTypes={nodeTypes}
+            onNodesChange={handleNodesChange}
             fitView
             fitViewOptions={{
               padding: 0.25,
@@ -1021,12 +919,18 @@ export function VideoAgentView({ collectionId }: { collectionId: string }) {
             nodesConnectable={false}
             elementsSelectable
             selectNodesOnDrag={false}
-            panOnDrag={false}
+            panOnDrag
             panOnScroll
             panOnScrollMode={PanOnScrollMode.Free}
             zoomOnScroll={false}
             zoomOnDoubleClick={false}
             className="bg-[#eff3f8]"
+            onNodeDragStop={(_, node) => {
+              setNodePositions((prev) => ({
+                ...prev,
+                [node.id]: node.position,
+              }));
+            }}
           >
             <Background variant={BackgroundVariant.Dots} gap={24} size={1} color="#cbd5e1" />
             <MiniMap
@@ -1053,95 +957,6 @@ export function VideoAgentView({ collectionId }: { collectionId: string }) {
           </Button>
         </div>
 
-        <div className="pointer-events-none absolute right-4 top-4 z-10 w-[330px] space-y-2">
-          <div className="pointer-events-auto rounded-xl border border-slate-200 bg-white/95 p-3 shadow-sm backdrop-blur">
-            <div className="mb-2 flex items-center justify-between gap-2">
-              <p className="text-sm font-semibold text-slate-800">Plan Output</p>
-              <Badge variant="default" className="max-w-[170px] truncate">
-                {activeCollection?.app_name || "Muslimah Pro"}
-              </Badge>
-            </div>
-
-            <div className="space-y-2">
-              <div className="flex flex-wrap gap-1.5">
-                <Badge variant="default">{isLoadingLibrary ? "Loading..." : `${library.length} formats`}</Badge>
-                {selectedFormatType ? (
-                  <Badge variant={formatTypeVariant(selectedFormatType)}>{selectedFormatType}</Badge>
-                ) : null}
-              </div>
-
-              <p className="text-xs text-slate-500">
-                Select a video card to open in-card controls and generate the plan there.
-              </p>
-
-              {error ? (
-                <div className="flex items-start gap-2 rounded-lg border border-rose-200 bg-rose-50 px-2.5 py-2 text-xs text-rose-700">
-                  <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-                  <span>{error}</span>
-                </div>
-              ) : null}
-
-              {success ? (
-                <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-2.5 py-2 text-xs text-emerald-700">
-                  {success}
-                </div>
-              ) : null}
-            </div>
-          </div>
-
-          {savedPlans.length > 0 ? (
-            <div className="pointer-events-auto rounded-xl border border-slate-200 bg-white/95 p-3 shadow-sm backdrop-blur">
-              <p className="text-xs font-semibold text-slate-700">
-                Saved Plans{isLoadingPlans ? " (loading...)" : ""}
-              </p>
-              <div className="mt-2 max-h-36 space-y-1.5 overflow-y-auto">
-                {savedPlans.map((saved) => (
-                  <button
-                    key={saved.id}
-                    type="button"
-                    onClick={() => {
-                      setPlan(saved.plan);
-                      setPlanId(saved.id);
-                      setSuccess("Loaded saved plan.");
-                    }}
-                    className={`w-full rounded-md border px-2 py-1.5 text-left text-xs ${
-                      planId === saved.id ? "border-rose-300 bg-rose-50" : "border-slate-200 bg-white"
-                    }`}
-                  >
-                    <p className="truncate font-semibold text-slate-700">{saved.plan.title || "Saved plan"}</p>
-                    <p className="text-[11px] text-slate-500">{formatDateTime(saved.generatedAt || saved.created_at)}</p>
-                  </button>
-                ))}
-              </div>
-            </div>
-          ) : null}
-
-          {plan ? (
-            <div className="pointer-events-auto rounded-xl border border-slate-200 bg-white/95 p-3 shadow-sm backdrop-blur">
-              <p className="text-sm font-semibold text-slate-800">{plan.title}</p>
-              <p className="mt-1 text-xs text-slate-500">{plan.deliverableSpec.duration}</p>
-              <p className="mt-2 line-clamp-4 text-xs text-slate-700">{plan.strategy}</p>
-              <div className="mt-2 flex gap-2">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => navigator.clipboard.writeText(buildScriptClipboardText(plan))}
-                >
-                  <Copy className="mr-1 h-3.5 w-3.5" />
-                  Script
-                </Button>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => navigator.clipboard.writeText(buildHiggsfieldClipboardText(plan))}
-                >
-                  <Copy className="mr-1 h-3.5 w-3.5" />
-                  Higgsfield
-                </Button>
-              </div>
-            </div>
-          ) : null}
-        </div>
       </section>
     </div>
   );
