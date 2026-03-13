@@ -92,6 +92,7 @@ type RecreatedHistoryItem = {
     setType?: string;
     adaptationMode?: string;
     versionLabel?: string;
+    characterId?: string;
     stage?: string;
     totalSlides?: number;
     completedSlides?: number;
@@ -111,6 +112,20 @@ type RecreatedHistoryItem = {
   created_at: string;
   updated_at: string;
   slide_plans?: SlidePlan[] | null;
+};
+
+type UgcCharacter = {
+  id: string;
+  characterName: string;
+  referenceImageUrl: string | null;
+  promptTemplate: string;
+  isDefault?: boolean;
+};
+
+type CharactersResponse = {
+  characters?: UgcCharacter[];
+  character?: UgcCharacter | null;
+  error?: string;
 };
 
 type FlattenedAsset = {
@@ -392,6 +407,8 @@ export function PostDetailView({ postId }: PostDetailViewProps) {
   const [error, setError] = useState("");
   const [reasoningModel, setReasoningModel] = useState(DEFAULT_REASONING_MODEL);
   const [imageGenerationModel, setImageGenerationModel] = useState(DEFAULT_IMAGE_GENERATION_MODEL);
+  const [ugcCharacters, setUgcCharacters] = useState<UgcCharacter[]>([]);
+  const [selectedUgcCharacterId, setSelectedUgcCharacterId] = useState<string | null>(null);
   const [history, setHistory] = useState<RecreatedHistoryItem[]>([]);
   const [isHistoryLoading, setIsHistoryLoading] = useState(false);
   const [generatingHistoryBySetId, setGeneratingHistoryBySetId] = useState<Record<string, boolean>>({});
@@ -650,10 +667,12 @@ export function PostDetailView({ postId }: PostDetailViewProps) {
     async ({
       recreatedPostId: targetRecreatedPostId,
       queue,
+      characterId,
       onAssetComplete,
     }: {
       recreatedPostId: string;
       queue: QueuedAsset[];
+      characterId?: string | null;
       onAssetComplete?: (payload: {
         generatedMediaUrls: string[];
         generatedCount: number;
@@ -681,6 +700,7 @@ export function PostDetailView({ postId }: PostDetailViewProps) {
               recreatedPostId: targetRecreatedPostId,
               assetIndex: asset.index,
               assetPrompt: asset.prompt,
+              characterId: characterId || null,
               imageGenerationModel,
               reasoningModel,
               totalAssets: queue.length,
@@ -754,6 +774,10 @@ export function PostDetailView({ postId }: PostDetailViewProps) {
     try {
       const slidePlans = Array.isArray(item.slide_plans) ? item.slide_plans : [];
       const queue = buildAssetQueue(slidePlans);
+      const historyCharacterId =
+        typeof item.generation_state?.characterId === "string"
+          ? item.generation_state.characterId
+          : selectedUgcCharacterId;
 
       setHistory((prev) =>
         prev.map((historyItem) =>
@@ -770,6 +794,7 @@ export function PostDetailView({ postId }: PostDetailViewProps) {
       const { failures, generatedMediaUrls } = await generateAssetsSequential({
         recreatedPostId: item.id,
         queue,
+        characterId: historyCharacterId,
         onAssetComplete: ({ generatedMediaUrls: urls }) => {
           setHistory((prev) =>
             prev.map((historyItem) =>
@@ -832,6 +857,11 @@ export function PostDetailView({ postId }: PostDetailViewProps) {
     setError("");
 
     try {
+      const historyCharacterId =
+        typeof item.generation_state?.characterId === "string"
+          ? item.generation_state.characterId
+          : selectedUgcCharacterId;
+
       const response = await fetch("/api/recreate/regenerate-asset", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -842,6 +872,7 @@ export function PostDetailView({ postId }: PostDetailViewProps) {
           recreatedPostId: item.id,
           assetIndex,
           assetPrompt: trimmedPrompt,
+          characterId: historyCharacterId || null,
           imageGenerationModel,
           reasoningModel,
         }),
@@ -935,6 +966,42 @@ export function PostDetailView({ postId }: PostDetailViewProps) {
     }
   }, [activeCollection, postId]);
 
+  const loadUgcCharacters = useCallback(async () => {
+    if (!activeCollection) {
+      setUgcCharacters([]);
+      setSelectedUgcCharacterId(null);
+      return;
+    }
+
+    try {
+      const response = await fetch(
+        `/api/video-agent/characters?collectionId=${encodeURIComponent(activeCollection.id)}`,
+        { method: "GET", cache: "no-store" }
+      );
+
+      const data = (await response.json()) as CharactersResponse;
+      if (!response.ok) {
+        throw new Error(data.error || "Failed to load UGC characters.");
+      }
+
+      const characters = Array.isArray(data.characters)
+        ? data.characters
+        : data.character
+          ? [data.character]
+          : [];
+
+      setUgcCharacters(characters);
+      setSelectedUgcCharacterId((current) => {
+        if (current && characters.some((item) => item.id === current)) return current;
+        const defaultCharacter = characters.find((item) => item.isDefault) || null;
+        return defaultCharacter?.id || characters[0]?.id || null;
+      });
+    } catch {
+      setUgcCharacters([]);
+      setSelectedUgcCharacterId(null);
+    }
+  }, [activeCollection]);
+
   useEffect(() => {
     if (!selectedPost) return;
 
@@ -969,6 +1036,10 @@ export function PostDetailView({ postId }: PostDetailViewProps) {
   }, [activeCollection, loadHistory]);
 
   useEffect(() => {
+    void loadUgcCharacters();
+  }, [loadUgcCharacters]);
+
+  useEffect(() => {
     const hasGeneratingHistory = history.some((item) => item.status === "generating");
     if (!isGeneratingImages && !hasGeneratingHistory) return;
 
@@ -1001,6 +1072,7 @@ export function PostDetailView({ postId }: PostDetailViewProps) {
           collectionId: activeCollection.id,
           referenceImageUrls: selectedReferenceImages,
           includeHookStrategy: mode === "hook_strategy",
+          characterId: selectedUgcCharacterId,
           reasoningModel,
         }),
       });
@@ -1135,6 +1207,7 @@ export function PostDetailView({ postId }: PostDetailViewProps) {
         const { failures: versionFailures } = await generateAssetsSequential({
           recreatedPostId: version.recreatedPostId,
           queue,
+          characterId: selectedUgcCharacterId,
           onAssetComplete: ({ generatedMediaUrls, generatedCount, totalAssets: versionTotal, assetIndex }) => {
             completedAssets += 1;
             const currentAsset = queue.find((item) => item.index === assetIndex);
@@ -1460,6 +1533,35 @@ export function PostDetailView({ postId }: PostDetailViewProps) {
                     </option>
                   ))}
                 </select>
+              </div>
+
+              <div className="space-y-2">
+                <div className="flex items-center justify-between gap-2">
+                  <p className="text-sm font-semibold text-slate-800">Character Studio Lock (Optional)</p>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => router.push(`/collections/${activeCollection.id}/characters`)}
+                  >
+                    Manage
+                  </Button>
+                </div>
+                <select
+                  value={selectedUgcCharacterId || ""}
+                  onChange={(event) => setSelectedUgcCharacterId(event.target.value || null)}
+                  className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700 outline-none transition focus:border-rose-400 focus:ring-2 focus:ring-rose-200"
+                >
+                  <option value="">No character lock</option>
+                  {ugcCharacters.map((character) => (
+                    <option key={character.id} value={character.id}>
+                      {character.characterName}
+                      {character.isDefault ? " (Default)" : ""}
+                    </option>
+                  ))}
+                </select>
+                <p className="text-xs text-slate-500">
+                  When selected, all character-style assets will reuse this Character Studio identity.
+                </p>
               </div>
 
               {isRecreationBlocked ? (

@@ -71,6 +71,12 @@ function isCharacterAssetPrompt(prompt: string): boolean {
   );
 }
 
+type UgcCharacterRow = {
+  id: string;
+  prompt_template: string | null;
+  reference_image_url: string | null;
+};
+
 export async function POST(request: NextRequest) {
   try {
     const body = (await request.json()) as Record<string, unknown>;
@@ -82,6 +88,7 @@ export async function POST(request: NextRequest) {
     const totalAssets = asPositiveInteger(body.totalAssets);
     const isFinalAsset = body.isFinalAsset === true;
     const explicitAppName = asNonEmptyString(body.appName);
+    const selectedCharacterId = asNonEmptyString(body.characterId);
     const imageGenerationModel = isImageGenerationModel(body.imageGenerationModel)
       ? body.imageGenerationModel
       : DEFAULT_IMAGE_GENERATION_MODEL;
@@ -151,7 +158,7 @@ export async function POST(request: NextRequest) {
 
     const { data: recreatedPost, error: recreatedPostError } = await supabase
       .from("recreated_posts")
-      .select("generated_media_urls")
+      .select("generated_media_urls, generation_state")
       .eq("id", recreatedPostId)
       .eq("original_post_id", postId)
       .eq("collection_id", collectionId)
@@ -179,6 +186,65 @@ export async function POST(request: NextRequest) {
       (item): item is string => typeof item === "string" && item.trim().length > 0
     );
 
+    let studioCharacter: UgcCharacterRow | null = null;
+    if (isCharacterAsset) {
+      const fetchSelected = async () => {
+        if (!selectedCharacterId) return { data: null as UgcCharacterRow | null, error: null as unknown };
+        const result = await supabase
+          .from("video_ugc_characters")
+          .select("id, prompt_template, reference_image_url")
+          .eq("collection_id", collectionId)
+          .eq("id", selectedCharacterId)
+          .maybeSingle();
+        return { data: (result.data as UgcCharacterRow | null) || null, error: result.error };
+      };
+
+      const fetchDefault = async () => {
+        let result = await supabase
+          .from("video_ugc_characters")
+          .select("id, prompt_template, reference_image_url")
+          .eq("collection_id", collectionId)
+          .eq("is_default", true)
+          .order("updated_at", { ascending: false })
+          .limit(1)
+          .maybeSingle();
+
+        if (result.error && isMissingColumnError(result.error, "is_default")) {
+          result = await supabase
+            .from("video_ugc_characters")
+            .select("id, prompt_template, reference_image_url")
+            .eq("collection_id", collectionId)
+            .order("updated_at", { ascending: false })
+            .limit(1)
+            .maybeSingle();
+        }
+
+        return { data: (result.data as UgcCharacterRow | null) || null, error: result.error };
+      };
+
+      const selectedResult = await fetchSelected();
+      if (!selectedResult.error && selectedResult.data) {
+        studioCharacter = selectedResult.data;
+      } else {
+        const defaultResult = await fetchDefault();
+        if (!defaultResult.error && defaultResult.data) {
+          studioCharacter = defaultResult.data;
+        }
+      }
+    }
+
+    const characterReferenceImageUrls =
+      isCharacterAsset && studioCharacter?.reference_image_url
+        ? [studioCharacter.reference_image_url]
+        : isCharacterAsset && firstExistingGenerated
+          ? [firstExistingGenerated]
+          : [];
+
+    const characterLockDescriptor = isCharacterAsset
+      ? studioCharacter?.prompt_template ||
+        "Same fictional woman identity across all character assets. Preserve face, age range, skin tone, hijab/wardrobe style."
+      : undefined;
+
     const imageUrl = await generateImage(assetPrompt, {
       collectionId,
       postId,
@@ -189,11 +255,8 @@ export async function POST(request: NextRequest) {
       imageModel: imageGenerationModel,
       uiGenerationMode: "ai_creative",
       referenceImageUrls,
-      characterReferenceImageUrls:
-        isCharacterAsset && firstExistingGenerated ? [firstExistingGenerated] : [],
-      characterLockDescriptor: isCharacterAsset
-        ? `Same fictional woman identity across all character assets. Preserve face, age range, skin tone, hijab/wardrobe style.`
-        : undefined,
+      characterReferenceImageUrls,
+      characterLockDescriptor,
       brandAssets: {
         appName,
         primaryColorHex: APP_BRAND_PRIMARY_COLOR,
@@ -214,11 +277,17 @@ export async function POST(request: NextRequest) {
     ).length;
     const effectiveTotal = totalAssets || nextMediaUrls.length;
     const status = isFinalAsset || generatedCount >= effectiveTotal ? "completed" : "generating";
+    const previousGenerationState =
+      recreatedPost.generation_state && typeof recreatedPost.generation_state === "object"
+        ? (recreatedPost.generation_state as Record<string, unknown>)
+        : {};
 
     const updatePayload: Record<string, unknown> = {
       generated_media_urls: nextMediaUrls,
       status,
       generation_state: {
+        ...previousGenerationState,
+        characterId: studioCharacter?.id || selectedCharacterId || previousGenerationState.characterId || null,
         generatedAssets: generatedCount,
         totalAssets: effectiveTotal,
         lastAssetIndex: assetIndex,

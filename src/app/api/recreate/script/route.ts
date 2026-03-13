@@ -85,6 +85,7 @@ export async function POST(request: NextRequest) {
     const collectionId = asNonEmptyString(body.collectionId);
     const referenceImageUrls = body.referenceImageUrls;
     const includeHookStrategy = body.includeHookStrategy === true;
+    const selectedCharacterId = asNonEmptyString(body.characterId);
     const reasoningModel = isReasoningModel(body.reasoningModel)
       ? body.reasoningModel
       : DEFAULT_REASONING_MODEL;
@@ -348,6 +349,7 @@ export async function POST(request: NextRequest) {
             setType: version.setType,
             adaptationMode: version.adaptationMode,
             versionLabel: version.label,
+            characterId: selectedCharacterId,
           },
           status: "draft",
         };
