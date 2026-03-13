@@ -2,13 +2,16 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
+  AlertCircle,
   ArrowLeft,
   ChevronDown,
   Clapperboard,
   ExternalLink,
+  Loader2,
   Play,
   Sparkles,
   Users,
+  VideoIcon,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import {
@@ -21,7 +24,6 @@ import {
   PanOnScrollMode,
   Position,
   type Edge,
-  type NodeChange,
   type Node,
   type NodeProps,
 } from "@xyflow/react";
@@ -395,13 +397,13 @@ function FormatTypeCanvasNode({ data }: NodeProps<Node<FormatTypeNodeData>>) {
   const isSelected = data.selectedType === data.formatType;
 
   return (
-    <div className={`nopan min-w-[220px] rounded-2xl border bg-white px-3 py-2 shadow-sm ${isSelected ? "border-rose-300" : "border-slate-200"}`}>
+    <div className={`min-w-[220px] rounded-2xl border bg-white px-3 py-2 shadow-sm ${isSelected ? "border-rose-300" : "border-slate-200"}`}>
       <Handle type="target" position={Position.Top} className="!h-2 !w-2 !bg-violet-300" />
       <Handle type="source" position={Position.Bottom} className="!h-2 !w-2 !bg-violet-300" />
       <button
         type="button"
         onClick={() => data.onToggleType(data.formatType)}
-        className="nodrag nopan flex w-full items-center justify-between gap-2 text-left"
+        className="nodrag flex w-full items-center justify-between gap-2 text-left"
       >
         <div>
           <p className="text-sm font-semibold text-slate-800">{data.formatType.replace(/_/g, " ")}</p>
@@ -434,7 +436,7 @@ export function VideoAgentView({ collectionId }: { collectionId: string }) {
   const [ugcCharacters, setUgcCharacters] = useState<UgcCharacter[]>([]);
   const [selectedUgcCharacterId, setSelectedUgcCharacterId] = useState<string | null>(null);
 
-  const [, setIsLoadingLibrary] = useState(false);
+  const [isLoadingLibrary, setIsLoadingLibrary] = useState(true);
   const [isLoadingCharacters, setIsLoadingCharacters] = useState(false);
   const [isGeneratingPlan, setIsGeneratingPlan] = useState(false);
 
@@ -554,37 +556,46 @@ export function VideoAgentView({ collectionId }: { collectionId: string }) {
         const formats = Array.isArray(data.formats) ? data.formats : [];
         setLibrary(formats);
 
-        const nextFormatId =
-          (preferred?.formatId && formats.some((item) => item.id === preferred.formatId)
-            ? preferred.formatId
-            : null) ||
-          (selectedFormatId && formats.some((item) => item.id === selectedFormatId)
-            ? selectedFormatId
-            : null) ||
-          formats[0]?.id ||
-          null;
+        setSelectedFormatId((prevFormatId) => {
+          const nextFormatId =
+            (preferred?.formatId && formats.some((item) => item.id === preferred.formatId)
+              ? preferred.formatId
+              : null) ||
+            (prevFormatId && formats.some((item) => item.id === prevFormatId)
+              ? prevFormatId
+              : null) ||
+            formats[0]?.id ||
+            null;
+          return nextFormatId;
+        });
 
-        const nextFormat = formats.find((item) => item.id === nextFormatId) || null;
-        const nextType = nextFormat?.format_type || formats[0]?.format_type || null;
+        setSelectedVideoId((prevVideoId) => {
+          const nextVideoId =
+            (preferred?.videoId && formats.some((item) => item.videos.some((video) => video.id === preferred.videoId))
+              ? preferred.videoId
+              : null) ||
+            (prevVideoId && formats.some((item) => item.videos.some((video) => video.id === prevVideoId))
+              ? prevVideoId
+              : null) ||
+            null;
+          return nextVideoId;
+        });
 
-        const nextVideoId =
-          (preferred?.videoId && formats.some((item) => item.videos.some((video) => video.id === preferred.videoId))
-            ? preferred.videoId
-            : null) ||
-          (selectedVideoId && formats.some((item) => item.videos.some((video) => video.id === selectedVideoId))
-            ? selectedVideoId
-            : null);
-
-        setSelectedFormatId(nextFormatId);
-        setSelectedVideoId(nextVideoId);
-        setExpandedType(nextType);
+        setExpandedType((prevType) => {
+          if (preferred?.formatId) {
+            const preferredFormat = formats.find((item) => item.id === preferred.formatId);
+            if (preferredFormat) return preferredFormat.format_type;
+          }
+          if (prevType && formats.some((item) => item.format_type === prevType)) return prevType;
+          return formats[0]?.format_type || null;
+        });
       } catch (err) {
         setError(err instanceof Error ? err.message : "Failed to load video format library.");
       } finally {
         setIsLoadingLibrary(false);
       }
     },
-    [collectionId, selectedFormatId, selectedVideoId]
+    [collectionId]
   );
 
   const loadCharacters = useCallback(async () => {
@@ -709,22 +720,15 @@ export function VideoAgentView({ collectionId }: { collectionId: string }) {
     }
   }, [collectionId, library, selectedFormat, selectedVideo, selectedUgcCharacter, reasoningModel]);
 
-  const handleNodesChange = useCallback((changes: NodeChange<Node>[]) => {
-    setNodePositions((prev) => {
-      const next = { ...prev };
-
-      for (const change of changes) {
-        if (change.type === "position" && change.position) {
-          next[change.id] = change.position;
-        }
-        if (change.type === "remove") {
-          delete next[change.id];
-        }
-      }
-
-      return next;
-    });
-  }, []);
+  const handleNodeDragStop = useCallback(
+    (_event: React.MouseEvent, node: Node) => {
+      setNodePositions((prev) => ({
+        ...prev,
+        [node.id]: node.position,
+      }));
+    },
+    []
+  );
 
   const canvasGraph = useMemo(() => {
     const nodes: Node[] = [];
@@ -897,15 +901,19 @@ export function VideoAgentView({ collectionId }: { collectionId: string }) {
     nodePositions,
   ]);
 
+  const hasNodes = canvasGraph.nodes.length > 0;
+  const showEmptyState = !isLoadingLibrary && !hasNodes && !error;
+  const showErrorState = !isLoadingLibrary && !hasNodes && !!error;
+
   return (
     <div className="flex min-h-0 flex-1 overflow-hidden bg-[#eef2f7]">
       <section className="relative min-w-0 flex-1 overflow-hidden">
-        <div className="absolute inset-0">
+        <div className="absolute inset-0" style={{ width: "100%", height: "100%" }}>
           <ReactFlow
             nodes={canvasGraph.nodes}
             edges={canvasGraph.edges}
             nodeTypes={nodeTypes}
-            onNodesChange={handleNodesChange}
+            onNodeDragStop={handleNodeDragStop}
             fitView
             fitViewOptions={{
               padding: 0.25,
@@ -925,12 +933,6 @@ export function VideoAgentView({ collectionId }: { collectionId: string }) {
             zoomOnScroll={false}
             zoomOnDoubleClick={false}
             className="bg-[#eff3f8]"
-            onNodeDragStop={(_, node) => {
-              setNodePositions((prev) => ({
-                ...prev,
-                [node.id]: node.position,
-              }));
-            }}
           >
             <Background variant={BackgroundVariant.Dots} gap={24} size={1} color="#cbd5e1" />
             <MiniMap
@@ -944,6 +946,37 @@ export function VideoAgentView({ collectionId }: { collectionId: string }) {
             <Controls showInteractive={false} />
           </ReactFlow>
         </div>
+
+        {isLoadingLibrary ? (
+          <div className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center">
+            <div className="flex flex-col items-center gap-3 rounded-2xl border border-slate-200 bg-white px-8 py-6 shadow-sm">
+              <Loader2 className="h-6 w-6 animate-spin text-rose-500" />
+              <p className="text-sm font-medium text-slate-600">Loading video library...</p>
+            </div>
+          </div>
+        ) : null}
+
+        {showEmptyState ? (
+          <div className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center">
+            <div className="flex flex-col items-center gap-3 rounded-2xl border border-slate-200 bg-white px-8 py-6 shadow-sm">
+              <VideoIcon className="h-8 w-8 text-slate-400" />
+              <p className="text-sm font-semibold text-slate-700">No videos yet</p>
+              <p className="max-w-[260px] text-center text-xs text-slate-500">
+                Click <strong>Add Video</strong> in the top bar to analyze a source video and start building your format library.
+              </p>
+            </div>
+          </div>
+        ) : null}
+
+        {showErrorState ? (
+          <div className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center">
+            <div className="flex flex-col items-center gap-3 rounded-2xl border border-rose-200 bg-white px-8 py-6 shadow-sm">
+              <AlertCircle className="h-8 w-8 text-rose-500" />
+              <p className="text-sm font-semibold text-slate-700">Failed to load library</p>
+              <p className="max-w-[280px] text-center text-xs text-rose-600">{error}</p>
+            </div>
+          </div>
+        ) : null}
 
         <div className="pointer-events-none absolute left-4 top-4 z-10">
           <Button
