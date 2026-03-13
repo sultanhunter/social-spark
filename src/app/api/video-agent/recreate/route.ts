@@ -121,6 +121,7 @@ function toFormatAnalysis(row: VideoFormatRow): VideoFormatAnalysis {
     sampledFrameCount: 0,
     sampledFrameSources: [],
     directMediaUrl: null,
+    r2VideoUrl: null,
     transcriptAvailable: false,
     transcriptSummary: "",
     transcriptText: "",

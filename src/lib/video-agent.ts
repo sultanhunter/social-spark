@@ -33,6 +33,7 @@ export interface VideoFormatAnalysis {
   sampledFrameCount: number;
   sampledFrameSources: string[];
   directMediaUrl: string | null;
+  r2VideoUrl: string | null;
   transcriptAvailable: boolean;
   transcriptSummary: string;
   transcriptText: string;
@@ -349,12 +350,13 @@ function extractMetaContent(html: string, key: string): string | null {
   return null;
 }
 
-async function buildVisualEvidence(source: VideoSourceMetadata): Promise<{
+async function buildVisualEvidence(source: VideoSourceMetadata, collectionId?: string): Promise<{
   method: AnalysisMethod;
   sourceDurationSeconds: number | null;
   parts: InlineImagePart[];
   sampledFrameSources: string[];
   directMediaUrl: string | null;
+  r2VideoUrl: string | null;
   transcript: {
     available: boolean;
     summary: string | null;
@@ -375,6 +377,7 @@ async function buildVisualEvidence(source: VideoSourceMetadata): Promise<{
     frameWidth: 960,
     includeTranscript: true,
     transcriptMaxSeconds: 90,
+    collectionId,
   });
 
   const frameParts = frameExtraction.frames
@@ -406,6 +409,7 @@ async function buildVisualEvidence(source: VideoSourceMetadata): Promise<{
     parts: frameParts,
     sampledFrameSources: ["remote_extractor_frames"],
     directMediaUrl: frameExtraction.videoUrl,
+    r2VideoUrl: frameExtraction.r2VideoUrl || null,
     transcript: {
       available: frameExtraction.transcript.available,
       summary: frameExtraction.transcript.summary,
@@ -465,12 +469,13 @@ export async function fetchVideoSourceMetadata(url: string): Promise<VideoSource
 
 export async function analyzeVideoFormatFromSource(
   source: VideoSourceMetadata,
-  reasoningModel: ReasoningModel = DEFAULT_REASONING_MODEL
+  reasoningModel: ReasoningModel = DEFAULT_REASONING_MODEL,
+  collectionId?: string
 ): Promise<VideoFormatAnalysis> {
   requireGeminiKey();
   const model = genAI.getGenerativeModel({ model: reasoningModel });
 
-  const visualEvidence = await buildVisualEvidence(source);
+  const visualEvidence = await buildVisualEvidence(source, collectionId);
 
   const prompt = `You are a short-form video format analyst.
 
@@ -546,6 +551,7 @@ JSON SHAPE:
     sampledFrameCount: visualEvidence.parts.length,
     sampledFrameSources: visualEvidence.sampledFrameSources,
     directMediaUrl: visualEvidence.directMediaUrl,
+    r2VideoUrl: visualEvidence.r2VideoUrl,
     transcriptAvailable: visualEvidence.transcript.available,
     transcriptSummary: sanitizeString(
       visualEvidence.transcript.summary,

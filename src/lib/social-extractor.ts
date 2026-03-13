@@ -39,6 +39,7 @@ export interface ExtractedVideoFramesData {
   description: string | null;
   extractor: string;
   videoUrl: string;
+  r2VideoUrl: string | null;
   durationSeconds: number | null;
   requestedFrameCount: number;
   extractedFrameCount: number;
@@ -246,6 +247,7 @@ export async function extractVideoFrames(
     frameWidth?: number;
     includeTranscript?: boolean;
     transcriptMaxSeconds?: number;
+    collectionId?: string;
   }
 ): Promise<ExtractedVideoFramesData> {
   if (platform !== "instagram" && platform !== "tiktok") {
@@ -285,6 +287,7 @@ export async function extractVideoFrames(
         frameWidth: options?.frameWidth,
         includeTranscript: options?.includeTranscript,
         transcriptMaxSeconds: options?.transcriptMaxSeconds,
+        collectionId: options?.collectionId,
       }),
       signal: controller.signal,
     });
@@ -312,6 +315,7 @@ export async function extractVideoFrames(
       description?: unknown;
       extractor?: unknown;
       videoUrl?: unknown;
+      r2VideoUrl?: unknown;
       durationSeconds?: unknown;
       requestedFrameCount?: unknown;
       extractedFrameCount?: unknown;
@@ -394,6 +398,10 @@ export async function extractVideoFrames(
       description: typeof data.description === "string" ? data.description : null,
       extractor,
       videoUrl: data.videoUrl,
+      r2VideoUrl:
+        typeof data.r2VideoUrl === "string" && isHttpUrl(data.r2VideoUrl)
+          ? data.r2VideoUrl
+          : null,
       durationSeconds:
         typeof data.durationSeconds === "number" && Number.isFinite(data.durationSeconds)
           ? data.durationSeconds

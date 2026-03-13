@@ -101,7 +101,7 @@ export async function POST(request: NextRequest) {
     const sourceMetadata = await fetchVideoSourceMetadata(sourceUrl);
     sourceMetadata.userNotes = userNotes;
 
-    const formatAnalysis = await analyzeVideoFormatFromSource(sourceMetadata, reasoningModel);
+    const formatAnalysis = await analyzeVideoFormatFromSource(sourceMetadata, reasoningModel, collectionId);
     sourceMetadata.transcriptSummary = formatAnalysis.transcriptSummary || null;
     sourceMetadata.transcriptText = formatAnalysis.transcriptText || null;
     sourceMetadata.sourceDurationSeconds =

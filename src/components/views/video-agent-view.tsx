@@ -5,10 +5,14 @@ import {
   AlertCircle,
   ArrowLeft,
   ChevronDown,
+  ChevronRight,
   Clapperboard,
+  Clock,
   ExternalLink,
+  FileText,
   Loader2,
   Play,
+  RefreshCw,
   Sparkles,
   Users,
   VideoIcon,
@@ -111,6 +115,21 @@ type RecreateResponse = {
   error?: string;
 };
 
+type SavedPlan = {
+  id: string;
+  source_video_id: string;
+  format_id: string;
+  reasoningModel?: string;
+  generatedAt?: string;
+  created_at: string;
+  plan: VideoPlan;
+};
+
+type PlansResponse = {
+  plans?: SavedPlan[];
+  error?: string;
+};
+
 type UgcCharacter = {
   id: string;
   characterName: string;
@@ -149,6 +168,10 @@ type VideoNodeData = {
   onOpenCharacterStudio: () => void;
   onGeneratePlan: (formatId: string, videoId: string) => void;
   isGeneratingPlan: boolean;
+  plan: VideoPlan | null;
+  hasR2Url: boolean;
+  isRefreshingR2: boolean;
+  onRefreshR2: (videoId: string) => void;
   error: string;
   success: string;
   onSelect: (formatId: string, videoId: string) => void;
@@ -196,7 +219,17 @@ function getVideoFrameCount(video: LibraryVideo): number | null {
   return typeof count === "number" && Number.isFinite(count) ? count : null;
 }
 
+function getVideoR2Url(video: LibraryVideo): string | null {
+  const analysis = getVideoFormatAnalysis(video);
+  const r2Url = analysis?.r2VideoUrl;
+  return typeof r2Url === "string" && r2Url.trim().length > 0 ? r2Url : null;
+}
+
 function getVideoDirectMediaUrl(video: LibraryVideo): string | null {
+  // Prefer permanent R2 URL over ephemeral CDN URL
+  const r2Url = getVideoR2Url(video);
+  if (r2Url) return r2Url;
+
   const analysis = getVideoFormatAnalysis(video);
   const url = analysis?.directMediaUrl;
   return typeof url === "string" && url.trim().length > 0 ? url : null;
@@ -226,9 +259,11 @@ function FormatCanvasNode({ data }: NodeProps<Node<FormatNodeData>>) {
 function VideoCanvasNode({ data }: NodeProps<Node<VideoNodeData>>) {
   const isSelected = data.selectedVideoId === data.video.id;
   const isPlaying = data.directMediaUrl && data.playingVideoId === data.video.id;
+  const plan = data.plan;
+  const [showPlanDetail, setShowPlanDetail] = useState(false);
 
   return (
-    <div className={`w-[230px] rounded-2xl border bg-white p-2.5 shadow-sm ${isSelected ? "border-rose-300 ring-2 ring-rose-100" : "border-slate-200"}`}>
+    <div className={`w-[260px] rounded-2xl border bg-white p-2.5 shadow-sm ${isSelected ? "border-rose-300 ring-2 ring-rose-100" : "border-slate-200"}`}>
       <Handle type="target" position={Position.Top} className="!h-2 !w-2 !bg-violet-300" />
 
       <div
@@ -253,7 +288,6 @@ function VideoCanvasNode({ data }: NodeProps<Node<VideoNodeData>>) {
               src={data.directMediaUrl}
               controls
               autoPlay
-              muted
               playsInline
               preload="metadata"
               poster={data.video.thumbnail_url || undefined}
@@ -297,6 +331,7 @@ function VideoCanvasNode({ data }: NodeProps<Node<VideoNodeData>>) {
       <div className="mt-1 flex flex-wrap items-center gap-1.5">
         <Badge variant="default" className="max-w-[140px] truncate">{data.formatName}</Badge>
         <Badge variant="default">{data.video.platform}</Badge>
+        {plan ? <Badge variant="success">Plan</Badge> : null}
         {(() => {
           const method = getVideoAnalysisMethod(data.video);
           const frameCount = getVideoFrameCount(data.video);
@@ -321,15 +356,30 @@ function VideoCanvasNode({ data }: NodeProps<Node<VideoNodeData>>) {
           </Button>
         ) : <span />}
 
-        <Button variant="ghost" size="sm" onClick={() => data.onOpen(data.video.source_url)} className="nodrag">
-          <ExternalLink className="mr-1 h-3.5 w-3.5" />
-          Open
-        </Button>
+        <div className="flex items-center gap-0.5">
+          {!data.hasR2Url ? (
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => data.onRefreshR2(data.video.id)}
+              isLoading={data.isRefreshingR2}
+              className="nodrag"
+              title="Download video to R2 for permanent playback"
+            >
+              <RefreshCw className={`h-3.5 w-3.5 ${data.isRefreshingR2 ? "animate-spin" : ""}`} />
+            </Button>
+          ) : null}
+          <Button variant="ghost" size="sm" onClick={() => data.onOpen(data.video.source_url)} className="nodrag">
+            <ExternalLink className="mr-1 h-3.5 w-3.5" />
+            Open
+          </Button>
+        </div>
       </div>
 
+      {/* Expanded controls section */}
       <div
-        className={`overflow-hidden transition-all duration-300 ease-out ${
-          isSelected ? "mt-2 max-h-72 opacity-100" : "max-h-0 opacity-0"
+        className={`nodrag overflow-hidden transition-all duration-300 ease-out ${
+          isSelected ? "mt-2 max-h-[800px] opacity-100" : "max-h-0 opacity-0"
         }`}
       >
         <div className="space-y-2 rounded-lg border border-slate-200 bg-slate-50 p-2">
@@ -377,7 +427,7 @@ function VideoCanvasNode({ data }: NodeProps<Node<VideoNodeData>>) {
             isLoading={data.isGeneratingPlan}
           >
             <Sparkles className="mr-1.5 h-3.5 w-3.5" />
-            {data.isGeneratingPlan ? "Generating..." : "Generate Plan"}
+            {data.isGeneratingPlan ? "Generating..." : plan ? "Regenerate Plan" : "Generate Plan"}
           </Button>
 
           {data.error ? (
@@ -387,6 +437,133 @@ function VideoCanvasNode({ data }: NodeProps<Node<VideoNodeData>>) {
             <div className="rounded-md border border-emerald-200 bg-emerald-50 px-2 py-1.5 text-[11px] text-emerald-700">{data.success}</div>
           ) : null}
         </div>
+
+        {/* Recreation plan display */}
+        {plan ? (
+          <div className="mt-2 rounded-lg border border-violet-200 bg-violet-50/50 p-2">
+            <button
+              type="button"
+              onClick={() => setShowPlanDetail((prev) => !prev)}
+              className="nodrag flex w-full items-center justify-between text-left"
+            >
+              <div className="flex items-center gap-1.5">
+                <FileText className="h-3.5 w-3.5 text-violet-600" />
+                <span className="text-xs font-semibold text-violet-800">Recreation Plan</span>
+              </div>
+              <ChevronRight className={`h-3.5 w-3.5 text-violet-500 transition-transform ${showPlanDetail ? "rotate-90" : ""}`} />
+            </button>
+
+            <p className="mt-1 text-[11px] font-medium text-slate-700">{plan.title}</p>
+
+            <div className={`overflow-hidden transition-all duration-200 ${showPlanDetail ? "mt-2 max-h-[500px]" : "max-h-0"}`}>
+              <div className="max-h-[480px] space-y-2.5 overflow-y-auto pr-1">
+                {/* Strategy & Objective */}
+                <div>
+                  <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">Strategy</p>
+                  <p className="mt-0.5 text-[11px] leading-relaxed text-slate-700">{plan.strategy}</p>
+                </div>
+                <div>
+                  <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">Objective</p>
+                  <p className="mt-0.5 text-[11px] leading-relaxed text-slate-700">{plan.objective}</p>
+                </div>
+
+                {/* Deliverable spec */}
+                {plan.deliverableSpec ? (
+                  <div>
+                    <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">Deliverable</p>
+                    <div className="mt-0.5 flex flex-wrap gap-1">
+                      {plan.deliverableSpec.duration ? <Badge variant="default">{plan.deliverableSpec.duration}</Badge> : null}
+                      {plan.deliverableSpec.aspectRatio ? <Badge variant="default">{plan.deliverableSpec.aspectRatio}</Badge> : null}
+                      {plan.deliverableSpec.voiceStyle ? <Badge variant="default">{plan.deliverableSpec.voiceStyle}</Badge> : null}
+                      {plan.deliverableSpec.platforms?.map((p) => (
+                        <Badge key={p} variant="default">{p}</Badge>
+                      ))}
+                    </div>
+                  </div>
+                ) : null}
+
+                {/* Script */}
+                {plan.script ? (
+                  <div>
+                    <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">Script</p>
+                    {plan.script.hook ? (
+                      <div className="mt-1 rounded border border-amber-200 bg-amber-50 px-2 py-1">
+                        <p className="text-[10px] font-semibold text-amber-700">Hook</p>
+                        <p className="text-[11px] leading-relaxed text-slate-700">{plan.script.hook}</p>
+                      </div>
+                    ) : null}
+
+                    {plan.script.beats?.length > 0 ? (
+                      <div className="mt-1.5 space-y-1">
+                        {plan.script.beats.map((beat, i) => (
+                          <div key={`beat-${beat.timecode}-${i}`} className="rounded border border-slate-200 bg-white px-2 py-1">
+                            <div className="flex items-center gap-1.5">
+                              <Clock className="h-2.5 w-2.5 text-slate-400" />
+                              <span className="text-[10px] font-mono font-medium text-slate-500">{beat.timecode}</span>
+                            </div>
+                            {beat.visual ? <p className="mt-0.5 text-[11px] text-slate-600"><span className="font-semibold text-slate-500">Visual:</span> {beat.visual}</p> : null}
+                            {beat.narration ? <p className="text-[11px] text-slate-600"><span className="font-semibold text-slate-500">VO:</span> {beat.narration}</p> : null}
+                            {beat.onScreenText ? <p className="text-[11px] text-slate-600"><span className="font-semibold text-slate-500">Text:</span> {beat.onScreenText}</p> : null}
+                            {beat.editNote ? <p className="text-[11px] italic text-slate-400">{beat.editNote}</p> : null}
+                          </div>
+                        ))}
+                      </div>
+                    ) : null}
+
+                    {plan.script.cta ? (
+                      <div className="mt-1 rounded border border-emerald-200 bg-emerald-50 px-2 py-1">
+                        <p className="text-[10px] font-semibold text-emerald-700">CTA</p>
+                        <p className="text-[11px] leading-relaxed text-slate-700">{plan.script.cta}</p>
+                      </div>
+                    ) : null}
+                  </div>
+                ) : null}
+
+                {/* Higgsfield prompts */}
+                {plan.higgsfieldPrompts?.length > 0 ? (
+                  <div>
+                    <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">AI Video Prompts</p>
+                    <div className="mt-1 space-y-1">
+                      {plan.higgsfieldPrompts.map((hp, i) => (
+                        <div key={`hf-${i}`} className="rounded border border-blue-200 bg-blue-50 px-2 py-1">
+                          <p className="text-[10px] font-semibold text-blue-700">{hp.scene}{hp.shotDuration ? ` (${hp.shotDuration})` : ""}</p>
+                          <p className="text-[11px] leading-relaxed text-slate-700">{hp.prompt}</p>
+                          {hp.recommendedModel ? <p className="mt-0.5 text-[10px] text-blue-500">Model: {hp.recommendedModel}</p> : null}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ) : null}
+
+                {/* Production steps */}
+                {plan.productionSteps?.length > 0 ? (
+                  <div>
+                    <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">Production Steps</p>
+                    <ol className="mt-0.5 list-inside list-decimal space-y-0.5">
+                      {plan.productionSteps.map((step, i) => (
+                        <li key={`ps-${i}`} className="text-[11px] leading-relaxed text-slate-600">{step}</li>
+                      ))}
+                    </ol>
+                  </div>
+                ) : null}
+
+                {/* Assets checklist */}
+                {plan.assetsChecklist?.length > 0 ? (
+                  <div>
+                    <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">Assets Checklist</p>
+                    <ul className="mt-0.5 space-y-0.5">
+                      {plan.assetsChecklist.map((asset, i) => (
+                        <li key={`ac-${i}`} className="flex items-start gap-1 text-[11px] text-slate-600">
+                          <span className="mt-0.5 text-slate-400">-</span> {asset}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                ) : null}
+              </div>
+            </div>
+          </div>
+        ) : null}
       </div>
     </div>
   );
@@ -435,10 +612,12 @@ export function VideoAgentView({ collectionId }: { collectionId: string }) {
 
   const [ugcCharacters, setUgcCharacters] = useState<UgcCharacter[]>([]);
   const [selectedUgcCharacterId, setSelectedUgcCharacterId] = useState<string | null>(null);
+  const [videoPlans, setVideoPlans] = useState<Record<string, VideoPlan>>({});
 
   const [isLoadingLibrary, setIsLoadingLibrary] = useState(true);
   const [isLoadingCharacters, setIsLoadingCharacters] = useState(false);
   const [isGeneratingPlan, setIsGeneratingPlan] = useState(false);
+  const [refreshingR2VideoId, setRefreshingR2VideoId] = useState<string | null>(null);
 
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
@@ -635,10 +814,34 @@ export function VideoAgentView({ collectionId }: { collectionId: string }) {
     }
   }, [collectionId]);
 
+  const loadPlans = useCallback(async () => {
+    try {
+      const response = await fetch(
+        `/api/video-agent/plans?collectionId=${encodeURIComponent(collectionId)}&limit=50`,
+        { method: "GET", cache: "no-store" }
+      );
+      const data = (await response.json()) as PlansResponse;
+      if (!response.ok || !Array.isArray(data.plans)) return;
+
+      const plansByVideo: Record<string, VideoPlan> = {};
+      for (const saved of data.plans) {
+        if (!saved.source_video_id || !saved.plan) continue;
+        // plans are ordered newest-first, so first match wins (most recent)
+        if (!plansByVideo[saved.source_video_id]) {
+          plansByVideo[saved.source_video_id] = saved.plan;
+        }
+      }
+      setVideoPlans(plansByVideo);
+    } catch {
+      // silent – plans are supplementary data
+    }
+  }, [collectionId]);
+
   useEffect(() => {
     void loadLibrary();
     void loadCharacters();
-  }, [loadLibrary, loadCharacters]);
+    void loadPlans();
+  }, [loadLibrary, loadCharacters, loadPlans]);
 
   useEffect(() => {
     if (!selectedFormat) {
@@ -662,11 +865,12 @@ export function VideoAgentView({ collectionId }: { collectionId: string }) {
         formatId: detail?.formatId || null,
         videoId: detail?.videoId || null,
       });
+      void loadPlans();
     };
 
     window.addEventListener("video-agent:source-added", onSourceAdded as EventListener);
     return () => window.removeEventListener("video-agent:source-added", onSourceAdded as EventListener);
-  }, [loadLibrary]);
+  }, [loadLibrary, loadPlans]);
 
   const handleGeneratePlan = useCallback(async (formatIdArg?: string, videoIdArg?: string) => {
     const targetFormat =
@@ -712,13 +916,44 @@ export function VideoAgentView({ collectionId }: { collectionId: string }) {
         throw new Error("No plan returned.");
       }
 
+      setVideoPlans((prev) => ({
+        ...prev,
+        [targetVideo.id]: data.plan as VideoPlan,
+      }));
       setSuccess("Recreation plan generated.");
+      void loadPlans();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to generate recreation plan.");
     } finally {
       setIsGeneratingPlan(false);
     }
-  }, [collectionId, library, selectedFormat, selectedVideo, selectedUgcCharacter, reasoningModel]);
+  }, [collectionId, library, selectedFormat, selectedVideo, selectedUgcCharacter, reasoningModel, loadPlans]);
+
+  const handleRefreshR2 = useCallback(async (videoId: string) => {
+    setRefreshingR2VideoId(videoId);
+    setError("");
+    setSuccess("");
+
+    try {
+      const response = await fetch("/api/video-agent/refresh-r2", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ collectionId, videoId }),
+      });
+
+      const data = (await response.json()) as { r2VideoUrl?: string; error?: string };
+      if (!response.ok) {
+        throw new Error(data.error || "Failed to refresh R2 video.");
+      }
+
+      setSuccess("Video saved to R2.");
+      void loadLibrary();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to refresh R2 video.");
+    } finally {
+      setRefreshingR2VideoId(null);
+    }
+  }, [collectionId, loadLibrary]);
 
   const handleNodeDragStop = useCallback(
     (_event: React.MouseEvent, node: Node) => {
@@ -839,6 +1074,10 @@ export function VideoAgentView({ collectionId }: { collectionId: string }) {
                 void handleGeneratePlan(formatId, videoId);
               },
               isGeneratingPlan: isGeneratingPlan && selectedVideoId === video.id,
+              plan: videoPlans[video.id] || null,
+              hasR2Url: Boolean(getVideoR2Url(video)),
+              isRefreshingR2: refreshingR2VideoId === video.id,
+              onRefreshR2: (videoId: string) => { void handleRefreshR2(videoId); },
               error,
               success,
               onSelect: handleSelectVideo,
@@ -892,6 +1131,9 @@ export function VideoAgentView({ collectionId }: { collectionId: string }) {
     error,
     success,
     videoAspectRatios,
+    videoPlans,
+    refreshingR2VideoId,
+    handleRefreshR2,
     router,
     handleSelectVideo,
     handlePlayVideo,
