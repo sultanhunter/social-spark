@@ -13,6 +13,13 @@ import {
 } from "@/lib/image-generation-model";
 import { generateImage } from "@/lib/gemini-image";
 
+type GeminiInlineImagePart = {
+  inlineData: {
+    data: string;
+    mimeType: string;
+  };
+};
+
 export const runtime = "nodejs";
 
 const genAI = new GoogleGenerativeAI(process.env.GOOGLE_GEMINI_API_KEY || "");
@@ -88,6 +95,35 @@ function cleanText(value: unknown, fallback = ""): string {
   return normalized || fallback;
 }
 
+function isHttpUrl(value: string): boolean {
+  try {
+    const parsed = new URL(value);
+    return parsed.protocol === "http:" || parsed.protocol === "https:";
+  } catch {
+    return false;
+  }
+}
+
+async function loadRemoteImagePart(url: string): Promise<GeminiInlineImagePart | null> {
+  try {
+    const response = await fetch(url);
+    if (!response.ok) return null;
+
+    const mimeType = response.headers.get("content-type")?.split(";")[0] || "image/jpeg";
+    if (!mimeType.startsWith("image/")) return null;
+
+    const imageBuffer = Buffer.from(await response.arrayBuffer());
+    return {
+      inlineData: {
+        data: imageBuffer.toString("base64"),
+        mimeType,
+      },
+    };
+  } catch {
+    return null;
+  }
+}
+
 function parseJsonObject(text: string): Record<string, unknown> | null {
   const cleaned = text
     .trim()
@@ -140,6 +176,8 @@ async function fetchCollectionRow(collectionId: string): Promise<CollectionRow |
 async function generateCharacterProfile(
   appName: string,
   appContext: string,
+  referenceImageUrl: string | null,
+  preferredCharacterName: string | null,
   reasoningModel: ReasoningModel
 ): Promise<{
   characterName: string;
@@ -157,11 +195,16 @@ async function generateCharacterProfile(
 
   const model = genAI.getGenerativeModel({ model: reasoningModel });
 
+  const referenceImagePart = referenceImageUrl ? await loadRemoteImagePart(referenceImageUrl) : null;
+
   const prompt = `You are defining one recurring UGC AI character for a Muslim women app brand.
 
 APP:
 - Name: ${appName}
 - Context: ${appContext || "N/A"}
+
+${referenceImagePart ? "REFERENCE IMAGE: Provided. Use it as identity/style anchor for this character." : "REFERENCE IMAGE: Not provided."}
+${preferredCharacterName ? `PREFERRED CHARACTER NAME: ${preferredCharacterName}` : ""}
 
 TASK:
 - Create one reusable, brand-safe UGC persona.
@@ -184,11 +227,14 @@ Return strict JSON only:
   "realismDirectives": ["3-5 camera realism constraints"]
 }`;
 
-  const result = await model.generateContent(prompt);
+  const result = await model.generateContent(
+    referenceImagePart ? [{ text: prompt }, referenceImagePart] : prompt
+  );
   const parsed = parseJsonObject(result.response.text()) || {};
 
   return {
-    characterName: cleanText(parsed.characterName, `${appName} Guide`),
+    characterName:
+      cleanText(preferredCharacterName, "") || cleanText(parsed.characterName, `${appName} Guide`),
     personaSummary: cleanText(
       parsed.personaSummary,
       "Warm Muslimah lifestyle mentor who shares practical routines with calm confidence."
@@ -332,6 +378,8 @@ export async function POST(request: NextRequest) {
     const body = (await request.json()) as Record<string, unknown>;
     const collectionId = asText(body.collectionId);
     const setAsDefault = asBoolean(body.setAsDefault, true);
+    const preferredCharacterName = asText(body.characterName) || null;
+    const providedReferenceImageUrl = asText(body.referenceImageUrl) || null;
     const reasoningModel = isReasoningModel(body.reasoningModel)
       ? body.reasoningModel
       : DEFAULT_REASONING_MODEL;
@@ -343,6 +391,10 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "collectionId is required." }, { status: 400 });
     }
 
+    if (providedReferenceImageUrl && !isHttpUrl(providedReferenceImageUrl)) {
+      return NextResponse.json({ error: "referenceImageUrl must be a valid http(s) URL." }, { status: 400 });
+    }
+
     const collection = await fetchCollectionRow(collectionId);
     if (!collection) {
       return NextResponse.json({ error: "Collection not found." }, { status: 404 });
@@ -350,25 +402,35 @@ export async function POST(request: NextRequest) {
 
     const appName = (collection.app_name || "Muslimah Pro").trim() || "Muslimah Pro";
     const appContext = (collection.app_description || collection.app_context || "").trim();
-    const profile = await generateCharacterProfile(appName, appContext, reasoningModel);
+    const profile = await generateCharacterProfile(
+      appName,
+      appContext,
+      providedReferenceImageUrl,
+      preferredCharacterName,
+      reasoningModel
+    );
 
-    const imagePrompt = [
-      `Create a high-quality photorealistic portrait reference image for a recurring UGC creator persona named ${profile.characterName}.`,
-      profile.promptTemplate,
-      `Persona: ${profile.personaSummary}.`,
-      `Visual style: ${profile.visualStyle}.`,
-      `Wardrobe: ${profile.wardrobeNotes}.`,
-      `Identity anchors: ${profile.identityAnchors.join("; ")}.`,
-      `Realism directives: ${profile.realismDirectives.join("; ")}.`,
-      "Vertical 9:16, upper-body framing, natural lighting, documentary smartphone realism, lived-in authentic background, realistic skin texture with pores and minor imperfections, slight facial asymmetry, flyaway hair strands, no text overlay.",
-      "NEGATIVE: plastic skin, porcelain face, hyper-symmetry, uncanny eyes, glossy CGI skin, beauty filter, fashion-magazine retouch.",
-    ].join(" ");
+    const referenceImageUrl = providedReferenceImageUrl
+      ? providedReferenceImageUrl
+      : await (async () => {
+        const imagePrompt = [
+          `Create a high-quality photorealistic portrait reference image for a recurring UGC creator persona named ${profile.characterName}.`,
+          profile.promptTemplate,
+          `Persona: ${profile.personaSummary}.`,
+          `Visual style: ${profile.visualStyle}.`,
+          `Wardrobe: ${profile.wardrobeNotes}.`,
+          `Identity anchors: ${profile.identityAnchors.join("; ")}.`,
+          `Realism directives: ${profile.realismDirectives.join("; ")}.`,
+          "Vertical 9:16, upper-body framing, natural lighting, documentary smartphone realism, lived-in authentic background, realistic skin texture with pores and minor imperfections, slight facial asymmetry, flyaway hair strands, no text overlay.",
+          "NEGATIVE: plastic skin, porcelain face, hyper-symmetry, uncanny eyes, glossy CGI skin, beauty filter, fashion-magazine retouch.",
+        ].join(" ");
 
-    const referenceImageUrl = await generateImage(imagePrompt, {
-      collectionId,
-      platform: "instagram",
-      imageModel,
-    });
+        return generateImage(imagePrompt, {
+          collectionId,
+          platform: "instagram",
+          imageModel,
+        });
+      })();
 
     if (setAsDefault) {
       const { error: resetError } = await supabase

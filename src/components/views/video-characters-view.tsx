@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { ArrowLeft, Camera, Loader2, Sparkles, Star } from "lucide-react";
+import { ArrowLeft, Camera, Loader2, Sparkles, Star, Upload } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -55,8 +55,12 @@ export function VideoCharactersView({ collectionId }: { collectionId: string }) 
   const [imageModel, setImageModel] = useState<ImageGenerationModel>("gemini-3-pro-image-preview");
   const [isLoading, setIsLoading] = useState(false);
   const [isCreating, setIsCreating] = useState(false);
+  const [isUploadingCreate, setIsUploadingCreate] = useState(false);
   const [defaultingId, setDefaultingId] = useState<string | null>(null);
   const [generatingAnglesId, setGeneratingAnglesId] = useState<string | null>(null);
+  const [uploadedCharacterFile, setUploadedCharacterFile] = useState<File | null>(null);
+  const [uploadedCharacterPreview, setUploadedCharacterPreview] = useState<string | null>(null);
+  const [characterNameInput, setCharacterNameInput] = useState("");
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
 
@@ -91,6 +95,14 @@ export function VideoCharactersView({ collectionId }: { collectionId: string }) 
     void loadCharacters();
   }, [loadCharacters]);
 
+  useEffect(() => {
+    return () => {
+      if (uploadedCharacterPreview) {
+        URL.revokeObjectURL(uploadedCharacterPreview);
+      }
+    };
+  }, [uploadedCharacterPreview]);
+
   const handleCreate = async () => {
     setIsCreating(true);
     setError("");
@@ -119,6 +131,61 @@ export function VideoCharactersView({ collectionId }: { collectionId: string }) 
       setError(err instanceof Error ? err.message : "Failed to create character.");
     } finally {
       setIsCreating(false);
+    }
+  };
+
+  const handleCreateFromUpload = async () => {
+    if (!uploadedCharacterFile) {
+      setError("Please select an image first.");
+      return;
+    }
+
+    setIsUploadingCreate(true);
+    setError("");
+    setSuccess("");
+
+    try {
+      const formData = new FormData();
+      formData.append("collectionId", collectionId);
+      formData.append("image", uploadedCharacterFile);
+
+      const uploadResponse = await fetch("/api/video-agent/characters/upload", {
+        method: "POST",
+        body: formData,
+      });
+
+      const uploadData = (await uploadResponse.json()) as { imageUrl?: string; error?: string };
+      if (!uploadResponse.ok || !uploadData.imageUrl) {
+        throw new Error(uploadData.error || "Failed to upload character image.");
+      }
+
+      const createResponse = await fetch("/api/video-agent/characters", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          collectionId,
+          reasoningModel,
+          imageGenerationModel: imageModel,
+          setAsDefault: true,
+          referenceImageUrl: uploadData.imageUrl,
+          characterName: characterNameInput.trim() || undefined,
+        }),
+      });
+
+      const createData = (await createResponse.json()) as CharactersResponse;
+      if (!createResponse.ok) {
+        throw new Error(createData.error || "Failed to create character from uploaded image.");
+      }
+
+      setUploadedCharacterFile(null);
+      setUploadedCharacterPreview(null);
+      setCharacterNameInput("");
+      setSuccess("Character created from uploaded image and set as default.");
+      await loadCharacters();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to create character from uploaded image.");
+    } finally {
+      setIsUploadingCreate(false);
     }
   };
 
@@ -256,10 +323,51 @@ export function VideoCharactersView({ collectionId }: { collectionId: string }) 
               </div>
             </div>
 
-            <Button variant="primary" onClick={handleCreate} isLoading={isCreating}>
-              <Sparkles className="mr-2 h-4 w-4" />
-              Create Character
-            </Button>
+            <div className="grid gap-3 md:grid-cols-2">
+              <div className="space-y-1">
+                <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Character name (optional)</p>
+                <input
+                  type="text"
+                  value={characterNameInput}
+                  onChange={(event) => setCharacterNameInput(event.target.value)}
+                  placeholder="e.g. Ayesha Lifestyle"
+                  className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800 outline-none transition focus:border-rose-400 focus:ring-2 focus:ring-rose-200"
+                />
+              </div>
+              <div className="space-y-1">
+                <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Upload reference image</p>
+                <input
+                  type="file"
+                  accept="image/*"
+                  onChange={(event) => {
+                    const file = event.target.files?.[0] || null;
+                    setUploadedCharacterFile(file);
+                    setUploadedCharacterPreview(file ? URL.createObjectURL(file) : null);
+                  }}
+                  className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800 file:mr-3 file:rounded-md file:border-0 file:bg-rose-50 file:px-2 file:py-1 file:text-xs file:font-medium file:text-rose-700"
+                />
+              </div>
+            </div>
+
+            {uploadedCharacterPreview ? (
+              <img src={uploadedCharacterPreview} alt="Uploaded character preview" className="h-36 w-28 rounded-lg border border-slate-200 object-cover" />
+            ) : null}
+
+            <div className="flex flex-wrap gap-2">
+              <Button variant="primary" onClick={handleCreate} isLoading={isCreating}>
+                <Sparkles className="mr-2 h-4 w-4" />
+                Create AI Character
+              </Button>
+              <Button
+                variant="outline"
+                onClick={handleCreateFromUpload}
+                isLoading={isUploadingCreate}
+                disabled={!uploadedCharacterFile}
+              >
+                <Upload className="mr-2 h-4 w-4" />
+                Create from Uploaded Image
+              </Button>
+            </div>
 
             {error ? <p className="text-sm text-rose-700">{error}</p> : null}
             {success ? <p className="text-sm text-emerald-700">{success}</p> : null}
