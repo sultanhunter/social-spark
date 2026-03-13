@@ -6,6 +6,7 @@ import { uploadToR2, generateMediaKey } from "./r2";
 import { getSlideImageSpec } from "./utils";
 import type { SlideGenerationPlan } from "./gemini";
 import type { UIGenerationMode } from "./gemini";
+import type { VisualVariant } from "./gemini";
 import {
   DEFAULT_IMAGE_GENERATION_MODEL,
   type ImageGenerationModel,
@@ -30,6 +31,8 @@ interface GenerateImageOptions {
   referenceImageUrls?: string[];
   characterReferenceImageUrls?: string[];
   characterLockDescriptor?: string;
+  visualVariant?: VisualVariant;
+  forceCarouselAspect?: boolean;
   imageModel?: ImageGenerationModel;
 }
 
@@ -42,6 +45,8 @@ interface GenerateSlideImagesOptions {
   brandAssets?: BrandAssets;
   uiGenerationMode?: UIGenerationMode;
   referenceImageUrls?: string[];
+  visualVariant?: VisualVariant;
+  forceCarouselAspect?: boolean;
   imageModel?: ImageGenerationModel;
   onSlideComplete?: (update: { slideIndex: number; imageUrl: string }) => Promise<void> | void;
 }
@@ -191,8 +196,12 @@ async function getBrandImageParts(brandAssets?: BrandAssets): Promise<{
   return { logoPart, featureMockupPart };
 }
 
-async function normalizeImageForPlatform(imageBuffer: Buffer, platform: string = "unknown"): Promise<Buffer> {
-  const imageSpec = getSlideImageSpec(platform);
+async function normalizeImageForPlatform(
+  imageBuffer: Buffer,
+  platform: string = "unknown",
+  options?: { forceCarouselAspect?: boolean }
+): Promise<Buffer> {
+  const imageSpec = getSlideImageSpec(platform, { forceCarouselAspect: options?.forceCarouselAspect });
   return sharp(imageBuffer)
     .resize(imageSpec.width, imageSpec.height, {
       fit: "cover",
@@ -223,12 +232,6 @@ function isCharacterAssetPrompt(prompt: string, description: string): boolean {
   );
 }
 
-function isPhotorealAssetPrompt(prompt: string): boolean {
-  return /(woman|female|girl|lady|muslimah|hijab|character|person|portrait|face|food|meal|juice|drink|bedroom|room|desk|table|kitchen|home|lifestyle|ugc|selfie|camera|photo)/i.test(
-    prompt.toLowerCase()
-  );
-}
-
 function shouldAttachBrandVisualRefs(prompt: string): boolean {
   return /(app ui|ui mockup|app mockup|phone mockup|screen mockup|dashboard|interface|logo placement|logo lockup|product shot of app)/i.test(
     prompt.toLowerCase()
@@ -255,13 +258,15 @@ export async function generateImage(
     referenceImageUrls = [],
     characterReferenceImageUrls = [],
     characterLockDescriptor,
+    visualVariant = "brand_optimized",
+    forceCarouselAspect = false,
     imageModel = DEFAULT_IMAGE_GENERATION_MODEL,
   } = options;
 
   const supportsInlineImageContext = !isImagenPredictModel(imageModel);
-  const imageSpec = getSlideImageSpec(platform || "unknown");
-  const photorealAsset = isPhotorealAssetPrompt(assetPromptText);
-  const attachBrandVisualRefs = shouldAttachBrandVisualRefs(assetPromptText);
+  const imageSpec = getSlideImageSpec(platform || "unknown", { forceCarouselAspect });
+  const attachBrandVisualRefs =
+    visualVariant === "brand_optimized" && shouldAttachBrandVisualRefs(assetPromptText);
   const { logoPart, featureMockupPart } = supportsInlineImageContext
     ? await getBrandImageParts(brandAssets)
     : { logoPart: null, featureMockupPart: null };
@@ -284,8 +289,11 @@ BRAND TONE GUIDELINES:
 - Brand/app name: ${brandAssets.appName || "N/A"}
 - Primary brand color: ${brandAssets.primaryColorHex || "N/A"}
 - Brand gradient: ${gradientStr}
-- Keep branding subtle inside scene styling. Do not turn people into mascots or branded characters.
-- Use warm pink-to-blush tones only as gentle accents in lighting/props when natural.
+- ${
+      visualVariant === "ugc_real"
+        ? "Keep branding subtle and secondary. Never transform people into mascots/cartoons."
+        : "You may use stronger brand expression, mascot-like style, and branded gradient accents when it improves output."
+    }
 - If generating a mockup or UI screenshot asset, style it based on brand context.
 `
     : "";
@@ -310,7 +318,7 @@ CHARACTER CONTINUITY RULES:
     ? "- Keep the same character identity anchored by the provided character reference image."
     : "- Do NOT copy source people, products, logos, or scene details.";
 
-  const realismRules = photorealAsset
+  const realismRules = visualVariant === "ugc_real"
     ? `
 REALISM RULES:
 - Generate a photorealistic lifestyle photograph.
@@ -319,6 +327,19 @@ REALISM RULES:
 - Use a real environment background (bedroom/home/kitchen/table etc. as implied by prompt), not plain white studio backdrop.
 `
     : "";
+
+  const variantRules =
+    visualVariant === "ugc_real"
+      ? `
+VISUAL VARIANT: UGC_REAL
+- Prioritize authentic user-generated photo style over branded polish.
+- Keep color grading natural and understated.
+`
+      : `
+VISUAL VARIANT: BRAND_OPTIMIZED
+- You may use polished art direction and stronger brand styling.
+- Stylized/3D/mascot aesthetics are allowed only when aligned with prompt intent.
+`;
 
   const prompt = `Generate ONE clean visual design asset image. This will be used as a background or visual element inside a slide that a designer will assemble in Figma.
 
@@ -333,6 +354,7 @@ STYLE REFERENCE:
 
 ${characterLockRules}
 ${realismRules}
+${variantRules}
 
 CRITICAL OUTPUT RULES:
 - Do NOT render any text, headlines, typography, captions, or UI overlays into the image.
@@ -361,7 +383,7 @@ CRITICAL OUTPUT RULES:
     })()
     : await generateImageWithImagenPredict(imageModel, prompt, 1);
 
-  const finalizedBuffer = await normalizeImageForPlatform(generatedBuffer, platform);
+  const finalizedBuffer = await normalizeImageForPlatform(generatedBuffer, platform, { forceCarouselAspect });
   const mimeType = "image/png";
   const extension = "png";
 
@@ -390,15 +412,18 @@ export async function generateSlideImages(
     brandAssets,
     uiGenerationMode,
     referenceImageUrls,
+    visualVariant = "brand_optimized",
+    forceCarouselAspect = false,
     imageModel,
     onSlideComplete,
   } = options;
 
   const images: string[] = [];
   const allAssetPrompts = slidePlans.flatMap((plan) => plan.assetPrompts || []);
-  const firstCharacterAsset = allAssetPrompts.find((asset) =>
-    isCharacterAssetPrompt(asset.prompt, asset.description)
-  );
+  const firstCharacterAsset =
+    visualVariant === "ugc_real"
+      ? allAssetPrompts.find((asset) => isCharacterAssetPrompt(asset.prompt, asset.description))
+      : undefined;
 
   let characterReferenceImageUrl: string | null = null;
   let characterLockDescriptor: string | null = null;
@@ -421,6 +446,8 @@ Create a single-character identity anchor image in a natural lifestyle setting (
       brandAssets,
       uiGenerationMode: "ai_creative",
       referenceImageUrls,
+      visualVariant,
+      forceCarouselAspect,
       imageModel,
       characterLockDescriptor,
     });
@@ -433,7 +460,9 @@ Create a single-character identity anchor image in a natural lifestyle setting (
     if (assetPrompts.length === 0) {
       // No asset prompts for this slide — generate a default branded background
       const imageUrl = await generateImage(
-        "Clean abstract background with soft pink-to-blush gradients, suitable as a design asset for a social slide.",
+        visualVariant === "ugc_real"
+          ? "Photorealistic natural lifestyle background scene for a social slide, no text, no logos."
+          : "Clean abstract background with soft pink-to-blush gradients, suitable as a design asset for a social slide.",
         {
           collectionId,
           postId,
@@ -444,6 +473,8 @@ Create a single-character identity anchor image in a natural lifestyle setting (
           brandAssets,
           uiGenerationMode,
           referenceImageUrls,
+          visualVariant,
+          forceCarouselAspect,
           imageModel,
         }
       );
@@ -471,6 +502,8 @@ Create a single-character identity anchor image in a natural lifestyle setting (
         brandAssets,
         uiGenerationMode,
         referenceImageUrls,
+        visualVariant,
+        forceCarouselAspect,
         characterReferenceImageUrls:
           isCharacterAsset && characterReferenceImageUrl ? [characterReferenceImageUrl] : [],
         characterLockDescriptor: isCharacterAsset ? characterLockDescriptor || undefined : undefined,

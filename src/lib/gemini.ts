@@ -17,6 +17,7 @@ export interface NicheRelevanceResult {
 
 export type AdaptationMode = "app_context" | "variant_only";
 export type UIGenerationMode = "reference_exact" | "ai_creative";
+export type VisualVariant = "ugc_real" | "brand_optimized";
 
 export interface SlideGenerationPlan {
   headline: string;
@@ -413,13 +414,33 @@ export async function generateSlideDesignPlans(
   brandPrimaryColor: string,
   brandGradient: string[],
   appName: string,
+  visualVariant: VisualVariant = "brand_optimized",
+  forceCarouselAspect = false,
   reasoningModel: ReasoningModel = DEFAULT_REASONING_MODEL
 ): Promise<SlideGenerationPlan[]> {
   const model = genAI.getGenerativeModel({ model: reasoningModel });
-  const imageSpec = getSlideImageSpec(platform);
+  const imageSpec = getSlideImageSpec(platform, { forceCarouselAspect });
   const gradientStr = brandGradient.join(" → ");
 
   const imageParts = await buildReferenceImageParts(originalImageUrls);
+
+  const variantGuidelines =
+    visualVariant === "ugc_real"
+      ? `
+VISUAL VARIANT MODE: UGC_REAL
+- Preserve authentic UGC/lifestyle realism from source slides.
+- Photoreal only: no cartoon, no 3D mascot, no illustration look.
+- Keep natural environments and textures (home/table/room/real-life scenes), not studio-white cutout look unless explicitly needed for a specific small icon.
+- If a recurring person is implied, prompts should support one consistent woman identity across slides.
+- Branding should be subtle and secondary (small accents), not a dominant visual language.
+`
+      : `
+VISUAL VARIANT MODE: BRAND_OPTIMIZED
+- Keep source layout/composition logic, but optimize visual language toward our app brand identity.
+- You may use stylized/3D mascot visuals, branded gradients, and stronger brand accents.
+- Productized, polished brand-forward aesthetics are allowed.
+- Person consistency can be maintained when needed, but brand expression is primary.
+`;
 
   const prompt = `You are an expert art director and Figma designer. I am showing you ${imageParts.length} original carousel slide images and a rewritten script for our brand.
 
@@ -448,12 +469,13 @@ BRAND IDENTITY:
 - Brand Gradient: ${gradientStr}
 - Target size: ${imageSpec.width}×${imageSpec.height} (${imageSpec.aspectRatio})
 
+${variantGuidelines}
+
 RULES:
 - Look at each original slide image carefully to understand its layout, composition, typography placement, visual hierarchy, and style.
 - Your figmaInstructions should recreate that SAME style/layout but adapted with our brand colors (${gradientStr}), our copy from the script, and our logo.
 - figmaInstructions must include the exact on-slide copy for that slide (full script content, not placeholders). Include one explicit step that lists the exact text to place.
 - assetPrompts must NEVER include text/typography in the generated images. Assets are purely visual elements.
-- If source slides are UGC/lifestyle/real-photo style, assetPrompts MUST stay photoreal and natural (phone-camera look), not cartoon/3D/illustration.
 - Use plain white/solid backgrounds ONLY for explicit cutout/icon/sticker assets. For scene assets (people, food, table, room, lifestyle), require natural real environments.
 - Match the number of slides in the script to the provided images. If the script has more slides than images, use the last image's style for extra slides.
 

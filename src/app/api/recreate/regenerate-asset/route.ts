@@ -71,6 +71,11 @@ function isCharacterAssetPrompt(prompt: string): boolean {
   );
 }
 
+function asVisualVariant(value: unknown): "ugc_real" | "brand_optimized" | null {
+  if (value === "ugc_real" || value === "brand_optimized") return value;
+  return null;
+}
+
 type UgcCharacterRow = {
   id: string;
   prompt_template: string | null;
@@ -89,6 +94,7 @@ export async function POST(request: NextRequest) {
     const isFinalAsset = body.isFinalAsset === true;
     const explicitAppName = asNonEmptyString(body.appName);
     const selectedCharacterId = asNonEmptyString(body.characterId);
+    const requestedVisualVariant = asVisualVariant(body.visualVariant);
     const imageGenerationModel = isImageGenerationModel(body.imageGenerationModel)
       ? body.imageGenerationModel
       : DEFAULT_IMAGE_GENERATION_MODEL;
@@ -119,7 +125,7 @@ export async function POST(request: NextRequest) {
 
     const { data: originalPost, error: postError } = await supabase
       .from("saved_posts")
-      .select("platform, media_urls, thumbnail_url")
+      .select("platform, post_type, media_urls, thumbnail_url")
       .eq("id", postId)
       .eq("collection_id", collectionId)
       .single();
@@ -173,6 +179,7 @@ export async function POST(request: NextRequest) {
       : [];
 
     const platform = asNonEmptyString(originalPost?.platform) || "unknown";
+    const forceCarouselAspect = originalPost?.post_type === "image_slides";
     const thumbnailUrl = asNonEmptyString(originalPost?.thumbnail_url);
     const referenceImageUrls = [
       ...normalizeMediaUrls(originalPost?.media_urls),
@@ -181,7 +188,14 @@ export async function POST(request: NextRequest) {
 
     const appContext = getCollectionAppContext(collection);
     const appName = asNonEmptyString(collection?.app_name) || explicitAppName || appContext || "Social Spark";
-    const isCharacterAsset = isCharacterAssetPrompt(assetPrompt);
+    const previousGenerationState =
+      recreatedPost.generation_state && typeof recreatedPost.generation_state === "object"
+        ? (recreatedPost.generation_state as Record<string, unknown>)
+        : {};
+    const persistedVisualVariant = asVisualVariant(previousGenerationState.visualVariant);
+    const visualVariant = requestedVisualVariant || persistedVisualVariant || "brand_optimized";
+
+    const isCharacterAsset = visualVariant === "ugc_real" && isCharacterAssetPrompt(assetPrompt);
     const firstExistingGenerated = generatedMediaUrls.find(
       (item): item is string => typeof item === "string" && item.trim().length > 0
     );
@@ -255,6 +269,8 @@ export async function POST(request: NextRequest) {
       imageModel: imageGenerationModel,
       uiGenerationMode: "ai_creative",
       referenceImageUrls,
+      visualVariant,
+      forceCarouselAspect,
       characterReferenceImageUrls,
       characterLockDescriptor,
       brandAssets: {
@@ -277,17 +293,16 @@ export async function POST(request: NextRequest) {
     ).length;
     const effectiveTotal = totalAssets || nextMediaUrls.length;
     const status = isFinalAsset || generatedCount >= effectiveTotal ? "completed" : "generating";
-    const previousGenerationState =
-      recreatedPost.generation_state && typeof recreatedPost.generation_state === "object"
-        ? (recreatedPost.generation_state as Record<string, unknown>)
-        : {};
-
     const updatePayload: Record<string, unknown> = {
       generated_media_urls: nextMediaUrls,
       status,
       generation_state: {
         ...previousGenerationState,
-        characterId: studioCharacter?.id || selectedCharacterId || previousGenerationState.characterId || null,
+        visualVariant,
+        characterId:
+          visualVariant === "ugc_real"
+            ? studioCharacter?.id || selectedCharacterId || previousGenerationState.characterId || null
+            : null,
         generatedAssets: generatedCount,
         totalAssets: effectiveTotal,
         lastAssetIndex: assetIndex,

@@ -11,6 +11,7 @@ import {
   type AdaptationMode,
   type SlideGenerationPlan,
   type UIGenerationMode,
+  type VisualVariant,
 } from "@/lib/gemini";
 import {
   DEFAULT_REASONING_MODEL,
@@ -30,6 +31,7 @@ interface ScriptVersion {
   label: string;
   setType: "variant_only" | "app_context" | "hook_strategy";
   adaptationMode: AdaptationMode;
+  visualVariant: VisualVariant;
   usesAppContext: boolean;
   uiGenerationMode: UIGenerationMode;
   followsReferenceLayout: boolean;
@@ -61,6 +63,17 @@ function buildHookVersionLabel(adaptationMode: AdaptationMode): string {
   return adaptationMode === "app_context"
     ? "Hook Strategy (App Context)"
     : "Hook Strategy (Original Topic)";
+}
+
+function buildVisualVariantLabel(visualVariant: VisualVariant): string {
+  return visualVariant === "ugc_real" ? "UGC Real" : "Brand Optimized";
+}
+
+function parseVisualVariantPreference(value: unknown): VisualVariant | "both" | null {
+  if (value === "ugc_real" || value === "brand_optimized" || value === "both") {
+    return value;
+  }
+  return null;
 }
 
 function deriveSetType(versionId: string, adaptationMode: AdaptationMode): "variant_only" | "app_context" | "hook_strategy" {
@@ -196,6 +209,16 @@ export async function POST(request: NextRequest) {
       platform: post.platform,
       postType: post.post_type,
     };
+    const forceCarouselAspect = post.post_type === "image_slides";
+    const requestedVisualVariantPreference = parseVisualVariantPreference(body.visualVariantPreference);
+    const supportsVisualVariants = post.post_type === "image_slides";
+    const visualVariantPreference: VisualVariant | "both" = supportsVisualVariants
+      ? requestedVisualVariantPreference || "both"
+      : "brand_optimized";
+    const visualVariantsToGenerate: VisualVariant[] =
+      visualVariantPreference === "both"
+        ? ["ugc_real", "brand_optimized"]
+        : [visualVariantPreference];
 
     const adaptationModes: AdaptationMode[] = isIslamic
       ? ["variant_only", "app_context"]
@@ -252,7 +275,18 @@ export async function POST(request: NextRequest) {
 
     // ---------- Step 3: Per-slide Figma instructions + asset prompts ----------
     console.log("[script] Step 3: Generating per-slide design plans...");
-    let versions: ScriptVersion[] = [];
+    type BaseScriptVersion = {
+      id: string;
+      label: string;
+      setType: "variant_only" | "app_context" | "hook_strategy";
+      adaptationMode: AdaptationMode;
+      usesAppContext: boolean;
+      uiGenerationMode: UIGenerationMode;
+      followsReferenceLayout: boolean;
+      script: string;
+    };
+
+    let baseVersions: BaseScriptVersion[] = [];
 
     if (includeHookStrategy) {
       const hookSourceScript = scriptMap.get(hookSourceMode);
@@ -273,17 +307,7 @@ export async function POST(request: NextRequest) {
         reasoningModel,
       });
 
-      const hookSlidePlans = await generateSlideDesignPlans(
-        selectedReferenceImageUrls,
-        hookScript,
-        post.platform,
-        APP_BRAND_PRIMARY_COLOR,
-        APP_BRAND_GRADIENT,
-        appName,
-        reasoningModel
-      );
-
-      versions = [
+      baseVersions = [
         {
           id: `${hookSourceMode}_hook_strategy`,
           label: buildHookVersionLabel(hookSourceMode),
@@ -293,26 +317,14 @@ export async function POST(request: NextRequest) {
           uiGenerationMode: "ai_creative",
           followsReferenceLayout: false,
           script: hookScript,
-          slidePlans: hookSlidePlans,
         },
       ];
     } else {
-      versions = await Promise.all(
-        adaptationModes.map(async (mode): Promise<ScriptVersion> => {
+      baseVersions = adaptationModes.map((mode): BaseScriptVersion => {
           const modeScript = scriptMap.get(mode);
           if (!modeScript) {
             throw new Error(`Missing generated script for adaptation mode: ${mode}`);
           }
-
-          const slidePlans = await generateSlideDesignPlans(
-            selectedReferenceImageUrls,
-            modeScript,
-            post.platform,
-            APP_BRAND_PRIMARY_COLOR,
-            APP_BRAND_GRADIENT,
-            appName,
-            reasoningModel
-          );
 
           return {
             id: mode,
@@ -323,11 +335,39 @@ export async function POST(request: NextRequest) {
             uiGenerationMode: "ai_creative" as UIGenerationMode,
             followsReferenceLayout: false,
             script: modeScript,
-            slidePlans,
           };
-        })
-      );
+        });
     }
+
+    const versions = await Promise.all(
+      baseVersions.flatMap((baseVersion) =>
+        visualVariantsToGenerate.map(async (visualVariant) => {
+          const slidePlans = await generateSlideDesignPlans(
+            selectedReferenceImageUrls,
+            baseVersion.script,
+            post.platform,
+            APP_BRAND_PRIMARY_COLOR,
+            APP_BRAND_GRADIENT,
+            appName,
+            visualVariant,
+            forceCarouselAspect,
+            reasoningModel
+          );
+
+          const needsVisualSuffix = supportsVisualVariants || visualVariantsToGenerate.length > 1;
+
+          return {
+            ...baseVersion,
+            id: needsVisualSuffix ? `${baseVersion.id}__${visualVariant}` : baseVersion.id,
+            label: needsVisualSuffix
+              ? `${baseVersion.label} · ${buildVisualVariantLabel(visualVariant)}`
+              : baseVersion.label,
+            visualVariant,
+            slidePlans,
+          } satisfies ScriptVersion;
+        })
+      )
+    );
 
     if (versions.length === 0) {
       throw new Error("No script version was generated.");
@@ -348,8 +388,9 @@ export async function POST(request: NextRequest) {
           generation_state: {
             setType: version.setType,
             adaptationMode: version.adaptationMode,
+            visualVariant: version.visualVariant,
             versionLabel: version.label,
-            characterId: selectedCharacterId,
+            characterId: version.visualVariant === "ugc_real" ? selectedCharacterId : null,
           },
           status: "draft",
         };
@@ -391,6 +432,7 @@ export async function POST(request: NextRequest) {
       slidePlans,
       versions: versionsWithRecreatedIds,
       primaryVersionId: primaryVersionWithId.id,
+      visualVariantPreference,
       canRecreate,
       isIslamic,
       isPregnancyOrPeriodRelated,

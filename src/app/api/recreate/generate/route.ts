@@ -1,7 +1,12 @@
 import path from "path";
 import { NextRequest, NextResponse } from "next/server";
 import { generateSlideDesignPlans } from "@/lib/gemini";
-import type { AdaptationMode, SlideGenerationPlan, UIGenerationMode } from "@/lib/gemini";
+import type {
+  AdaptationMode,
+  SlideGenerationPlan,
+  UIGenerationMode,
+  VisualVariant,
+} from "@/lib/gemini";
 import { generateSlideImages } from "@/lib/gemini-image";
 import {
   DEFAULT_IMAGE_GENERATION_MODEL,
@@ -72,6 +77,11 @@ function asSetType(value: unknown): "variant_only" | "app_context" | "hook_strat
   return null;
 }
 
+function asVisualVariant(value: unknown): VisualVariant | null {
+  if (value === "ugc_real" || value === "brand_optimized") return value;
+  return null;
+}
+
 interface GenerationVersionInput {
   id: string;
   label: string;
@@ -80,8 +90,10 @@ interface GenerationVersionInput {
   usesAppContext: boolean;
   uiGenerationMode: UIGenerationMode;
   followsReferenceLayout: boolean;
+  visualVariant: VisualVariant;
   script: string;
   slidePlans: SlideGenerationPlan[];
+  characterId?: string;
   recreatedPostId?: string;
 }
 
@@ -168,6 +180,7 @@ export async function POST(request: NextRequest) {
     const postId = asNonEmptyString(body.postId);
     const appName = asNonEmptyString(body.appName);
     const recreatedPostId = asNonEmptyString(body.recreatedPostId);
+    const selectedCharacterId = asNonEmptyString(body.characterId);
     const imageGenerationModel = isImageGenerationModel(body.imageGenerationModel)
       ? body.imageGenerationModel
       : DEFAULT_IMAGE_GENERATION_MODEL;
@@ -195,7 +208,7 @@ export async function POST(request: NextRequest) {
 
     const { data: originalPost, error: postError } = await supabase
       .from("saved_posts")
-      .select("platform, media_urls, thumbnail_url")
+      .select("platform, post_type, media_urls, thumbnail_url")
       .eq("id", postId)
       .eq("collection_id", collectionId)
       .single();
@@ -211,6 +224,7 @@ export async function POST(request: NextRequest) {
     }
 
     const platform = asNonEmptyString(originalPost?.platform) || "unknown";
+    const forceCarouselAspect = originalPost?.post_type === "image_slides";
     const appContext = getCollectionAppContext(collection);
     const thumbnailUrl = asNonEmptyString(originalPost?.thumbnail_url);
     const referenceImageUrls = [
@@ -239,8 +253,10 @@ export async function POST(request: NextRequest) {
           usesAppContext: adaptationMode === "app_context",
           uiGenerationMode: asUIGenerationMode(item.uiGenerationMode) || "ai_creative",
           followsReferenceLayout: asUIGenerationMode(item.uiGenerationMode) === "reference_exact",
+          visualVariant: asVisualVariant(item.visualVariant) || "brand_optimized",
           script: versionScript,
           slidePlans: sanitizeSlidePlans(item.slidePlans),
+          characterId: asNonEmptyString(item.characterId) || selectedCharacterId || undefined,
           recreatedPostId: asNonEmptyString(item.recreatedPostId) || undefined,
         };
       })
@@ -255,8 +271,10 @@ export async function POST(request: NextRequest) {
         usesAppContext: fallbackMode === "app_context",
         uiGenerationMode: "ai_creative",
         followsReferenceLayout: false,
+        visualVariant: "brand_optimized",
         script,
         slidePlans: sanitizeSlidePlans(incomingSlidePlans),
+        characterId: selectedCharacterId || undefined,
         recreatedPostId: recreatedPostId || undefined,
       }
       : null;
@@ -297,6 +315,8 @@ export async function POST(request: NextRequest) {
           APP_BRAND_PRIMARY_COLOR,
           APP_BRAND_GRADIENT,
           appName,
+          version.visualVariant,
+          forceCarouselAspect,
           reasoningModel
         );
 
@@ -320,7 +340,9 @@ export async function POST(request: NextRequest) {
           generation_state: {
             setType: version.setType,
             adaptationMode: version.adaptationMode,
+            visualVariant: version.visualVariant,
             versionLabel: version.label,
+            characterId: version.visualVariant === "ugc_real" ? version.characterId || null : null,
           },
           status: "draft",
         };
@@ -387,6 +409,7 @@ export async function POST(request: NextRequest) {
             collectionId,
             postId,
             platform,
+            forceCarouselAspect,
             generationId,
             versionId: version.id,
             imageModel: imageGenerationModel,
@@ -414,6 +437,7 @@ export async function POST(request: NextRequest) {
               }
             },
             uiGenerationMode: version.uiGenerationMode,
+            visualVariant: version.visualVariant,
             referenceImageUrls,
             brandAssets: {
               appName,
@@ -440,6 +464,7 @@ export async function POST(request: NextRequest) {
               id: version.id,
               label: version.label,
               adaptationMode: version.adaptationMode,
+              visualVariant: version.visualVariant,
               usesAppContext: version.usesAppContext,
               uiGenerationMode: version.uiGenerationMode,
               followsReferenceLayout: version.followsReferenceLayout,

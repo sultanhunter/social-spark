@@ -42,10 +42,14 @@ type SlidePlan = {
   assetPrompts: { prompt: string; description: string }[];
 };
 
+type VisualVariant = "ugc_real" | "brand_optimized";
+type VisualVariantPreference = VisualVariant | "both";
+
 type ScriptVersion = {
   id: string;
   label: string;
   adaptationMode: "app_context" | "variant_only";
+  visualVariant: VisualVariant;
   usesAppContext: boolean;
   uiGenerationMode: "reference_exact" | "ai_creative";
   followsReferenceLayout: boolean;
@@ -58,6 +62,7 @@ type GeneratedVersionResult = {
   id: string;
   label: string;
   adaptationMode: "app_context" | "variant_only";
+  visualVariant: VisualVariant;
   usesAppContext: boolean;
   uiGenerationMode: "reference_exact" | "ai_creative";
   followsReferenceLayout: boolean;
@@ -91,6 +96,7 @@ type RecreatedHistoryItem = {
   generation_state?: {
     setType?: string;
     adaptationMode?: string;
+    visualVariant?: VisualVariant;
     versionLabel?: string;
     characterId?: string;
     stage?: string;
@@ -148,6 +154,10 @@ function isUIGenerationMode(value: unknown): value is "reference_exact" | "ai_cr
   return value === "reference_exact" || value === "ai_creative";
 }
 
+function isVisualVariant(value: unknown): value is VisualVariant {
+  return value === "ugc_real" || value === "brand_optimized";
+}
+
 function sanitizeScriptVersions(payload: unknown): ScriptVersion[] {
   if (!Array.isArray(payload)) return [];
 
@@ -174,6 +184,7 @@ function sanitizeScriptVersions(payload: unknown): ScriptVersion[] {
               ? "App Context Rewrite"
               : "Original Topic Variant",
         adaptationMode,
+        visualVariant: isVisualVariant(row.visualVariant) ? row.visualVariant : "brand_optimized",
         usesAppContext: adaptationMode === "app_context",
         uiGenerationMode: isUIGenerationMode(row.uiGenerationMode) ? row.uiGenerationMode : "ai_creative",
         followsReferenceLayout: isUIGenerationMode(row.uiGenerationMode)
@@ -407,6 +418,7 @@ export function PostDetailView({ postId }: PostDetailViewProps) {
   const [error, setError] = useState("");
   const [reasoningModel, setReasoningModel] = useState(DEFAULT_REASONING_MODEL);
   const [imageGenerationModel, setImageGenerationModel] = useState(DEFAULT_IMAGE_GENERATION_MODEL);
+  const [visualVariantPreference, setVisualVariantPreference] = useState<VisualVariantPreference>("both");
   const [ugcCharacters, setUgcCharacters] = useState<UgcCharacter[]>([]);
   const [selectedUgcCharacterId, setSelectedUgcCharacterId] = useState<string | null>(null);
   const [history, setHistory] = useState<RecreatedHistoryItem[]>([]);
@@ -668,11 +680,13 @@ export function PostDetailView({ postId }: PostDetailViewProps) {
       recreatedPostId: targetRecreatedPostId,
       queue,
       characterId,
+      visualVariant,
       onAssetComplete,
     }: {
       recreatedPostId: string;
       queue: QueuedAsset[];
       characterId?: string | null;
+      visualVariant: VisualVariant;
       onAssetComplete?: (payload: {
         generatedMediaUrls: string[];
         generatedCount: number;
@@ -701,6 +715,7 @@ export function PostDetailView({ postId }: PostDetailViewProps) {
               assetIndex: asset.index,
               assetPrompt: asset.prompt,
               characterId: characterId || null,
+              visualVariant,
               imageGenerationModel,
               reasoningModel,
               totalAssets: queue.length,
@@ -774,10 +789,15 @@ export function PostDetailView({ postId }: PostDetailViewProps) {
     try {
       const slidePlans = Array.isArray(item.slide_plans) ? item.slide_plans : [];
       const queue = buildAssetQueue(slidePlans);
+      const historyVisualVariant: VisualVariant = isVisualVariant(item.generation_state?.visualVariant)
+        ? item.generation_state.visualVariant
+        : "brand_optimized";
       const historyCharacterId =
-        typeof item.generation_state?.characterId === "string"
+        historyVisualVariant === "ugc_real" && typeof item.generation_state?.characterId === "string"
           ? item.generation_state.characterId
-          : selectedUgcCharacterId;
+          : historyVisualVariant === "ugc_real"
+            ? selectedUgcCharacterId
+            : null;
 
       setHistory((prev) =>
         prev.map((historyItem) =>
@@ -795,6 +815,7 @@ export function PostDetailView({ postId }: PostDetailViewProps) {
         recreatedPostId: item.id,
         queue,
         characterId: historyCharacterId,
+        visualVariant: historyVisualVariant,
         onAssetComplete: ({ generatedMediaUrls: urls }) => {
           setHistory((prev) =>
             prev.map((historyItem) =>
@@ -857,10 +878,15 @@ export function PostDetailView({ postId }: PostDetailViewProps) {
     setError("");
 
     try {
+      const historyVisualVariant: VisualVariant = isVisualVariant(item.generation_state?.visualVariant)
+        ? item.generation_state.visualVariant
+        : "brand_optimized";
       const historyCharacterId =
-        typeof item.generation_state?.characterId === "string"
+        historyVisualVariant === "ugc_real" && typeof item.generation_state?.characterId === "string"
           ? item.generation_state.characterId
-          : selectedUgcCharacterId;
+          : historyVisualVariant === "ugc_real"
+            ? selectedUgcCharacterId
+            : null;
 
       const response = await fetch("/api/recreate/regenerate-asset", {
         method: "POST",
@@ -873,6 +899,7 @@ export function PostDetailView({ postId }: PostDetailViewProps) {
           assetIndex,
           assetPrompt: trimmedPrompt,
           characterId: historyCharacterId || null,
+          visualVariant: historyVisualVariant,
           imageGenerationModel,
           reasoningModel,
         }),
@@ -1018,6 +1045,7 @@ export function PostDetailView({ postId }: PostDetailViewProps) {
     setInstagramResultBySetId({});
     setGeneratingHistoryBySetId({});
     setRegeneratingHistoryAssetIds({});
+    setVisualVariantPreference(selectedPost.post_type === "image_slides" ? "both" : "brand_optimized");
 
     if (selectedPost.media_urls?.length) {
       setSelectedReferenceImages(selectedPost.media_urls);
@@ -1072,7 +1100,8 @@ export function PostDetailView({ postId }: PostDetailViewProps) {
           collectionId: activeCollection.id,
           referenceImageUrls: selectedReferenceImages,
           includeHookStrategy: mode === "hook_strategy",
-          characterId: selectedUgcCharacterId,
+          characterId: shouldUseCharacterLock ? selectedUgcCharacterId : null,
+          visualVariantPreference,
           reasoningModel,
         }),
       });
@@ -1119,6 +1148,7 @@ export function PostDetailView({ postId }: PostDetailViewProps) {
               id: "fallback",
               label: "Generated Script",
               adaptationMode: fallbackMode,
+              visualVariant: "brand_optimized",
               usesAppContext: fallbackMode === "app_context",
               uiGenerationMode: "ai_creative",
               followsReferenceLayout: false,
@@ -1177,6 +1207,7 @@ export function PostDetailView({ postId }: PostDetailViewProps) {
           id: version.id,
           label: version.label,
           adaptationMode: version.adaptationMode,
+          visualVariant: version.visualVariant,
           usesAppContext: version.usesAppContext,
           uiGenerationMode: version.uiGenerationMode,
           followsReferenceLayout: version.followsReferenceLayout,
@@ -1207,7 +1238,8 @@ export function PostDetailView({ postId }: PostDetailViewProps) {
         const { failures: versionFailures } = await generateAssetsSequential({
           recreatedPostId: version.recreatedPostId,
           queue,
-          characterId: selectedUgcCharacterId,
+          characterId: version.visualVariant === "ugc_real" ? selectedUgcCharacterId : null,
+          visualVariant: version.visualVariant,
           onAssetComplete: ({ generatedMediaUrls, generatedCount, totalAssets: versionTotal, assetIndex }) => {
             completedAssets += 1;
             const currentAsset = queue.find((item) => item.index === assetIndex);
@@ -1288,6 +1320,7 @@ export function PostDetailView({ postId }: PostDetailViewProps) {
   };
 
   const isRecreationBlocked = Boolean(nicheState && !nicheState.canRecreate);
+  const shouldUseCharacterLock = visualVariantPreference !== "brand_optimized";
 
   const generationButtonConfig =
     step === "prepare"
@@ -1536,6 +1569,30 @@ export function PostDetailView({ postId }: PostDetailViewProps) {
               </div>
 
               <div className="space-y-2">
+                <p className="text-sm font-semibold text-slate-800">Visual Variant Mode</p>
+                <select
+                  value={visualVariantPreference}
+                  onChange={(event) => {
+                    const value = event.target.value as VisualVariantPreference;
+                    if (value === "ugc_real" || value === "brand_optimized" || value === "both") {
+                      setVisualVariantPreference(value);
+                    }
+                  }}
+                  disabled={selectedPost.post_type !== "image_slides"}
+                  className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700 outline-none transition focus:border-rose-400 focus:ring-2 focus:ring-rose-200"
+                >
+                  <option value="both">Both (UGC Real + Brand Optimized)</option>
+                  <option value="ugc_real">UGC Real only</option>
+                  <option value="brand_optimized">Brand Optimized only</option>
+                </select>
+                <p className="text-xs text-slate-500">
+                  {selectedPost.post_type === "image_slides"
+                    ? "UGC Real keeps photoreal style; Brand Optimized applies app theme and can use mascot/3D styling."
+                    : "Visual variant switching is only available for image slides."}
+                </p>
+              </div>
+
+              <div className="space-y-2">
                 <div className="flex items-center justify-between gap-2">
                   <p className="text-sm font-semibold text-slate-800">Character Studio Lock (Optional)</p>
                   <Button
@@ -1549,6 +1606,7 @@ export function PostDetailView({ postId }: PostDetailViewProps) {
                 <select
                   value={selectedUgcCharacterId || ""}
                   onChange={(event) => setSelectedUgcCharacterId(event.target.value || null)}
+                  disabled={!shouldUseCharacterLock}
                   className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700 outline-none transition focus:border-rose-400 focus:ring-2 focus:ring-rose-200"
                 >
                   <option value="">No character lock</option>
@@ -1560,7 +1618,9 @@ export function PostDetailView({ postId }: PostDetailViewProps) {
                   ))}
                 </select>
                 <p className="text-xs text-slate-500">
-                  When selected, all character-style assets will reuse this Character Studio identity.
+                  {shouldUseCharacterLock
+                    ? "When selected, all UGC-real character assets will reuse this Character Studio identity."
+                    : "Character lock is disabled in Brand Optimized mode."}
                 </p>
               </div>
 
@@ -1644,6 +1704,9 @@ export function PostDetailView({ postId }: PostDetailViewProps) {
                         {activeVersion.adaptationMode}
                       </Badge>
                       <Badge variant="default">
+                        {activeVersion.visualVariant === "ugc_real" ? "UGC Real" : "Brand Optimized"}
+                      </Badge>
+                      <Badge variant="default">
                         {activeVersion.uiGenerationMode === "reference_exact" ? "Exact Source UI" : "AI Creative UI"}
                       </Badge>
                       <Badge variant="default">{activeVersion.slidePlans.length} slides planned</Badge>
@@ -1703,6 +1766,9 @@ export function PostDetailView({ postId }: PostDetailViewProps) {
                       <div key={result.id} className="space-y-3 rounded-xl border border-slate-200 bg-slate-50 p-4">
                         <div className="flex flex-wrap items-center gap-2">
                           <Badge variant={result.usesAppContext ? "success" : "default"}>{result.label}</Badge>
+                          <Badge variant="default">
+                            {result.visualVariant === "ugc_real" ? "UGC Real" : "Brand Optimized"}
+                          </Badge>
                           <Badge variant="default">
                             {result.uiGenerationMode === "reference_exact" ? "Exact Source UI" : "AI Creative UI"}
                           </Badge>
@@ -1886,12 +1952,18 @@ export function PostDetailView({ postId }: PostDetailViewProps) {
                     const instagramResult = instagramResultBySetId[captionKey];
                     const generatedCount = item.generated_media_urls?.length || 0;
                     const historySetType = inferHistorySetType(item);
+                    const historyVisualVariant: VisualVariant = isVisualVariant(item.generation_state?.visualVariant)
+                      ? item.generation_state.visualVariant
+                      : "brand_optimized";
 
                     return (
                       <div key={item.id} className="rounded-xl border border-slate-200 bg-slate-50 p-4">
                         <div className="mb-3 flex flex-wrap items-center gap-2">
                           <Badge variant={statusBadgeVariant(item.status)}>{item.status}</Badge>
                           <Badge variant="default">{setTypeLabel(historySetType)}</Badge>
+                          <Badge variant="default">
+                            {historyVisualVariant === "ugc_real" ? "UGC Real" : "Brand Optimized"}
+                          </Badge>
                           <Badge variant="default">{item.generated_media_urls?.length || 0} images</Badge>
                           <span className="text-xs text-slate-500">Created {formatDate(item.created_at)}</span>
                           <div className="ml-auto flex flex-wrap items-center gap-2">

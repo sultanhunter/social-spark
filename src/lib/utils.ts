@@ -21,6 +21,10 @@ export interface SlideImageSpec {
   aspectRatio: string;
 }
 
+interface SlideImageSpecOptions {
+  forceCarouselAspect?: boolean;
+}
+
 export function extractPlatform(url: string): SocialPlatform {
   const normalized = url.trim().toLowerCase();
 
@@ -40,7 +44,11 @@ export function extractPlatform(url: string): SocialPlatform {
   return "unknown";
 }
 
-export function getSlideImageSpec(platform: string): SlideImageSpec {
+export function getSlideImageSpec(platform: string, options?: SlideImageSpecOptions): SlideImageSpec {
+  if (options?.forceCarouselAspect) {
+    return { width: 1080, height: 1350, aspectRatio: "4:5" };
+  }
+
   switch (platform) {
     case "instagram":
       return { width: 1080, height: 1350, aspectRatio: "4:5" };
