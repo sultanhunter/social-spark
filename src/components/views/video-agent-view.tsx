@@ -5,7 +5,6 @@ import {
   AlertCircle,
   ArrowLeft,
   ChevronDown,
-  ChevronRight,
   Clapperboard,
   Clock,
   ExternalLink,
@@ -33,6 +32,13 @@ import {
 } from "@xyflow/react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/modal";
 import {
   DEFAULT_REASONING_MODEL,
   REASONING_MODELS,
@@ -207,18 +213,6 @@ function getVideoFormatAnalysis(video: LibraryVideo): Record<string, unknown> | 
   return formatAnalysis as Record<string, unknown>;
 }
 
-function getVideoAnalysisMethod(video: LibraryVideo): string | null {
-  const analysis = getVideoFormatAnalysis(video);
-  const method = analysis?.analysisMethod;
-  return typeof method === "string" ? method : null;
-}
-
-function getVideoFrameCount(video: LibraryVideo): number | null {
-  const analysis = getVideoFormatAnalysis(video);
-  const count = analysis?.sampledFrameCount;
-  return typeof count === "number" && Number.isFinite(count) ? count : null;
-}
-
 function getVideoR2Url(video: LibraryVideo): string | null {
   const analysis = getVideoFormatAnalysis(video);
   const r2Url = analysis?.r2VideoUrl;
@@ -260,7 +254,7 @@ function VideoCanvasNode({ data }: NodeProps<Node<VideoNodeData>>) {
   const isSelected = data.selectedVideoId === data.video.id;
   const isPlaying = data.directMediaUrl && data.playingVideoId === data.video.id;
   const plan = data.plan;
-  const [showPlanDetail, setShowPlanDetail] = useState(false);
+  const [isPlanModalOpen, setIsPlanModalOpen] = useState(false);
 
   return (
     <div className={`w-[260px] rounded-2xl border bg-white p-2.5 shadow-sm ${isSelected ? "border-rose-300 ring-2 ring-rose-100" : "border-slate-200"}`}>
@@ -328,16 +322,9 @@ function VideoCanvasNode({ data }: NodeProps<Node<VideoNodeData>>) {
       </div>
 
       <p className="mt-1.5 truncate text-xs font-semibold text-slate-800">{data.video.title || "Untitled source"}</p>
-      <div className="mt-1 flex flex-wrap items-center gap-1.5">
-        <Badge variant="default" className="max-w-[140px] truncate">{data.formatName}</Badge>
-        <Badge variant="default">{data.video.platform}</Badge>
-        {plan ? <Badge variant="success">Plan</Badge> : null}
-        {(() => {
-          const method = getVideoAnalysisMethod(data.video);
-          const frameCount = getVideoFrameCount(data.video);
-          if (!method) return null;
-          return <Badge variant="default">{method.replace(/_/g, " ")}{typeof frameCount === "number" ? ` (${frameCount})` : ""}</Badge>;
-        })()}
+      <div className="mt-1 flex items-center justify-between gap-2">
+        <p className="truncate text-[11px] text-slate-500">{data.video.platform}</p>
+        {plan ? <Badge variant="success">Plan Ready</Badge> : null}
       </div>
 
       <div className="mt-2 flex items-center justify-between">
@@ -438,131 +425,133 @@ function VideoCanvasNode({ data }: NodeProps<Node<VideoNodeData>>) {
           ) : null}
         </div>
 
-        {/* Recreation plan display */}
+        {/* Recreation plan entry */}
         {plan ? (
-          <div className="mt-2 rounded-lg border border-violet-200 bg-violet-50/50 p-2">
+          <>
             <button
               type="button"
-              onClick={() => setShowPlanDetail((prev) => !prev)}
-              className="nodrag flex w-full items-center justify-between text-left"
+              onClick={() => setIsPlanModalOpen(true)}
+              className="nodrag mt-2 w-full rounded-lg border border-violet-200 bg-violet-50/60 p-2 text-left transition hover:bg-violet-100/70"
             >
               <div className="flex items-center gap-1.5">
                 <FileText className="h-3.5 w-3.5 text-violet-600" />
                 <span className="text-xs font-semibold text-violet-800">Recreation Plan</span>
               </div>
-              <ChevronRight className={`h-3.5 w-3.5 text-violet-500 transition-transform ${showPlanDetail ? "rotate-90" : ""}`} />
+              <p className="mt-1 truncate text-[11px] font-medium text-slate-700">{plan.title}</p>
+              <p className="mt-0.5 text-[10px] text-violet-700">Click to view full plan</p>
             </button>
 
-            <p className="mt-1 text-[11px] font-medium text-slate-700">{plan.title}</p>
+            <Dialog open={isPlanModalOpen} onOpenChange={setIsPlanModalOpen}>
+              <DialogContent className="max-h-[88vh] max-w-3xl overflow-hidden p-0">
+                <DialogHeader className="border-b border-slate-200">
+                  <DialogTitle className="text-base">Recreation Plan</DialogTitle>
+                  <DialogDescription className="line-clamp-2 text-xs text-slate-600">
+                    {plan.title}
+                  </DialogDescription>
+                </DialogHeader>
 
-            <div className={`overflow-hidden transition-all duration-200 ${showPlanDetail ? "mt-2 max-h-[500px]" : "max-h-0"}`}>
-              <div className="max-h-[480px] space-y-2.5 overflow-y-auto pr-1">
-                {/* Strategy & Objective */}
-                <div>
-                  <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">Strategy</p>
-                  <p className="mt-0.5 text-[11px] leading-relaxed text-slate-700">{plan.strategy}</p>
-                </div>
-                <div>
-                  <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">Objective</p>
-                  <p className="mt-0.5 text-[11px] leading-relaxed text-slate-700">{plan.objective}</p>
-                </div>
-
-                {/* Deliverable spec */}
-                {plan.deliverableSpec ? (
+                <div className="max-h-[74vh] space-y-3 overflow-y-auto px-6 pb-6 pt-4">
                   <div>
-                    <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">Deliverable</p>
-                    <div className="mt-0.5 flex flex-wrap gap-1">
-                      {plan.deliverableSpec.duration ? <Badge variant="default">{plan.deliverableSpec.duration}</Badge> : null}
-                      {plan.deliverableSpec.aspectRatio ? <Badge variant="default">{plan.deliverableSpec.aspectRatio}</Badge> : null}
-                      {plan.deliverableSpec.voiceStyle ? <Badge variant="default">{plan.deliverableSpec.voiceStyle}</Badge> : null}
-                      {plan.deliverableSpec.platforms?.map((p) => (
-                        <Badge key={p} variant="default">{p}</Badge>
-                      ))}
-                    </div>
+                    <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">Strategy</p>
+                    <p className="mt-0.5 text-xs leading-relaxed text-slate-700">{plan.strategy}</p>
                   </div>
-                ) : null}
-
-                {/* Script */}
-                {plan.script ? (
                   <div>
-                    <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">Script</p>
-                    {plan.script.hook ? (
-                      <div className="mt-1 rounded border border-amber-200 bg-amber-50 px-2 py-1">
-                        <p className="text-[10px] font-semibold text-amber-700">Hook</p>
-                        <p className="text-[11px] leading-relaxed text-slate-700">{plan.script.hook}</p>
-                      </div>
-                    ) : null}
+                    <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">Objective</p>
+                    <p className="mt-0.5 text-xs leading-relaxed text-slate-700">{plan.objective}</p>
+                  </div>
 
-                    {plan.script.beats?.length > 0 ? (
-                      <div className="mt-1.5 space-y-1">
-                        {plan.script.beats.map((beat, i) => (
-                          <div key={`beat-${beat.timecode}-${i}`} className="rounded border border-slate-200 bg-white px-2 py-1">
-                            <div className="flex items-center gap-1.5">
-                              <Clock className="h-2.5 w-2.5 text-slate-400" />
-                              <span className="text-[10px] font-mono font-medium text-slate-500">{beat.timecode}</span>
+                  {plan.deliverableSpec ? (
+                    <div>
+                      <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">Deliverable</p>
+                      <div className="mt-1 flex flex-wrap gap-1.5">
+                        {plan.deliverableSpec.duration ? <Badge variant="default">{plan.deliverableSpec.duration}</Badge> : null}
+                        {plan.deliverableSpec.aspectRatio ? <Badge variant="default">{plan.deliverableSpec.aspectRatio}</Badge> : null}
+                        {plan.deliverableSpec.voiceStyle ? <Badge variant="default">{plan.deliverableSpec.voiceStyle}</Badge> : null}
+                        {plan.deliverableSpec.platforms?.map((platform) => (
+                          <Badge key={platform} variant="default">{platform}</Badge>
+                        ))}
+                      </div>
+                    </div>
+                  ) : null}
+
+                  {plan.script ? (
+                    <div>
+                      <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">Script</p>
+                      {plan.script.hook ? (
+                        <div className="mt-1 rounded border border-amber-200 bg-amber-50 px-2.5 py-2">
+                          <p className="text-[10px] font-semibold text-amber-700">Hook</p>
+                          <p className="text-xs leading-relaxed text-slate-700">{plan.script.hook}</p>
+                        </div>
+                      ) : null}
+
+                      {plan.script.beats?.length > 0 ? (
+                        <div className="mt-2 space-y-1.5">
+                          {plan.script.beats.map((beat, i) => (
+                            <div key={`beat-${beat.timecode}-${i}`} className="rounded border border-slate-200 bg-white px-2.5 py-2">
+                              <div className="flex items-center gap-1.5">
+                                <Clock className="h-3 w-3 text-slate-400" />
+                                <span className="text-[10px] font-mono font-medium text-slate-500">{beat.timecode}</span>
+                              </div>
+                              {beat.visual ? <p className="mt-0.5 text-xs text-slate-600"><span className="font-semibold text-slate-500">Visual:</span> {beat.visual}</p> : null}
+                              {beat.narration ? <p className="text-xs text-slate-600"><span className="font-semibold text-slate-500">VO:</span> {beat.narration}</p> : null}
+                              {beat.onScreenText ? <p className="text-xs text-slate-600"><span className="font-semibold text-slate-500">Text:</span> {beat.onScreenText}</p> : null}
+                              {beat.editNote ? <p className="text-xs italic text-slate-400">{beat.editNote}</p> : null}
                             </div>
-                            {beat.visual ? <p className="mt-0.5 text-[11px] text-slate-600"><span className="font-semibold text-slate-500">Visual:</span> {beat.visual}</p> : null}
-                            {beat.narration ? <p className="text-[11px] text-slate-600"><span className="font-semibold text-slate-500">VO:</span> {beat.narration}</p> : null}
-                            {beat.onScreenText ? <p className="text-[11px] text-slate-600"><span className="font-semibold text-slate-500">Text:</span> {beat.onScreenText}</p> : null}
-                            {beat.editNote ? <p className="text-[11px] italic text-slate-400">{beat.editNote}</p> : null}
+                          ))}
+                        </div>
+                      ) : null}
+
+                      {plan.script.cta ? (
+                        <div className="mt-2 rounded border border-emerald-200 bg-emerald-50 px-2.5 py-2">
+                          <p className="text-[10px] font-semibold text-emerald-700">CTA</p>
+                          <p className="text-xs leading-relaxed text-slate-700">{plan.script.cta}</p>
+                        </div>
+                      ) : null}
+                    </div>
+                  ) : null}
+
+                  {plan.higgsfieldPrompts?.length > 0 ? (
+                    <div>
+                      <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">AI Video Prompts</p>
+                      <div className="mt-1.5 space-y-1.5">
+                        {plan.higgsfieldPrompts.map((hp, i) => (
+                          <div key={`hf-${i}`} className="rounded border border-blue-200 bg-blue-50 px-2.5 py-2">
+                            <p className="text-[10px] font-semibold text-blue-700">{hp.scene}{hp.shotDuration ? ` (${hp.shotDuration})` : ""}</p>
+                            <p className="text-xs leading-relaxed text-slate-700">{hp.prompt}</p>
+                            {hp.recommendedModel ? <p className="mt-0.5 text-[10px] text-blue-500">Model: {hp.recommendedModel}</p> : null}
                           </div>
                         ))}
                       </div>
-                    ) : null}
-
-                    {plan.script.cta ? (
-                      <div className="mt-1 rounded border border-emerald-200 bg-emerald-50 px-2 py-1">
-                        <p className="text-[10px] font-semibold text-emerald-700">CTA</p>
-                        <p className="text-[11px] leading-relaxed text-slate-700">{plan.script.cta}</p>
-                      </div>
-                    ) : null}
-                  </div>
-                ) : null}
-
-                {/* Higgsfield prompts */}
-                {plan.higgsfieldPrompts?.length > 0 ? (
-                  <div>
-                    <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">AI Video Prompts</p>
-                    <div className="mt-1 space-y-1">
-                      {plan.higgsfieldPrompts.map((hp, i) => (
-                        <div key={`hf-${i}`} className="rounded border border-blue-200 bg-blue-50 px-2 py-1">
-                          <p className="text-[10px] font-semibold text-blue-700">{hp.scene}{hp.shotDuration ? ` (${hp.shotDuration})` : ""}</p>
-                          <p className="text-[11px] leading-relaxed text-slate-700">{hp.prompt}</p>
-                          {hp.recommendedModel ? <p className="mt-0.5 text-[10px] text-blue-500">Model: {hp.recommendedModel}</p> : null}
-                        </div>
-                      ))}
                     </div>
-                  </div>
-                ) : null}
+                  ) : null}
 
-                {/* Production steps */}
-                {plan.productionSteps?.length > 0 ? (
-                  <div>
-                    <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">Production Steps</p>
-                    <ol className="mt-0.5 list-inside list-decimal space-y-0.5">
-                      {plan.productionSteps.map((step, i) => (
-                        <li key={`ps-${i}`} className="text-[11px] leading-relaxed text-slate-600">{step}</li>
-                      ))}
-                    </ol>
-                  </div>
-                ) : null}
+                  {plan.productionSteps?.length > 0 ? (
+                    <div>
+                      <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">Production Steps</p>
+                      <ol className="mt-1 list-inside list-decimal space-y-0.5">
+                        {plan.productionSteps.map((step, i) => (
+                          <li key={`ps-${i}`} className="text-xs leading-relaxed text-slate-600">{step}</li>
+                        ))}
+                      </ol>
+                    </div>
+                  ) : null}
 
-                {/* Assets checklist */}
-                {plan.assetsChecklist?.length > 0 ? (
-                  <div>
-                    <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">Assets Checklist</p>
-                    <ul className="mt-0.5 space-y-0.5">
-                      {plan.assetsChecklist.map((asset, i) => (
-                        <li key={`ac-${i}`} className="flex items-start gap-1 text-[11px] text-slate-600">
-                          <span className="mt-0.5 text-slate-400">-</span> {asset}
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-                ) : null}
-              </div>
-            </div>
-          </div>
+                  {plan.assetsChecklist?.length > 0 ? (
+                    <div>
+                      <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">Assets Checklist</p>
+                      <ul className="mt-1 space-y-0.5">
+                        {plan.assetsChecklist.map((asset, i) => (
+                          <li key={`ac-${i}`} className="flex items-start gap-1 text-xs text-slate-600">
+                            <span className="mt-0.5 text-slate-400">-</span> {asset}
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  ) : null}
+                </div>
+              </DialogContent>
+            </Dialog>
+          </>
         ) : null}
       </div>
     </div>
