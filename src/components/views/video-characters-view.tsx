@@ -49,6 +49,97 @@ type CharactersResponse = {
 };
 
 const MAX_UPLOAD_SIZE_BYTES = 10 * 1024 * 1024;
+const MAX_UPLOAD_TRANSPORT_BYTES = 3.8 * 1024 * 1024;
+
+function toJpegName(filename: string): string {
+  const cleaned = filename.trim();
+  if (!cleaned) return `character-${Date.now()}.jpg`;
+  const dotIndex = cleaned.lastIndexOf(".");
+  if (dotIndex <= 0) return `${cleaned}.jpg`;
+  return `${cleaned.slice(0, dotIndex)}.jpg`;
+}
+
+function readFileAsDataUrl(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || ""));
+    reader.onerror = () => reject(new Error("Failed to read image for upload."));
+    reader.readAsDataURL(file);
+  });
+}
+
+function loadImage(src: string): Promise<HTMLImageElement> {
+  return new Promise((resolve, reject) => {
+    const image = new Image();
+    image.onload = () => resolve(image);
+    image.onerror = () => reject(new Error("Failed to process uploaded image."));
+    image.src = src;
+  });
+}
+
+function canvasToBlob(canvas: HTMLCanvasElement, quality: number): Promise<Blob> {
+  return new Promise((resolve, reject) => {
+    canvas.toBlob(
+      (blob) => {
+        if (!blob) {
+          reject(new Error("Failed to compress image for upload."));
+          return;
+        }
+        resolve(blob);
+      },
+      "image/jpeg",
+      quality
+    );
+  });
+}
+
+async function compressImageForUpload(file: File, targetBytes: number): Promise<File> {
+  if (file.size <= targetBytes) return file;
+
+  const src = await readFileAsDataUrl(file);
+  const image = await loadImage(src);
+
+  const maxDimension = 2048;
+  const scale = Math.min(1, maxDimension / Math.max(image.width, image.height));
+  let width = Math.max(1, Math.round(image.width * scale));
+  let height = Math.max(1, Math.round(image.height * scale));
+
+  const canvas = document.createElement("canvas");
+  const context = canvas.getContext("2d");
+  if (!context) {
+    throw new Error("Failed to initialize image compression context.");
+  }
+
+  let quality = 0.9;
+  let bestBlob: Blob | null = null;
+
+  for (let attempt = 0; attempt < 8; attempt += 1) {
+    canvas.width = width;
+    canvas.height = height;
+    context.clearRect(0, 0, width, height);
+    context.drawImage(image, 0, 0, width, height);
+
+    const blob = await canvasToBlob(canvas, quality);
+    bestBlob = blob;
+
+    if (blob.size <= targetBytes) {
+      return new File([blob], toJpegName(file.name), { type: "image/jpeg" });
+    }
+
+    quality = Math.max(0.45, quality - 0.1);
+
+    if (attempt >= 3) {
+      width = Math.max(720, Math.round(width * 0.88));
+      height = Math.max(720, Math.round(height * 0.88));
+    }
+  }
+
+  if (bestBlob && bestBlob.size <= targetBytes) {
+    return new File([bestBlob], toJpegName(file.name), { type: "image/jpeg" });
+  }
+
+  throw new Error("Could not compress image enough for upload. Try a smaller image.");
+}
 
 export function VideoCharactersView({ collectionId }: { collectionId: string }) {
   const router = useRouter();
@@ -165,9 +256,11 @@ export function VideoCharactersView({ collectionId }: { collectionId: string }) 
     setSuccess("");
 
     try {
+      const fileForUpload = await compressImageForUpload(uploadedCharacterFile, MAX_UPLOAD_TRANSPORT_BYTES);
+
       const formData = new FormData();
       formData.append("collectionId", collectionId);
-      formData.append("image", uploadedCharacterFile);
+      formData.append("image", fileForUpload);
 
       const uploadResponse = await fetch("/api/video-agent/characters/upload", {
         method: "POST",
@@ -191,7 +284,7 @@ export function VideoCharactersView({ collectionId }: { collectionId: string }) 
           /request entity too large/i.test(rawMessage) ||
           /payload too large/i.test(rawMessage)
         ) {
-          throw new Error("Image upload too large. Please use an image under 10MB.");
+          throw new Error("Upload gateway rejected the file size. Try a smaller image (current transport cap is ~4MB).");
         }
 
         throw new Error(rawMessage);
@@ -400,6 +493,9 @@ export function VideoCharactersView({ collectionId }: { collectionId: string }) 
                   }}
                   className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800 file:mr-3 file:rounded-md file:border-0 file:bg-rose-50 file:px-2 file:py-1 file:text-xs file:font-medium file:text-rose-700"
                 />
+                <p className="text-[11px] text-slate-500">
+                  You can pick files up to 10MB. Large images are auto-compressed for upload.
+                </p>
               </div>
             </div>
 
