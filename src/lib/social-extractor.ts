@@ -118,7 +118,8 @@ function getRemoteExtractorHost(baseUrl: string): string {
 async function extractWithRemoteService(
   url: string,
   platform: SupportedPlatform,
-  sessionId?: string
+  sessionId?: string,
+  mediaKind: "any" | "image" = "any"
 ): Promise<ExtractedPostData> {
   const baseUrl = getRemoteExtractorUrl();
   if (!baseUrl) {
@@ -145,7 +146,7 @@ async function extractWithRemoteService(
         "Content-Type": "application/json",
         ...(token ? { Authorization: `Bearer ${token}` } : {}),
       },
-      body: JSON.stringify({ url, platform, sessionId }),
+      body: JSON.stringify({ url, platform, sessionId, mediaKind }),
       signal: controller.signal,
     });
 
@@ -223,10 +224,11 @@ async function extractWithRemoteService(
 export async function extractSocialPost(
   url: string,
   platform: SupportedPlatform,
-  sessionId?: string
+  sessionId?: string,
+  mediaKind: "any" | "image" = "any"
 ): Promise<ExtractedPostData> {
   if (platform === "instagram" || platform === "tiktok") {
-    return extractWithRemoteService(url, platform, sessionId);
+    return extractWithRemoteService(url, platform, sessionId, mediaKind);
   }
 
   return {

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabase } from "@/lib/supabase";
 import { extractPlatform } from "@/lib/utils";
-import { downloadAndUploadMultipleToR2 } from "@/lib/r2";
+import { downloadAndUploadToR2 } from "@/lib/r2";
 import { fetchWithProxy } from "@/lib/proxy-fetch";
 import { extractSocialPost } from "@/lib/social-extractor";
 import { fetchTikTokPost } from "@/lib/tiktok";
@@ -71,20 +71,68 @@ function dedupeHttpUrls(urls: string[]): string[] {
   );
 }
 
+function getSafeExtensionFromUrl(url: string): string {
+  try {
+    const parsed = new URL(url);
+    const filename = parsed.pathname.split("/").pop() || "";
+    const ext = filename.includes(".") ? filename.split(".").pop() || "" : "";
+    if (/^[a-zA-Z0-9]{2,5}$/.test(ext)) return ext.toLowerCase();
+  } catch {
+    // Ignore parse failures and fall back.
+  }
+  return "jpg";
+}
+
 function isLikelyDirectMediaUrl(url: string, platform: string): boolean {
   try {
     const parsed = new URL(url);
     const host = parsed.hostname.toLowerCase();
-    const path = parsed.pathname.toLowerCase();
+    const pathWithQuery = `${parsed.pathname}${parsed.search}`.toLowerCase();
+
+    if (
+      /\.(mp4|mov|webm|m4v|m3u8|mp3|m4a|aac|opus)(\?|$)/i.test(pathWithQuery) ||
+      pathWithQuery.includes("mime_type=audio") ||
+      pathWithQuery.includes("mime_type=video") ||
+      pathWithQuery.includes("/aweme/v1/play")
+    ) {
+      return false;
+    }
 
     if (platform === "tiktok") {
       if (host === "www.tiktok.com" || host === "m.tiktok.com" || host === "tiktok.com") {
         return false;
       }
 
-      if (path.includes("/photo/") || path.includes("/video/") || path.startsWith("/t/")) {
+      if (
+        pathWithQuery.includes("/photo/") ||
+        pathWithQuery.includes("/video/") ||
+        pathWithQuery.startsWith("/t/") ||
+        pathWithQuery.includes("playwm")
+      ) {
         return false;
       }
+
+      if (/\.(jpe?g|png|webp|gif|bmp)(\?|$)/i.test(pathWithQuery)) {
+        return true;
+      }
+
+      const likelyCdnHost =
+        host.includes("tiktokcdn") ||
+        host.includes("byteoversea") ||
+        host.includes("bytedance") ||
+        host.includes("ibytedtos") ||
+        host.includes("muscdn") ||
+        host.includes("snssdk") ||
+        host.includes("akamaized") ||
+        host.includes("cloudfront");
+
+      const likelyImagePath =
+        pathWithQuery.includes("/obj/") ||
+        pathWithQuery.includes("/tos-") ||
+        pathWithQuery.includes("image") ||
+        pathWithQuery.includes("photomode");
+
+      return likelyCdnHost && likelyImagePath;
     }
   } catch {
     return false;
@@ -155,7 +203,12 @@ export async function POST(request: NextRequest) {
             `[posts-save] req=${requestId} extraction_attempt platform=${platform} attempt=${attempt} session=${sessionId}`
           );
 
-          const extracted = await extractSocialPost(url, platform, sessionId);
+          const extracted = await extractSocialPost(
+            url,
+            platform,
+            sessionId,
+            platform === "tiktok" && postType === "image_slides" ? "image" : "any"
+          );
 
           const remoteUrls = dedupeHttpUrls(extracted.mediaUrls);
           originalImageUrls = remoteUrls.filter((item) => isLikelyDirectMediaUrl(item, platform));
@@ -287,17 +340,63 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // Download images and upload to R2
+    // Download images and upload to R2 (skip invalid candidates instead of failing the whole save)
     if (originalImageUrls.length > 0) {
       try {
         console.log(
           `[posts-save] req=${requestId} r2_upload_start count=${originalImageUrls.length}`
         );
-        mediaUrls = await downloadAndUploadMultipleToR2(
-          originalImageUrls,
-          collectionId,
-          tempPostId
-        );
+
+        const uploadedMediaUrls: string[] = [];
+        const skippedInvalidMedia: string[] = [];
+
+        for (let index = 0; index < originalImageUrls.length; index += 1) {
+          const sourceMediaUrl = originalImageUrls[index];
+          const extension = getSafeExtensionFromUrl(sourceMediaUrl);
+          const filename = `image-${index + 1}.${extension}`;
+          const key = `collections/${collectionId}/posts/${tempPostId}/${filename}`;
+
+          try {
+            const uploadedUrl = await downloadAndUploadToR2(sourceMediaUrl, key);
+            uploadedMediaUrls.push(uploadedUrl);
+          } catch (error) {
+            const message = asErrorMessage(error);
+            const nonImagePayload =
+              message.includes("did not return image bytes") ||
+              message.includes("content-type=text/html") ||
+              message.includes("content-type=audio/") ||
+              message.includes("content-type=video/");
+
+            if (nonImagePayload) {
+              skippedInvalidMedia.push(`${sourceMediaUrl} -> ${message}`);
+              continue;
+            }
+
+            throw error;
+          }
+        }
+
+        if (skippedInvalidMedia.length > 0) {
+          metadata = {
+            ...metadata,
+            skippedInvalidMediaCount: skippedInvalidMedia.length,
+            skippedInvalidMedia: skippedInvalidMedia.slice(0, 8),
+          };
+        }
+
+        if (uploadedMediaUrls.length === 0) {
+          return NextResponse.json(
+            {
+              error:
+                "TikTok extractor returned non-image URLs (HTML/audio/video links). Try a different TikTok URL variant or add image URLs manually.",
+              details: skippedInvalidMedia,
+              requestId,
+            },
+            { status: 422 }
+          );
+        }
+
+        mediaUrls = uploadedMediaUrls;
         thumbnailUrl = mediaUrls[0] || null;
         console.log(`[posts-save] req=${requestId} r2_upload_success count=${mediaUrls.length}`);
       } catch (error) {
