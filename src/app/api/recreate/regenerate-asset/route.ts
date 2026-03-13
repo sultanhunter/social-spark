@@ -65,6 +65,12 @@ function getCollectionAppContext(collection: unknown): string {
   return "";
 }
 
+function isCharacterAssetPrompt(prompt: string): boolean {
+  return /(woman|female|girl|lady|muslimah|hijab|character|person|portrait|face|model|influencer)/i.test(
+    prompt.toLowerCase()
+  );
+}
+
 export async function POST(request: NextRequest) {
   try {
     const body = (await request.json()) as Record<string, unknown>;
@@ -168,6 +174,10 @@ export async function POST(request: NextRequest) {
 
     const appContext = getCollectionAppContext(collection);
     const appName = asNonEmptyString(collection?.app_name) || explicitAppName || appContext || "Social Spark";
+    const isCharacterAsset = isCharacterAssetPrompt(assetPrompt);
+    const firstExistingGenerated = generatedMediaUrls.find(
+      (item): item is string => typeof item === "string" && item.trim().length > 0
+    );
 
     const imageUrl = await generateImage(assetPrompt, {
       collectionId,
@@ -179,6 +189,11 @@ export async function POST(request: NextRequest) {
       imageModel: imageGenerationModel,
       uiGenerationMode: "ai_creative",
       referenceImageUrls,
+      characterReferenceImageUrls:
+        isCharacterAsset && firstExistingGenerated ? [firstExistingGenerated] : [],
+      characterLockDescriptor: isCharacterAsset
+        ? `Same fictional woman identity across all character assets. Preserve face, age range, skin tone, hijab/wardrobe style.`
+        : undefined,
       brandAssets: {
         appName,
         primaryColorHex: APP_BRAND_PRIMARY_COLOR,

@@ -28,6 +28,8 @@ interface GenerateImageOptions {
   brandAssets?: BrandAssets;
   uiGenerationMode?: UIGenerationMode;
   referenceImageUrls?: string[];
+  characterReferenceImageUrls?: string[];
+  characterLockDescriptor?: string;
   imageModel?: ImageGenerationModel;
 }
 
@@ -214,6 +216,29 @@ function parseGeneratedImagePart(
   return parts.find((part) => "inlineData" in part) as PartWithInlineData | undefined;
 }
 
+function isCharacterAssetPrompt(prompt: string, description: string): boolean {
+  const combined = `${prompt} ${description}`.toLowerCase();
+  return /(woman|female|girl|lady|muslimah|hijab|character|person|portrait|face|model|influencer)/i.test(
+    combined
+  );
+}
+
+function isPhotorealAssetPrompt(prompt: string): boolean {
+  return /(woman|female|girl|lady|muslimah|hijab|character|person|portrait|face|food|meal|juice|drink|bedroom|room|desk|table|kitchen|home|lifestyle|ugc|selfie|camera|photo)/i.test(
+    prompt.toLowerCase()
+  );
+}
+
+function shouldAttachBrandVisualRefs(prompt: string): boolean {
+  return /(app ui|ui mockup|app mockup|phone mockup|screen mockup|dashboard|interface|logo placement|logo lockup|product shot of app)/i.test(
+    prompt.toLowerCase()
+  );
+}
+
+function buildCharacterLockDescriptor(seedPrompt: string): string {
+  return `Same fictional woman identity across all slides: ${seedPrompt}`;
+}
+
 export async function generateImage(
   assetPromptText: string,
   options: GenerateImageOptions = {}
@@ -228,17 +253,25 @@ export async function generateImage(
     brandAssets,
     uiGenerationMode = "ai_creative",
     referenceImageUrls = [],
+    characterReferenceImageUrls = [],
+    characterLockDescriptor,
     imageModel = DEFAULT_IMAGE_GENERATION_MODEL,
   } = options;
 
   const supportsInlineImageContext = !isImagenPredictModel(imageModel);
   const imageSpec = getSlideImageSpec(platform || "unknown");
+  const photorealAsset = isPhotorealAssetPrompt(assetPromptText);
+  const attachBrandVisualRefs = shouldAttachBrandVisualRefs(assetPromptText);
   const { logoPart, featureMockupPart } = supportsInlineImageContext
     ? await getBrandImageParts(brandAssets)
     : { logoPart: null, featureMockupPart: null };
   const exactUiReferencePart =
     supportsInlineImageContext && uiGenerationMode === "reference_exact" && referenceImageUrls.length > 0
       ? await loadRemoteImagePart(referenceImageUrls[0])
+      : null;
+  const characterReferencePart =
+    supportsInlineImageContext && characterReferenceImageUrls.length > 0
+      ? await loadRemoteImagePart(characterReferenceImageUrls[0])
       : null;
 
   const gradientStr = brandAssets?.gradientHexColors?.length
@@ -251,7 +284,8 @@ BRAND TONE GUIDELINES:
 - Brand/app name: ${brandAssets.appName || "N/A"}
 - Primary brand color: ${brandAssets.primaryColorHex || "N/A"}
 - Brand gradient: ${gradientStr}
-- Use the warm pink-to-blush gradient tones (${gradientStr}) to influence the mood, lighting, and color palette of the asset.
+- Keep branding subtle inside scene styling. Do not turn people into mascots or branded characters.
+- Use warm pink-to-blush tones only as gentle accents in lighting/props when natural.
 - If generating a mockup or UI screenshot asset, style it based on brand context.
 `
     : "";
@@ -263,6 +297,29 @@ BRAND TONE GUIDELINES:
         : "- Match the source post's visual mood and color palette based on the prompt instructions."
       : "- Keep quality high but allow fresh visual exploration.";
 
+  const characterLockRules = characterLockDescriptor
+    ? `
+CHARACTER CONTINUITY RULES:
+- ${characterLockDescriptor}
+- Preserve face identity, age range, skin tone, expression style, and hijab/wardrobe style consistently.
+- Do not switch to a different person.
+`
+    : "";
+
+  const peopleCopyRule = characterLockDescriptor
+    ? "- Keep the same character identity anchored by the provided character reference image."
+    : "- Do NOT copy source people, products, logos, or scene details.";
+
+  const realismRules = photorealAsset
+    ? `
+REALISM RULES:
+- Generate a photorealistic lifestyle photograph.
+- No cartoon, no 3D render, no illustration, no CGI, no mascot style.
+- Natural textures, natural skin rendering, realistic lighting.
+- Use a real environment background (bedroom/home/kitchen/table etc. as implied by prompt), not plain white studio backdrop.
+`
+    : "";
+
   const prompt = `Generate ONE clean visual design asset image. This will be used as a background or visual element inside a slide that a designer will assemble in Figma.
 
 ASSET DESCRIPTION:
@@ -272,7 +329,10 @@ ${brandRules}
 
 STYLE REFERENCE:
 - ${referenceModeRule}
-- Do NOT copy source people, products, logos, or scene details.
+- ${peopleCopyRule}
+
+${characterLockRules}
+${realismRules}
 
 CRITICAL OUTPUT RULES:
 - Do NOT render any text, headlines, typography, captions, or UI overlays into the image.
@@ -282,9 +342,10 @@ CRITICAL OUTPUT RULES:
 - Target size: ${imageSpec.width}x${imageSpec.height} (${imageSpec.aspectRatio}).`;
 
   const promptParts: Array<{ text: string } | GeminiInlineImagePart> = [{ text: prompt }];
+  if (characterReferencePart) promptParts.push(characterReferencePart);
   if (exactUiReferencePart) promptParts.push(exactUiReferencePart);
-  if (logoPart) promptParts.push(logoPart);
-  if (featureMockupPart) promptParts.push(featureMockupPart);
+  if (attachBrandVisualRefs && logoPart) promptParts.push(logoPart);
+  if (attachBrandVisualRefs && featureMockupPart) promptParts.push(featureMockupPart);
 
   const generatedBuffer = supportsInlineImageContext
     ? await (async () => {
@@ -334,6 +395,36 @@ export async function generateSlideImages(
   } = options;
 
   const images: string[] = [];
+  const allAssetPrompts = slidePlans.flatMap((plan) => plan.assetPrompts || []);
+  const firstCharacterAsset = allAssetPrompts.find((asset) =>
+    isCharacterAssetPrompt(asset.prompt, asset.description)
+  );
+
+  let characterReferenceImageUrl: string | null = null;
+  let characterLockDescriptor: string | null = null;
+
+  if (firstCharacterAsset) {
+    const descriptorSeed = `${firstCharacterAsset.description}. ${firstCharacterAsset.prompt}`;
+    characterLockDescriptor = buildCharacterLockDescriptor(descriptorSeed);
+
+    const characterAnchorPrompt = `${firstCharacterAsset.prompt}
+
+Create a single-character identity anchor image in a natural lifestyle setting (not plain white background). One woman only, high facial clarity, modest styling, no text/UI, realistic phone-camera look.`;
+
+    characterReferenceImageUrl = await generateImage(characterAnchorPrompt, {
+      collectionId,
+      postId,
+      index: 9999,
+      platform,
+      generationId,
+      versionId: `${versionId || "default"}-character-lock`,
+      brandAssets,
+      uiGenerationMode: "ai_creative",
+      referenceImageUrls,
+      imageModel,
+      characterLockDescriptor,
+    });
+  }
 
   for (let slideIndex = 0; slideIndex < slidePlans.length; slideIndex += 1) {
     const plan = slidePlans[slideIndex];
@@ -364,7 +455,13 @@ export async function generateSlideImages(
     // Generate each asset for this slide
     for (let assetIndex = 0; assetIndex < assetPrompts.length; assetIndex += 1) {
       const asset = assetPrompts[assetIndex];
-      const imageUrl = await generateImage(asset.prompt, {
+      const isCharacterAsset = isCharacterAssetPrompt(asset.prompt, asset.description);
+      const continuityPrompt =
+        isCharacterAsset && characterLockDescriptor
+          ? `${asset.prompt}\n\nCharacter continuity lock: ${characterLockDescriptor}. Keep this exact same woman identity as the character reference image.`
+          : asset.prompt;
+
+      const imageUrl = await generateImage(continuityPrompt, {
         collectionId,
         postId,
         index: slideIndex * 10 + assetIndex, // unique index for file naming
@@ -374,6 +471,9 @@ export async function generateSlideImages(
         brandAssets,
         uiGenerationMode,
         referenceImageUrls,
+        characterReferenceImageUrls:
+          isCharacterAsset && characterReferenceImageUrl ? [characterReferenceImageUrl] : [],
+        characterLockDescriptor: isCharacterAsset ? characterLockDescriptor || undefined : undefined,
         imageModel,
       });
       images.push(imageUrl);

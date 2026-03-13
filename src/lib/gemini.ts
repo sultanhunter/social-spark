@@ -453,7 +453,8 @@ RULES:
 - Your figmaInstructions should recreate that SAME style/layout but adapted with our brand colors (${gradientStr}), our copy from the script, and our logo.
 - figmaInstructions must include the exact on-slide copy for that slide (full script content, not placeholders). Include one explicit step that lists the exact text to place.
 - assetPrompts must NEVER include text/typography in the generated images. Assets are purely visual elements.
-- assetPrompts MUST specify that the asset is rendered on a PLAIN WHITE or SOLID COLOR background. Do NOT include gradients, shadows, glows, bokeh, lens flares, vignettes, or any background effects — the asset needs clean background removal.
+- If source slides are UGC/lifestyle/real-photo style, assetPrompts MUST stay photoreal and natural (phone-camera look), not cartoon/3D/illustration.
+- Use plain white/solid backgrounds ONLY for explicit cutout/icon/sticker assets. For scene assets (people, food, table, room, lifestyle), require natural real environments.
 - Match the number of slides in the script to the provided images. If the script has more slides than images, use the last image's style for extra slides.
 
 Return JSON array with one object per slide:
