@@ -361,6 +361,7 @@ CRITICAL OUTPUT RULES:
 - Do NOT include any words, letters, or numbers in the generated image.
 - The image must be a clean visual asset only (photo, illustration, texture, pattern, gradient, 3D render, etc.).
 - Do not add third-party logos or watermarks.
+- Do not include Gemini logo/text or any AI model branding.
 - Target size: ${imageSpec.width}x${imageSpec.height} (${imageSpec.aspectRatio}).`;
 
   const promptParts: Array<{ text: string } | GeminiInlineImagePart> = [{ text: prompt }];
@@ -384,6 +385,7 @@ CRITICAL OUTPUT RULES:
     : await generateImageWithImagenPredict(imageModel, prompt, 1);
 
   const finalizedBuffer = await normalizeImageForPlatform(generatedBuffer, platform, { forceCarouselAspect });
+
   const mimeType = "image/png";
   const extension = "png";
 
@@ -436,7 +438,7 @@ export async function generateSlideImages(
 
 Create a single-character identity anchor image in a natural lifestyle setting (not plain white background). One woman only, high facial clarity, modest styling, no text/UI, realistic phone-camera look.`;
 
-    characterReferenceImageUrl = await generateImage(characterAnchorPrompt, {
+      characterReferenceImageUrl = await generateImage(characterAnchorPrompt, {
       collectionId,
       postId,
       index: 9999,
