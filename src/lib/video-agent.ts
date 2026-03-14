@@ -77,6 +77,7 @@ type PlanBeat = {
 };
 
 type HiggsfieldPrompt = {
+  generationType: "base_ai_video" | "ugc_video" | "ai_broll" | "product_ui_overlay" | "transition_fx";
   scene: string;
   prompt: string;
   recommendedModel: string;
@@ -103,6 +104,7 @@ export interface VideoRecreationPlan {
     cta: string;
   };
   higgsfieldPrompts: HiggsfieldPrompt[];
+  finalCutProSteps: string[];
   productionSteps: string[];
   editingTimeline: string[];
   assetsChecklist: string[];
@@ -243,6 +245,36 @@ function sourceMatchedDurationFallback(seconds: number | null | undefined): stri
   const min = Math.max(8, Math.round(base * 0.9));
   const max = Math.max(min + 2, Math.round(base * 1.1));
   return `${min}-${max} seconds (match source around ${base}s)`;
+}
+
+function sanitizeHiggsfieldGenerationType(value: unknown): HiggsfieldPrompt["generationType"] {
+  const cleaned = sanitizeString(value, "").toLowerCase();
+  if (cleaned === "base_ai_video") return "base_ai_video";
+  if (cleaned === "ugc_video") return "ugc_video";
+  if (cleaned === "ai_broll") return "ai_broll";
+  if (cleaned === "product_ui_overlay") return "product_ui_overlay";
+  if (cleaned === "transition_fx") return "transition_fx";
+  return "ai_broll";
+}
+
+function buildFinalCutProFallbackSteps(sourceDurationSeconds: number | null | undefined): string[] {
+  const targetDuration = sourceMatchedDurationFallback(sourceDurationSeconds);
+  return [
+    "Create a new Final Cut Pro library and event; set project to vertical 1080x1920, 30fps, Rec.709 color space.",
+    `Set project duration target to ${targetDuration} and create primary timeline markers for hook, body beats, and CTA.`,
+    "Import all generated Higgsfield clips, app screen recordings, source overlays, SFX, and music into organized keyword collections.",
+    "Build the rough cut on the primary storyline following script timecodes; trim clips on motion/action to keep retention pacing.",
+    "Place UGC/talking-head shots on primary storyline and keep framing continuity between adjacent cuts.",
+    "Add AI B-roll and cutaway layers above primary clips (connected clips) to visually support each narration beat.",
+    "Insert app UI overlays and screen-recording callouts using transform/opacity keyframes for subtle integrations.",
+    "Add on-screen text titles matching hook and beat copy; enforce safe margins and consistent type scale hierarchy.",
+    "Apply speed ramps and transitions only where necessary for rhythm (avoid overuse); keep most cuts clean and direct.",
+    "Run primary color correction (white balance, exposure, contrast), then secondary skin tone balancing for human shots.",
+    "Mix audio: dialogue/VO at consistent LUFS target, duck music under speech, and add light ambience/SFX for realism.",
+    "Add captions/subtitles, proofread every line, and ensure subtitle timing aligns to spoken phrases.",
+    "Perform QA pass for pacing, visual continuity, faith-positive framing, and accurate app overlay timing.",
+    "Export H.264 master (vertical, high quality), then render platform-ready upload version and verify playback on mobile.",
+  ];
 }
 
 function applyUgcCharacterLock(prompt: string, character: UGCCharacterProfile): string {
@@ -734,11 +766,14 @@ RESPONSE RULES:
 - Reuse the source transcript style (cadence, phrasing, emotional tone) when drafting narration so output feels native to the original format.
 - If human presence is needed, include execution-ready Higgsfield prompts for the AI influencer scenes and include persona continuity instructions.
 - Production steps must explicitly describe how to generate and stitch AI influencer shots with app overlays.
+- Add a dedicated finalCutProSteps list with explicit, ordered Final Cut Pro execution steps from project setup to export.
 - Every Higgsfield scene prompt must include performance instruction:
   - If character speaks on camera, include the exact spoken line in quotes and prefix with "Dialogue:".
   - If character does not speak, explicitly write "No dialogue" and describe facial/body expression intent.
 - For every Higgsfield scene, include a recommended Higgsfield model and why it is the best fit for that scene.
 - For every Higgsfield scene, include individual shotDuration (for example: "3.5s" or "0:08").
+- For every Higgsfield scene, include generationType from: base_ai_video | ugc_video | ai_broll | product_ui_overlay | transition_fx.
+- Ensure Higgsfield prompts cover required generation types for this concept (at minimum base_ai_video + ai_broll, and ugc_video whenever human talking-head presence is required).
 - Keep the prompt field clean scene direction only. Do NOT include model, reason, or duration text inside prompt; use the dedicated fields.
 - For ugc format, include a Character Lock continuity directive in each scene using the provided UGC character profile.
 - If source content appears to include a famous public figure, public speech, or recognisable creator persona that should not be rewritten:
@@ -777,6 +812,7 @@ JSON SHAPE:
   },
   "higgsfieldPrompts": [
     {
+      "generationType": "base_ai_video|ugc_video|ai_broll|product_ui_overlay|transition_fx",
       "scene": "string",
       "prompt": "string with Dialogue: \"...\" OR No dialogue: ...",
       "recommendedModel": "string",
@@ -784,6 +820,7 @@ JSON SHAPE:
       "shotDuration": "string"
     }
   ],
+  "finalCutProSteps": ["string"],
   "productionSteps": ["string"],
   "editingTimeline": ["string"],
   "assetsChecklist": ["string"],
@@ -820,6 +857,7 @@ JSON SHAPE:
     .map((item) => {
       if (!isRecord(item)) return null;
       return {
+        generationType: sanitizeHiggsfieldGenerationType(item.generationType),
         scene: sanitizeString(item.scene, "Scene"),
         prompt: ensureHiggsfieldPromptHasPerformanceInstruction(
           stripPromptMetaTags(
@@ -850,6 +888,8 @@ JSON SHAPE:
           prompt: applyUgcCharacterLock(item.prompt, ugcCharacter),
         }))
       : higgsfieldPrompts;
+
+  const finalCutProSteps = sanitizeStringArray(row.finalCutProSteps, 20);
 
   const mentionState = { count: 0 };
   const integrationModeRaw = sanitizeString(row.integrationMode, "standard_adaptation");
@@ -922,6 +962,10 @@ JSON SHAPE:
       cta: enforceFaithPositiveFraming(adjustedCta),
     },
     higgsfieldPrompts: ugcLockedPrompts,
+    finalCutProSteps:
+      finalCutProSteps.length > 0
+        ? finalCutProSteps
+        : buildFinalCutProFallbackSteps(sourceVideo.sourceDurationSeconds),
     productionSteps: sanitizeStringArray(row.productionSteps, 12),
     editingTimeline: sanitizeStringArray(row.editingTimeline, 12),
     assetsChecklist: sanitizeStringArray(row.assetsChecklist, 12),

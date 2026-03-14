@@ -87,6 +87,7 @@ type PlanBeat = {
 };
 
 type HiggsfieldPrompt = {
+  generationType?: string;
   scene: string;
   prompt: string;
   recommendedModel?: string;
@@ -110,6 +111,7 @@ type VideoPlan = {
     cta: string;
   };
   higgsfieldPrompts: HiggsfieldPrompt[];
+  finalCutProSteps?: string[];
   productionSteps: string[];
   editingTimeline: string[];
   assetsChecklist: string[];
@@ -516,12 +518,26 @@ function VideoCanvasNode({ data }: NodeProps<Node<VideoNodeData>>) {
                       <div className="mt-1.5 space-y-1.5">
                         {plan.higgsfieldPrompts.map((hp, i) => (
                           <div key={`hf-${i}`} className="rounded border border-blue-200 bg-blue-50 px-2.5 py-2">
+                            {hp.generationType ? (
+                              <Badge variant="default" className="mb-1">{hp.generationType.replace(/_/g, " ")}</Badge>
+                            ) : null}
                             <p className="text-[10px] font-semibold text-blue-700">{hp.scene}{hp.shotDuration ? ` (${hp.shotDuration})` : ""}</p>
                             <p className="text-xs leading-relaxed text-slate-700">{hp.prompt}</p>
                             {hp.recommendedModel ? <p className="mt-0.5 text-[10px] text-blue-500">Model: {hp.recommendedModel}</p> : null}
                           </div>
                         ))}
                       </div>
+                    </div>
+                  ) : null}
+
+                  {plan.finalCutProSteps?.length ? (
+                    <div>
+                      <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">Final Cut Pro Steps</p>
+                      <ol className="mt-1 list-inside list-decimal space-y-0.5">
+                        {plan.finalCutProSteps.map((step, i) => (
+                          <li key={`fcp-${i}`} className="text-xs leading-relaxed text-slate-600">{step}</li>
+                        ))}
+                      </ol>
                     </div>
                   ) : null}
 
