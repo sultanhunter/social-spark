@@ -352,6 +352,29 @@ function ensureSeedanceQualityDirectives(prompt: string): string {
   return `${cleaned}. ${directives.join(", ")}, maintain temporal consistency and natural motion continuity.`;
 }
 
+function needsAppScreenReplacementCue(
+  generationType: HiggsfieldPrompt["generationType"],
+  scene: string,
+  prompt: string
+): boolean {
+  if (generationType === "product_ui_overlay") return true;
+  const combined = `${scene} ${prompt}`.toLowerCase();
+  return /\b(app|ui|screen|phone screen|mobile screen|dashboard|tap|swipe|onscreen app|screen recording)\b/i.test(
+    combined
+  );
+}
+
+function ensureAppScreenReplacementDirective(prompt: string): string {
+  const cleaned = cleanText(prompt);
+  if (!cleaned) return cleaned;
+
+  if (/\b(chroma|green\s*screen|#00ff00|keyable|for\s+replacement)\b/i.test(cleaned)) {
+    return cleaned;
+  }
+
+  return `Phone screen pure chroma green (#00FF00), no UI/text, minimal glare for replacement. ${cleaned}`;
+}
+
 function buildSeedanceFallbackPrompt(args: {
   appName: string;
   format: VideoFormatAnalysis;
@@ -382,6 +405,7 @@ function buildSeedanceFallbackPrompt(args: {
       `Context: ${sourceVideo.description || sourceVideo.userNotes || "N/A"}.`,
       characterLine,
       `Subtle app integration for ${appName} only where naturally relevant.`,
+      `Any visible phone/app showcase moment must use a pure chroma green screen (#00FF00) for post screen replacement; no baked UI.`,
       `Natural camera motion, coherent lighting continuity, realistic skin/fabric textures, smooth scene transitions.`,
       `No logos/watermarks, no visual glitches, no jumpy frame interpolation, no abrupt transitions.`,
     ].join(" ")
@@ -906,6 +930,7 @@ RESPONSE RULES:
 - For every Kling shot, include shotId in strict sequence format: shot1, shot2, shot3, ...
 - Each prompt field must be 77 words maximum (hard limit).
 - Prompts are for video generation, not still photos. Do not use wording like "photo", "portrait photo", "still image", or "snapshot".
+- For any app showcase / phone UI shot, force a keyable phone screen: pure chroma green (#00FF00), no UI/text baked in, minimal glare/reflections.
 - Ensure prompts are ready for shot-based generation and continuity in Kling MultiShot.
 - Ensure Kling prompts cover required generation types for this concept (at minimum base_ai_video + ai_broll, and ugc_video whenever human talking-head presence is required).
 - Keep the prompt field clean scene direction only. Do NOT include model, reason, or duration text inside prompt; use the dedicated fields.
@@ -997,21 +1022,24 @@ JSON SHAPE:
   const higgsfieldPrompts: HiggsfieldPrompt[] = promptsRaw
     .map((item, index) => {
       if (!isRecord(item)) return null;
+      const generationType = sanitizeHiggsfieldGenerationType(item.generationType);
+      const scene = sanitizeString(item.scene, "Scene");
+      const basePrompt = sanitizeString(
+        item.prompt,
+        "Create a vertical 9:16 AI influencer shot for Muslimah audience: modest outfit, natural expression, soft daylight, realistic movement, clean background, consistent character identity across scenes. No dialogue: character conveys reassurance through calm facial expression and gentle nod."
+      );
+      const withPerformance = ensureHiggsfieldPromptHasPerformanceInstruction(
+        stripPromptMetaTags(basePrompt)
+      );
+      const withScreenCue = needsAppScreenReplacementCue(generationType, scene, withPerformance)
+        ? ensureAppScreenReplacementDirective(withPerformance)
+        : withPerformance;
+
       return {
         shotId: sanitizeKlingShotId(item.shotId, index),
-        generationType: sanitizeHiggsfieldGenerationType(item.generationType),
-        scene: sanitizeString(item.scene, "Scene"),
-        prompt: enforceKlingPromptWordLimit(
-          ensureHiggsfieldPromptHasPerformanceInstruction(
-            stripPromptMetaTags(
-              sanitizeString(
-                item.prompt,
-                "Create a vertical 9:16 AI influencer shot for Muslimah audience: modest outfit, natural expression, soft daylight, realistic movement, clean background, consistent character identity across scenes. No dialogue: character conveys reassurance through calm facial expression and gentle nod."
-              )
-            )
-          ),
-          77
-        ),
+        generationType,
+        scene,
+        prompt: enforceKlingPromptWordLimit(withScreenCue, 77),
         recommendedModel: sanitizeString(
           item.recommendedModel,
           "Kling 1.6 Pro"
