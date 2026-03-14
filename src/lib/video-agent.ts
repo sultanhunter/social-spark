@@ -77,6 +77,7 @@ type PlanBeat = {
 };
 
 type HiggsfieldPrompt = {
+  shotId: string;
   generationType: "base_ai_video" | "ugc_video" | "ai_broll" | "product_ui_overlay" | "transition_fx";
   scene: string;
   prompt: string;
@@ -257,12 +258,24 @@ function sanitizeHiggsfieldGenerationType(value: unknown): HiggsfieldPrompt["gen
   return "ai_broll";
 }
 
+function sanitizeKlingShotId(value: unknown, fallbackIndex: number): string {
+  const cleaned = sanitizeString(value, "").toLowerCase();
+  if (/^shot\s*\d+$/.test(cleaned)) {
+    return cleaned.replace(/\s+/g, "");
+  }
+
+  const numeric = cleaned.match(/\d+/)?.[0];
+  if (numeric) return `shot${numeric}`;
+
+  return `shot${fallbackIndex + 1}`;
+}
+
 function buildFinalCutProFallbackSteps(sourceDurationSeconds: number | null | undefined): string[] {
   const targetDuration = sourceMatchedDurationFallback(sourceDurationSeconds);
   return [
     "Create a new Final Cut Pro library and event; set project to vertical 1080x1920, 30fps, Rec.709 color space.",
     `Set project duration target to ${targetDuration} and create primary timeline markers for hook, body beats, and CTA.`,
-    "Import all generated Higgsfield clips, app screen recordings, source overlays, SFX, and music into organized keyword collections.",
+    "Import all generated Kling MultiShot clips, app screen recordings, source overlays, SFX, and music into organized keyword collections.",
     "Build the rough cut on the primary storyline following script timecodes; trim clips on motion/action to keep retention pacing.",
     "Place UGC/talking-head shots on primary storyline and keep framing continuity between adjacent cuts.",
     "Add AI B-roll and cutaway layers above primary clips (connected clips) to visually support each narration beat.",
@@ -722,7 +735,7 @@ APP:
 - Context: ${appContext || "N/A"}
 
 TOOLS AVAILABLE:
-- Higgsfield subscription for generation
+- Kling MultiShot for AI video generation (shot-based workflow)
 - Professional video editing tools
 
 CREATOR CONSTRAINT:
@@ -753,7 +766,7 @@ RESPONSE RULES:
 - Keep output execution-ready, not high-level fluff.
 - Match the source video length by default (target within +/-10% of source duration when source duration is available).
 - Use enough timing beats to cover the full source-matched duration (not compressed short-form unless source itself is short).
-- Include Higgsfield prompts that can be copied directly.
+- Include Kling MultiShot prompts that can be copied directly.
 - Never celebrate anti-religious behavior. Do not frame skipping prayer, neglecting salah, or distancing from worship as a positive outcome.
 - Prefer positive faith framing: celebrate being able to pray, spiritual consistency, barakah-oriented routines, and practical habits that support worship.
 - If mentioning difficult phases, keep compassionate tone and guide toward faith-positive actions and recovery, not disengagement.
@@ -764,16 +777,18 @@ RESPONSE RULES:
 - CTA must be soft and non-salesy (example style: save/share/follow/use this method), with optional subtle app reference only if it fits context.
 - For any app overlay moment, specify placement and intent in editNote (for example: "top-right mini overlay of cycle day screen for 2s").
 - Reuse the source transcript style (cadence, phrasing, emotional tone) when drafting narration so output feels native to the original format.
-- If human presence is needed, include execution-ready Higgsfield prompts for the AI influencer scenes and include persona continuity instructions.
-- Production steps must explicitly describe how to generate and stitch AI influencer shots with app overlays.
+- If human presence is needed, include execution-ready Kling MultiShot prompts for AI influencer scenes and include persona continuity instructions.
+- Production steps must explicitly describe how to generate and stitch Kling shots with app overlays.
 - Add a dedicated finalCutProSteps list with explicit, ordered Final Cut Pro execution steps from project setup to export.
-- Every Higgsfield scene prompt must include performance instruction:
+- Every Kling shot prompt must include performance instruction:
   - If character speaks on camera, include the exact spoken line in quotes and prefix with "Dialogue:".
   - If character does not speak, explicitly write "No dialogue" and describe facial/body expression intent.
-- For every Higgsfield scene, include a recommended Higgsfield model and why it is the best fit for that scene.
-- For every Higgsfield scene, include individual shotDuration (for example: "3.5s" or "0:08").
-- For every Higgsfield scene, include generationType from: base_ai_video | ugc_video | ai_broll | product_ui_overlay | transition_fx.
-- Ensure Higgsfield prompts cover required generation types for this concept (at minimum base_ai_video + ai_broll, and ugc_video whenever human talking-head presence is required).
+- For every Kling shot, include a recommended Kling model and why it is the best fit for that shot.
+- For every Kling shot, include individual shotDuration (for example: "3.5s" or "0:08").
+- For every Kling shot, include generationType from: base_ai_video | ugc_video | ai_broll | product_ui_overlay | transition_fx.
+- For every Kling shot, include shotId in strict sequence format: shot1, shot2, shot3, ...
+- Ensure prompts are ready for shot-based generation and continuity in Kling MultiShot.
+- Ensure Kling prompts cover required generation types for this concept (at minimum base_ai_video + ai_broll, and ugc_video whenever human talking-head presence is required).
 - Keep the prompt field clean scene direction only. Do NOT include model, reason, or duration text inside prompt; use the dedicated fields.
 - For ugc format, include a Character Lock continuity directive in each scene using the provided UGC character profile.
 - If source content appears to include a famous public figure, public speech, or recognisable creator persona that should not be rewritten:
@@ -812,6 +827,7 @@ JSON SHAPE:
   },
   "higgsfieldPrompts": [
     {
+      "shotId": "shot1",
       "generationType": "base_ai_video|ugc_video|ai_broll|product_ui_overlay|transition_fx",
       "scene": "string",
       "prompt": "string with Dialogue: \"...\" OR No dialogue: ...",
@@ -854,9 +870,10 @@ JSON SHAPE:
 
   const promptsRaw = Array.isArray(row.higgsfieldPrompts) ? row.higgsfieldPrompts : [];
   const higgsfieldPrompts: HiggsfieldPrompt[] = promptsRaw
-    .map((item) => {
+    .map((item, index) => {
       if (!isRecord(item)) return null;
       return {
+        shotId: sanitizeKlingShotId(item.shotId, index),
         generationType: sanitizeHiggsfieldGenerationType(item.generationType),
         scene: sanitizeString(item.scene, "Scene"),
         prompt: ensureHiggsfieldPromptHasPerformanceInstruction(
@@ -869,11 +886,11 @@ JSON SHAPE:
         ),
         recommendedModel: sanitizeString(
           item.recommendedModel,
-          "Higgsfield Realistic Character"
+          "Kling 1.6 Pro"
         ),
         modelReason: sanitizeString(
           item.modelReason,
-          "Best for natural human motion, consistent face identity, and believable lifestyle scenes."
+          "Strong for cinematic realism, coherent motion, and shot-to-shot continuity in MultiShot workflows."
         ),
         shotDuration: sanitizeString(item.shotDuration, "4s"),
       };

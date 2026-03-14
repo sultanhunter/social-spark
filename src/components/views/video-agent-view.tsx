@@ -87,6 +87,7 @@ type PlanBeat = {
 };
 
 type HiggsfieldPrompt = {
+  shotId?: string;
   generationType?: string;
   scene: string;
   prompt: string;
@@ -514,10 +515,15 @@ function VideoCanvasNode({ data }: NodeProps<Node<VideoNodeData>>) {
 
                   {plan.higgsfieldPrompts?.length > 0 ? (
                     <div>
-                      <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">AI Video Prompts</p>
+                      <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">Kling MultiShot Prompts</p>
                       <div className="mt-1.5 space-y-1.5">
                         {plan.higgsfieldPrompts.map((hp, i) => (
                           <div key={`hf-${i}`} className="rounded border border-blue-200 bg-blue-50 px-2.5 py-2">
+                            {hp.shotId ? (
+                              <Badge variant="default" className="mb-1 mr-1">{hp.shotId}</Badge>
+                            ) : (
+                              <Badge variant="default" className="mb-1 mr-1">{`shot${i + 1}`}</Badge>
+                            )}
                             {hp.generationType ? (
                               <Badge variant="default" className="mb-1">{hp.generationType.replace(/_/g, " ")}</Badge>
                             ) : null}
