@@ -45,6 +45,12 @@ import {
   isReasoningModel,
   type ReasoningModel,
 } from "@/lib/reasoning-model";
+import {
+  DEFAULT_IMAGE_GENERATION_MODEL,
+  IMAGE_GENERATION_MODELS,
+  isImageGenerationModel,
+  type ImageGenerationModel,
+} from "@/lib/image-generation-model";
 
 type LibraryVideo = {
   id: string;
@@ -96,6 +102,14 @@ type HiggsfieldPrompt = {
   shotDuration?: string;
 };
 
+type VideoStartFrame = {
+  imageUrl?: string;
+  prompt?: string;
+  generatedAt?: string;
+  characterId?: string | null;
+  imageModel?: string;
+};
+
 type VideoPlan = {
   title: string;
   strategy: string;
@@ -111,6 +125,7 @@ type VideoPlan = {
     beats: PlanBeat[];
     cta: string;
   };
+  startFrame?: VideoStartFrame;
   higgsfieldPrompts: HiggsfieldPrompt[];
   finalCutProSteps?: string[];
   productionSteps: string[];
@@ -120,6 +135,12 @@ type VideoPlan = {
 };
 
 type RecreateResponse = {
+  plan?: VideoPlan;
+  error?: string;
+};
+
+type StartFrameResponse = {
+  startFrame?: VideoStartFrame;
   plan?: VideoPlan;
   error?: string;
 };
@@ -170,6 +191,8 @@ type VideoNodeData = {
   directMediaUrl: string | null;
   reasoningModel: ReasoningModel;
   onReasoningModelChange: (value: string) => void;
+  startFrameImageModel: ImageGenerationModel;
+  onStartFrameImageModelChange: (value: string) => void;
   isLoadingCharacters: boolean;
   ugcCharacters: UgcCharacter[];
   selectedUgcCharacterId: string | null;
@@ -177,6 +200,8 @@ type VideoNodeData = {
   onOpenCharacterStudio: () => void;
   onGeneratePlan: (formatId: string, videoId: string) => void;
   isGeneratingPlan: boolean;
+  onGenerateStartFrame: (formatId: string, videoId: string) => void;
+  isGeneratingStartFrame: boolean;
   plan: VideoPlan | null;
   hasR2Url: boolean;
   isRefreshingR2: boolean;
@@ -385,6 +410,18 @@ function VideoCanvasNode({ data }: NodeProps<Node<VideoNodeData>>) {
             ))}
           </select>
 
+          <select
+            value={data.startFrameImageModel}
+            onChange={(event) => data.onStartFrameImageModelChange(event.target.value)}
+            className="nodrag w-full rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-xs text-slate-800 outline-none transition focus:border-rose-400 focus:ring-2 focus:ring-rose-200"
+          >
+            {IMAGE_GENERATION_MODELS.map((model) => (
+              <option key={model.id} value={model.id}>
+                {`Start Frame: ${model.label}`}
+              </option>
+            ))}
+          </select>
+
           {data.formatType === "ugc" ? (
             <>
               <select
@@ -419,6 +456,19 @@ function VideoCanvasNode({ data }: NodeProps<Node<VideoNodeData>>) {
             <Sparkles className="mr-1.5 h-3.5 w-3.5" />
             {data.isGeneratingPlan ? "Generating..." : plan ? "Regenerate Plan" : "Generate Plan"}
           </Button>
+
+          {plan ? (
+            <Button
+              variant="outline"
+              size="sm"
+              className="nodrag w-full"
+              onClick={() => data.onGenerateStartFrame(data.formatId, data.video.id)}
+              isLoading={data.isGeneratingStartFrame}
+            >
+              <Sparkles className="mr-1.5 h-3.5 w-3.5" />
+              {data.isGeneratingStartFrame ? "Generating start frame..." : "Generate Start Frame"}
+            </Button>
+          ) : null}
 
           {data.error ? (
             <div className="rounded-md border border-rose-200 bg-rose-50 px-2 py-1.5 text-[11px] text-rose-700">{data.error}</div>
@@ -476,6 +526,53 @@ function VideoCanvasNode({ data }: NodeProps<Node<VideoNodeData>>) {
                       </div>
                     </div>
                   ) : null}
+
+                  <div>
+                    <div className="flex items-center justify-between gap-2">
+                      <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">Video Start Frame</p>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="nodrag"
+                        onClick={() => data.onGenerateStartFrame(data.formatId, data.video.id)}
+                        isLoading={data.isGeneratingStartFrame}
+                      >
+                        <Sparkles className="mr-1 h-3.5 w-3.5" />
+                        {plan.startFrame?.imageUrl ? "Regenerate" : "Generate"}
+                      </Button>
+                    </div>
+                    {plan.startFrame?.imageUrl ? (
+                      <div className="mt-1.5 rounded border border-slate-200 bg-white p-2">
+                        <img
+                          src={plan.startFrame.imageUrl}
+                          alt="Video start frame"
+                          className="w-full rounded border border-slate-200 object-cover"
+                          style={{ aspectRatio: "9 / 16" }}
+                        />
+                        <div className="mt-1.5 flex items-center justify-end">
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="nodrag"
+                            onClick={() => data.onOpen(plan.startFrame?.imageUrl || "")}
+                          >
+                            <ExternalLink className="mr-1 h-3.5 w-3.5" />
+                            Open image
+                          </Button>
+                        </div>
+                        {plan.startFrame.imageModel ? (
+                          <p className="mt-1 text-[11px] text-slate-500">Model: {plan.startFrame.imageModel}</p>
+                        ) : null}
+                        {plan.startFrame.prompt ? (
+                          <p className="mt-1 text-[11px] leading-relaxed text-slate-500">{plan.startFrame.prompt}</p>
+                        ) : null}
+                      </div>
+                    ) : (
+                      <p className="mt-1 text-xs text-slate-500">
+                        Generate one opening frame based on this plan and selected character.
+                      </p>
+                    )}
+                  </div>
 
                   {plan.script ? (
                     <div>
@@ -613,6 +710,8 @@ export function VideoAgentView({ collectionId }: { collectionId: string }) {
   const router = useRouter();
 
   const [reasoningModel, setReasoningModel] = useState<ReasoningModel>(DEFAULT_REASONING_MODEL);
+  const [startFrameImageModel, setStartFrameImageModel] =
+    useState<ImageGenerationModel>(DEFAULT_IMAGE_GENERATION_MODEL);
 
   const [library, setLibrary] = useState<LibraryFormat[]>([]);
   const [expandedType, setExpandedType] = useState<string | null>(null);
@@ -628,6 +727,7 @@ export function VideoAgentView({ collectionId }: { collectionId: string }) {
   const [isLoadingLibrary, setIsLoadingLibrary] = useState(true);
   const [isLoadingCharacters, setIsLoadingCharacters] = useState(false);
   const [isGeneratingPlan, setIsGeneratingPlan] = useState(false);
+  const [generatingStartFrameVideoId, setGeneratingStartFrameVideoId] = useState<string | null>(null);
   const [refreshingR2VideoId, setRefreshingR2VideoId] = useState<string | null>(null);
 
   const [error, setError] = useState("");
@@ -940,6 +1040,75 @@ export function VideoAgentView({ collectionId }: { collectionId: string }) {
     }
   }, [collectionId, library, selectedFormat, selectedVideo, selectedUgcCharacter, reasoningModel, loadPlans]);
 
+  const handleGenerateStartFrame = useCallback(async (formatIdArg?: string, videoIdArg?: string) => {
+    const targetFormat =
+      (formatIdArg ? library.find((item) => item.id === formatIdArg) : null) || selectedFormat;
+    const targetVideo =
+      (targetFormat && videoIdArg ? targetFormat.videos.find((item) => item.id === videoIdArg) : null) || selectedVideo;
+
+    if (!targetFormat || !targetVideo) {
+      setError("Select a format and video first.");
+      return;
+    }
+
+    const existingPlan = videoPlans[targetVideo.id] || null;
+    if (!existingPlan) {
+      setError("Generate a recreation plan first, then create start frame.");
+      return;
+    }
+
+    setGeneratingStartFrameVideoId(targetVideo.id);
+    setError("");
+    setSuccess("");
+
+    try {
+      const response = await fetch("/api/video-agent/start-frame", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          collectionId,
+          formatId: targetFormat.id,
+          videoId: targetVideo.id,
+          characterId: targetFormat.format_type === "ugc" ? selectedUgcCharacter?.id : null,
+          imageGenerationModel: startFrameImageModel,
+        }),
+      });
+
+      const data = (await response.json()) as StartFrameResponse;
+      if (!response.ok) {
+        throw new Error(data.error || "Failed to generate start frame.");
+      }
+
+      if (!data.startFrame && !data.plan) {
+        throw new Error("No start frame returned.");
+      }
+
+      setVideoPlans((prev) => ({
+        ...prev,
+        [targetVideo.id]: data.plan || {
+          ...existingPlan,
+          startFrame: data.startFrame,
+        },
+      }));
+
+      setSuccess("Start frame generated.");
+      void loadPlans();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to generate start frame.");
+    } finally {
+      setGeneratingStartFrameVideoId(null);
+    }
+  }, [
+    collectionId,
+    library,
+    selectedFormat,
+    selectedVideo,
+    selectedUgcCharacter,
+    startFrameImageModel,
+    videoPlans,
+    loadPlans,
+  ]);
+
   const handleRefreshR2 = useCallback(async (videoId: string) => {
     setRefreshingR2VideoId(videoId);
     setError("");
@@ -1076,6 +1245,10 @@ export function VideoAgentView({ collectionId }: { collectionId: string }) {
               onReasoningModelChange: (value: string) => {
                 if (isReasoningModel(value)) setReasoningModel(value);
               },
+              startFrameImageModel,
+              onStartFrameImageModelChange: (value: string) => {
+                if (isImageGenerationModel(value)) setStartFrameImageModel(value);
+              },
               isLoadingCharacters,
               ugcCharacters,
               selectedUgcCharacterId,
@@ -1085,6 +1258,10 @@ export function VideoAgentView({ collectionId }: { collectionId: string }) {
                 void handleGeneratePlan(formatId, videoId);
               },
               isGeneratingPlan: isGeneratingPlan && selectedVideoId === video.id,
+              onGenerateStartFrame: (formatId: string, videoId: string) => {
+                void handleGenerateStartFrame(formatId, videoId);
+              },
+              isGeneratingStartFrame: generatingStartFrameVideoId === video.id,
               plan: videoPlans[video.id] || null,
               hasR2Url: Boolean(getVideoR2Url(video)),
               isRefreshingR2: refreshingR2VideoId === video.id,
@@ -1135,10 +1312,12 @@ export function VideoAgentView({ collectionId }: { collectionId: string }) {
     selectedVideoId,
     playingVideoId,
     reasoningModel,
+    startFrameImageModel,
     isLoadingCharacters,
     ugcCharacters,
     selectedUgcCharacterId,
     isGeneratingPlan,
+    generatingStartFrameVideoId,
     error,
     success,
     videoAspectRatios,
@@ -1151,6 +1330,7 @@ export function VideoAgentView({ collectionId }: { collectionId: string }) {
     handleOpenSource,
     handleAspect,
     handleGeneratePlan,
+    handleGenerateStartFrame,
     nodePositions,
   ]);
 
