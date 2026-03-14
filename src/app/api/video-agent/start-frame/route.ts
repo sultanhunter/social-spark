@@ -127,6 +127,9 @@ function buildStartFramePrompt(args: {
     `Shot prompt cue: ${firstScenePrompt || "N/A"}.`,
     characterInstruction,
     `Vertical 9:16 composition. Cinematic but natural.`,
+    `If a person appears, enforce modest, non-sexual framing: neutral posture, respectful body language, and modest wardrobe with no tight/transparent clothing.`,
+    `Avoid camera angles or poses that emphasize chest, hips, or body contours. Prefer chest-up or waist-up framing unless script requires wider context.`,
+    `No suggestive posing, no cleavage, no lingerie/swimwear styling, no glamourized sensual focus.`,
     `No text overlays, no subtitles, no logos, no watermark.`,
     `High realism and coherent scene setup suitable for AI video generation start frame input.`,
   ].join(" ");
