@@ -240,6 +240,34 @@ function enforceFaithPositiveFraming(text: string): string {
   return output;
 }
 
+function enforcePrayerStruggleTone(text: string): string {
+  let output = cleanText(text);
+  if (!output) return output;
+
+  const hasPrayerStruggleSignal =
+    /\b(can(?:'|’)t|cannot|unable to|not able to|struggling to|miss(?:ed|ing)?|skip(?:ped|ping)?)\s+(pray|make salah|prayer|salah)\b/i.test(
+      output
+    ) || /\b(not praying|missing salah|skipping prayer)\b/i.test(output);
+
+  if (!hasPrayerStruggleSignal) return output;
+
+  const emotionalReplacements: Array<[RegExp, string]> = [
+    [/\blooks\s+relieved\b/gi, "looks concerned"],
+    [/\bfeel(?:s)?\s+relieved\b/gi, "feels concerned"],
+    [/\brelieved\b/gi, "concerned"],
+    [/\bhappy\b/gi, "concerned"],
+    [/\bexcited\b/gi, "concerned"],
+    [/\bjoyful\b/gi, "reflective"],
+    [/\bcelebrat(?:e|es|ing|ed)\b/gi, "seeks improvement"],
+  ];
+
+  for (const [pattern, replacement] of emotionalReplacements) {
+    output = output.replace(pattern, replacement);
+  }
+
+  return cleanText(output);
+}
+
 function sourceDurationHint(seconds: number | null | undefined): string {
   if (typeof seconds !== "number" || !Number.isFinite(seconds) || seconds <= 0) {
     return "unknown";
@@ -783,6 +811,7 @@ RESPONSE RULES:
 - Never celebrate anti-religious behavior. Do not frame skipping prayer, neglecting salah, or distancing from worship as a positive outcome.
 - Prefer positive faith framing: celebrate being able to pray, spiritual consistency, barakah-oriented routines, and practical habits that support worship.
 - If mentioning difficult phases, keep compassionate tone and guide toward faith-positive actions and recovery, not disengagement.
+- If the narrative includes being unable to pray, missing salah, or spiritual inconsistency, depict it as concern/struggle/recovery — never as relief, celebration, or comedic victory.
 - Keep this value-first, not ad-first. The video should feel like native educational/lifestyle content.
 - Do NOT force app mention in every script. Mention the app only when naturally relevant.
 - If app insertion is useful, prefer subtle visual integration (screen recording/screenshot overlay, UI callout, or quick proof moment) instead of hard-selling narration.
@@ -923,6 +952,14 @@ JSON SHAPE:
         }))
       : higgsfieldPrompts;
 
+  const faithAdjustedPrompts = ugcLockedPrompts.map((item) => ({
+    ...item,
+    prompt: enforceKlingPromptWordLimit(
+      enforcePrayerStruggleTone(enforceFaithPositiveFraming(item.prompt)),
+      77
+    ),
+  }));
+
   const finalCutProSteps = sanitizeStringArray(row.finalCutProSteps, 20);
 
   const mentionState = { count: 0 };
@@ -938,13 +975,13 @@ JSON SHAPE:
   );
   const adjustedBeats = beats.map((beat) => ({
     ...beat,
-    narration: enforceFaithPositiveFraming(
-      limitAppNameMentions(beat.narration, appName, mentionState)
+    narration: enforcePrayerStruggleTone(
+      enforceFaithPositiveFraming(limitAppNameMentions(beat.narration, appName, mentionState))
     ),
-    onScreenText: enforceFaithPositiveFraming(
-      limitAppNameMentions(beat.onScreenText, appName, mentionState)
+    onScreenText: enforcePrayerStruggleTone(
+      enforceFaithPositiveFraming(limitAppNameMentions(beat.onScreenText, appName, mentionState))
     ),
-    editNote: enforceFaithPositiveFraming(beat.editNote),
+    editNote: enforcePrayerStruggleTone(enforceFaithPositiveFraming(beat.editNote)),
   }));
   const adjustedCta = limitAppNameMentions(
     sanitizeString(scriptRow.cta, "Save this and try the routine today; use your tracker to stay consistent."),
@@ -966,11 +1003,15 @@ JSON SHAPE:
   return {
     title: sanitizeString(row.title, `${appName} format recreation plan`),
     strategy: (() => {
-      const normalized = enforceFaithPositiveFraming(sanitizeString(row.strategy, ""));
+      const normalized = enforcePrayerStruggleTone(
+        enforceFaithPositiveFraming(sanitizeString(row.strategy, ""))
+      );
       return normalized || "Reuse the selected format skeleton as value-first content, generate any required human scenes with a consistent Higgsfield AI influencer, and add subtle app integration where naturally relevant.";
     })(),
     objective: (() => {
-      const normalized = enforceFaithPositiveFraming(sanitizeString(row.objective, ""));
+      const normalized = enforcePrayerStruggleTone(
+        enforceFaithPositiveFraming(sanitizeString(row.objective, ""))
+      );
       return normalized || "Deliver practical guidance with authentic retention flow and optional low-friction app visibility.";
     })(),
     integrationMode,
@@ -991,11 +1032,11 @@ JSON SHAPE:
       voiceStyle: sanitizeString(deliverableSpecRow.voiceStyle, "Warm, direct, practical"),
     },
     script: {
-      hook: enforceFaithPositiveFraming(adjustedHook),
+      hook: enforcePrayerStruggleTone(enforceFaithPositiveFraming(adjustedHook)),
       beats: adjustedBeatsForMode,
-      cta: enforceFaithPositiveFraming(adjustedCta),
+      cta: enforcePrayerStruggleTone(enforceFaithPositiveFraming(adjustedCta)),
     },
-    higgsfieldPrompts: ugcLockedPrompts,
+    higgsfieldPrompts: faithAdjustedPrompts,
     finalCutProSteps:
       finalCutProSteps.length > 0
         ? finalCutProSteps

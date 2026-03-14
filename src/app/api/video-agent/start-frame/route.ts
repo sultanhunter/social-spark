@@ -150,7 +150,8 @@ function buildStartFramePrompt(args: {
     `Shot 1 cue (start-state only): ${firstScenePrompt || "N/A"}.`,
     `Render the first instant before any major action begins. If script later includes jump/dive/run/fall, do NOT depict that later action in this frame.`,
     characterInstruction,
-    `Vertical 9:16 composition. Cinematic but natural.`,
+    `Vertical 9:16 composition at 1080x1920 output framing.`,
+    `Photorealistic ultra-detailed 4K-quality look (high texture fidelity, clean dynamic range, realistic skin and fabric detail), while keeping output composition suitable for 1080x1920 video start frame usage.`,
     `If a person appears, enforce modest, non-sexual framing: neutral posture, respectful body language, and modest wardrobe with no tight/transparent clothing.`,
     `Avoid camera angles or poses that emphasize chest, hips, or body contours. Prefer chest-up or waist-up framing unless script requires wider context.`,
     `No suggestive posing, no cleavage, no lingerie/swimwear styling, no glamourized sensual focus.`,
@@ -251,7 +252,7 @@ export async function POST(request: NextRequest) {
     });
 
     const generatedDataUrl = await generateImage(prompt, {
-      platform: video.platform,
+      platform: "tiktok",
       uiGenerationMode: "ai_creative",
       visualVariant: format.format_type === "ugc" ? "ugc_real" : "brand_optimized",
       referenceImageUrls: video.thumbnail_url ? [video.thumbnail_url] : [],
