@@ -173,6 +173,18 @@ function sanitizeNumber(value: unknown, fallback = 0): number {
   return value;
 }
 
+function truncateToWordLimit(text: string, maxWords: number): string {
+  const cleaned = cleanText(text);
+  if (!cleaned) return "";
+  const words = cleaned.split(/\s+/).filter(Boolean);
+  if (words.length <= maxWords) return cleaned;
+  return words.slice(0, maxWords).join(" ").trim();
+}
+
+function enforceKlingPromptWordLimit(prompt: string, maxWords = 77): string {
+  return truncateToWordLimit(prompt, maxWords);
+}
+
 function ensureHiggsfieldPromptHasPerformanceInstruction(prompt: string): string {
   const normalized = cleanText(prompt);
   if (!normalized) {
@@ -292,7 +304,8 @@ function buildFinalCutProFallbackSteps(sourceDurationSeconds: number | null | un
 
 function applyUgcCharacterLock(prompt: string, character: UGCCharacterProfile): string {
   const cleanedPrompt = cleanText(prompt);
-  const lockLine = `Character Lock: ${character.characterName}. ${character.promptTemplate}`;
+  const conciseTemplate = truncateToWordLimit(character.promptTemplate, 20);
+  const lockLine = `Character Lock: ${character.characterName}. ${conciseTemplate}`;
 
   if (!cleanedPrompt) {
     return `${lockLine} No dialogue: character expresses calm confidence with natural eye contact.`;
@@ -787,6 +800,7 @@ RESPONSE RULES:
 - For every Kling shot, include individual shotDuration (for example: "3.5s" or "0:08").
 - For every Kling shot, include generationType from: base_ai_video | ugc_video | ai_broll | product_ui_overlay | transition_fx.
 - For every Kling shot, include shotId in strict sequence format: shot1, shot2, shot3, ...
+- Each prompt field must be 77 words maximum (hard limit).
 - Ensure prompts are ready for shot-based generation and continuity in Kling MultiShot.
 - Ensure Kling prompts cover required generation types for this concept (at minimum base_ai_video + ai_broll, and ugc_video whenever human talking-head presence is required).
 - Keep the prompt field clean scene direction only. Do NOT include model, reason, or duration text inside prompt; use the dedicated fields.
@@ -876,13 +890,16 @@ JSON SHAPE:
         shotId: sanitizeKlingShotId(item.shotId, index),
         generationType: sanitizeHiggsfieldGenerationType(item.generationType),
         scene: sanitizeString(item.scene, "Scene"),
-        prompt: ensureHiggsfieldPromptHasPerformanceInstruction(
-          stripPromptMetaTags(
-            sanitizeString(
-              item.prompt,
-              "Create a vertical 9:16 AI influencer shot for Muslimah audience: modest outfit, natural expression, soft daylight, realistic movement, clean background, consistent character identity across scenes. No dialogue: character conveys reassurance through calm facial expression and gentle nod."
+        prompt: enforceKlingPromptWordLimit(
+          ensureHiggsfieldPromptHasPerformanceInstruction(
+            stripPromptMetaTags(
+              sanitizeString(
+                item.prompt,
+                "Create a vertical 9:16 AI influencer shot for Muslimah audience: modest outfit, natural expression, soft daylight, realistic movement, clean background, consistent character identity across scenes. No dialogue: character conveys reassurance through calm facial expression and gentle nod."
+              )
             )
-          )
+          ),
+          77
         ),
         recommendedModel: sanitizeString(
           item.recommendedModel,
@@ -902,7 +919,7 @@ JSON SHAPE:
     format.formatType === "ugc" && ugcCharacter
       ? higgsfieldPrompts.map((item) => ({
           ...item,
-          prompt: applyUgcCharacterLock(item.prompt, ugcCharacter),
+          prompt: enforceKlingPromptWordLimit(applyUgcCharacterLock(item.prompt, ugcCharacter), 77),
         }))
       : higgsfieldPrompts;
 
