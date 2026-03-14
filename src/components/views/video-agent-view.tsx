@@ -125,6 +125,11 @@ type VideoPlan = {
     beats: PlanBeat[];
     cta: string;
   };
+  seedanceSinglePrompt?: {
+    model?: string;
+    prompt?: string;
+    targetDuration?: string;
+  };
   startFrame?: VideoStartFrame;
   higgsfieldPrompts: HiggsfieldPrompt[];
   finalCutProSteps?: string[];
@@ -629,6 +634,21 @@ function VideoCanvasNode({ data }: NodeProps<Node<VideoNodeData>>) {
                             {hp.recommendedModel ? <p className="mt-0.5 text-[10px] text-blue-500">Model: {hp.recommendedModel}</p> : null}
                           </div>
                         ))}
+                      </div>
+                    </div>
+                  ) : null}
+
+                  {plan.seedanceSinglePrompt?.prompt ? (
+                    <div>
+                      <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">Seedance 1.5 Pro Single Prompt</p>
+                      <div className="mt-1.5 rounded border border-indigo-200 bg-indigo-50 px-2.5 py-2">
+                        <div className="mb-1 flex flex-wrap items-center gap-1">
+                          <Badge variant="default">{plan.seedanceSinglePrompt.model || "Seedance 1.5 Pro"}</Badge>
+                          {plan.seedanceSinglePrompt.targetDuration ? (
+                            <Badge variant="default">{plan.seedanceSinglePrompt.targetDuration}</Badge>
+                          ) : null}
+                        </div>
+                        <p className="text-xs leading-relaxed text-slate-700">{plan.seedanceSinglePrompt.prompt}</p>
                       </div>
                     </div>
                   ) : null}

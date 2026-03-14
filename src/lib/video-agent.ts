@@ -104,6 +104,11 @@ export interface VideoRecreationPlan {
     beats: PlanBeat[];
     cta: string;
   };
+  seedanceSinglePrompt: {
+    model: string;
+    prompt: string;
+    targetDuration: string;
+  };
   higgsfieldPrompts: HiggsfieldPrompt[];
   finalCutProSteps: string[];
   productionSteps: string[];
@@ -328,6 +333,59 @@ function buildFinalCutProFallbackSteps(sourceDurationSeconds: number | null | un
     "Perform QA pass for pacing, visual continuity, faith-positive framing, and accurate app overlay timing.",
     "Export H.264 master (vertical, high quality), then render platform-ready upload version and verify playback on mobile.",
   ];
+}
+
+function ensureSeedanceQualityDirectives(prompt: string): string {
+  const cleaned = cleanText(prompt);
+  if (!cleaned) return cleaned;
+
+  const needsArtifactsDirective = !/no\s+ai\s+artifacts/i.test(cleaned);
+  const needsCutsDirective = !/no\s+(hard\s+)?cuts?/i.test(cleaned);
+  const needsFlickerDirective = !/no\s+flicker/i.test(cleaned);
+
+  const directives: string[] = [];
+  if (needsArtifactsDirective) directives.push("No AI artifacts");
+  if (needsCutsDirective) directives.push("no hard cuts");
+  if (needsFlickerDirective) directives.push("no flicker");
+
+  if (directives.length === 0) return cleaned;
+  return `${cleaned}. ${directives.join(", ")}, maintain temporal consistency and natural motion continuity.`;
+}
+
+function buildSeedanceFallbackPrompt(args: {
+  appName: string;
+  format: VideoFormatAnalysis;
+  sourceVideo: BuildRecreationPlanArgs["sourceVideo"];
+  hook: string;
+  beats: PlanBeat[];
+  ugcCharacter?: UGCCharacterProfile | null;
+  targetDuration: string;
+}): string {
+  const { appName, format, sourceVideo, hook, beats, ugcCharacter, targetDuration } = args;
+  const beatSummary = beats
+    .slice(0, 5)
+    .map((beat, index) => `Beat ${index + 1}: ${cleanText(beat.visual || beat.narration || "")}`)
+    .filter(Boolean)
+    .join(" | ");
+
+  const characterLine =
+    format.formatType === "ugc" && ugcCharacter
+      ? `Character lock: ${ugcCharacter.characterName}, consistent identity, modest styling, natural expression.`
+      : "No mandatory recurring character lock unless script requires a person.";
+
+  return ensureSeedanceQualityDirectives(
+    [
+      `Seedance 1.5 Pro single-video prompt for a ${targetDuration} vertical 9:16 short.`,
+      `Concept: ${hook || format.summary || sourceVideo.title || "Value-first lifestyle guidance"}.`,
+      `Tone: realistic, cinematic UGC pacing, faith-aware and respectful for Muslim women audience.`,
+      `Structure: ${beatSummary || "Clear hook, practical middle section, soft CTA ending"}.`,
+      `Context: ${sourceVideo.description || sourceVideo.userNotes || "N/A"}.`,
+      characterLine,
+      `Subtle app integration for ${appName} only where naturally relevant.`,
+      `Natural camera motion, coherent lighting continuity, realistic skin/fabric textures, smooth scene transitions.`,
+      `No logos/watermarks, no visual glitches, no jumpy frame interpolation, no abrupt transitions.`,
+    ].join(" ")
+  );
 }
 
 function toCharacterLockToken(characterName: string): string {
@@ -837,6 +895,8 @@ RESPONSE RULES:
 - If human presence is needed, include execution-ready Kling MultiShot prompts for AI influencer scenes and include persona continuity instructions.
 - Production steps must explicitly describe how to generate and stitch Kling shots with app overlays.
 - Add a dedicated finalCutProSteps list with explicit, ordered Final Cut Pro execution steps from project setup to export.
+- Also provide one single consolidated Seedance 1.5 Pro prompt for full-video generation (seedanceSinglePrompt).
+- Seedance prompt must be optimized for Seedance 1.5 Pro with smooth temporal continuity and explicit anti-artifact directives (no AI artifacts, no flicker, no hard cuts, no broken anatomy).
 - Every Kling shot prompt must include performance instruction:
   - If character speaks on camera, include the exact spoken line in quotes and prefix with "Dialogue:".
   - If character does not speak, explicitly write "No dialogue" and describe facial/body expression intent.
@@ -884,6 +944,11 @@ JSON SHAPE:
     ],
     "cta": "string"
   },
+  "seedanceSinglePrompt": {
+    "model": "Seedance 1.5 Pro",
+    "prompt": "string",
+    "targetDuration": "string"
+  },
   "higgsfieldPrompts": [
     {
       "shotId": "shot1",
@@ -907,6 +972,7 @@ JSON SHAPE:
   const row = isRecord(parsed) ? parsed : {};
   const deliverableSpecRow = isRecord(row.deliverableSpec) ? row.deliverableSpec : {};
   const scriptRow = isRecord(row.script) ? row.script : {};
+  const seedanceRow = isRecord(row.seedanceSinglePrompt) ? row.seedanceSinglePrompt : {};
   const maxBeats =
     typeof sourceVideo.sourceDurationSeconds === "number" && Number.isFinite(sourceVideo.sourceDurationSeconds)
       ? clamp(Math.round(sourceVideo.sourceDurationSeconds / 4), 6, 24)
@@ -1012,6 +1078,25 @@ JSON SHAPE:
     mentionState
   );
 
+  const targetDurationForSeedance = sanitizeString(
+    seedanceRow.targetDuration,
+    sanitizeString(deliverableSpecRow.duration, sourceMatchedDurationFallback(sourceVideo.sourceDurationSeconds))
+  );
+  const seedancePrompt = ensureSeedanceQualityDirectives(
+    sanitizeString(
+      seedanceRow.prompt,
+      buildSeedanceFallbackPrompt({
+        appName,
+        format,
+        sourceVideo,
+        hook: sanitizeString(scriptRow.hook, ""),
+        beats,
+        ugcCharacter,
+        targetDuration: targetDurationForSeedance,
+      })
+    )
+  );
+
   const adjustedBeatsForMode =
     integrationMode === "public_figure_overlay_only"
       ? adjustedBeats.map((beat) => ({
@@ -1058,6 +1143,11 @@ JSON SHAPE:
       hook: enforcePrayerStruggleTone(enforceFaithPositiveFraming(adjustedHook)),
       beats: adjustedBeatsForMode,
       cta: enforcePrayerStruggleTone(enforceFaithPositiveFraming(adjustedCta)),
+    },
+    seedanceSinglePrompt: {
+      model: sanitizeString(seedanceRow.model, "Seedance 1.5 Pro"),
+      prompt: seedancePrompt,
+      targetDuration: targetDurationForSeedance,
     },
     higgsfieldPrompts: faithAdjustedPrompts,
     finalCutProSteps:
