@@ -330,20 +330,35 @@ function buildFinalCutProFallbackSteps(sourceDurationSeconds: number | null | un
   ];
 }
 
+function toCharacterLockToken(characterName: string): string {
+  const cleaned = characterName
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "")
+    .replace(/_{2,}/g, "_");
+  return cleaned || "character";
+}
+
+function promptNeedsCharacterLock(prompt: string, generationType: HiggsfieldPrompt["generationType"]): boolean {
+  if (generationType === "ugc_video" || generationType === "base_ai_video") return true;
+  return /\b(woman|female|girl|lady|muslimah|hijab|she|her|talking[-\s]?head|portrait|face|creator|influencer)\b/i.test(
+    prompt
+  );
+}
+
 function applyUgcCharacterLock(prompt: string, character: UGCCharacterProfile): string {
   const cleanedPrompt = cleanText(prompt);
-  const conciseTemplate = truncateToWordLimit(character.promptTemplate, 20);
-  const lockLine = `Character Lock: ${character.characterName}. ${conciseTemplate}`;
+  const lockLine = `Character Lock: $${toCharacterLockToken(character.characterName)}.`;
 
-  if (!cleanedPrompt) {
+  const strippedExistingLock = cleanText(
+    cleanedPrompt.replace(/character\s*lock\s*:[^.;\n]+[.;]?/gi, " ")
+  );
+
+  if (!strippedExistingLock) {
     return `${lockLine} No dialogue: character expresses calm confidence with natural eye contact.`;
   }
 
-  if (/character lock:/i.test(cleanedPrompt) || new RegExp(escapeRegExp(character.characterName), "i").test(cleanedPrompt)) {
-    return cleanedPrompt;
-  }
-
-  return `${lockLine} ${cleanedPrompt}`;
+  return `${lockLine} ${strippedExistingLock}`;
 }
 
 function toFormatSignature(input: string): string {
@@ -830,6 +845,7 @@ RESPONSE RULES:
 - For every Kling shot, include generationType from: base_ai_video | ugc_video | ai_broll | product_ui_overlay | transition_fx.
 - For every Kling shot, include shotId in strict sequence format: shot1, shot2, shot3, ...
 - Each prompt field must be 77 words maximum (hard limit).
+- Prompts are for video generation, not still photos. Do not use wording like "photo", "portrait photo", "still image", or "snapshot".
 - Ensure prompts are ready for shot-based generation and continuity in Kling MultiShot.
 - Ensure Kling prompts cover required generation types for this concept (at minimum base_ai_video + ai_broll, and ugc_video whenever human talking-head presence is required).
 - Keep the prompt field clean scene direction only. Do NOT include model, reason, or duration text inside prompt; use the dedicated fields.
@@ -948,7 +964,14 @@ JSON SHAPE:
     format.formatType === "ugc" && ugcCharacter
       ? higgsfieldPrompts.map((item) => ({
           ...item,
-          prompt: enforceKlingPromptWordLimit(applyUgcCharacterLock(item.prompt, ugcCharacter), 77),
+          prompt: promptNeedsCharacterLock(item.prompt, item.generationType)
+            ? enforceKlingPromptWordLimit(
+                ensureHiggsfieldPromptHasPerformanceInstruction(
+                  applyUgcCharacterLock(item.prompt, ugcCharacter)
+                ),
+                77
+              )
+            : item.prompt,
         }))
       : higgsfieldPrompts;
 
