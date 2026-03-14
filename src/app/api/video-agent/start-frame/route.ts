@@ -57,6 +57,7 @@ type PlanShape = {
     cta?: string;
   };
   higgsfieldPrompts?: Array<{
+    shotId?: string;
     scene?: string;
     prompt?: string;
   }>;
@@ -95,6 +96,24 @@ function dataUrlToBuffer(dataUrl: string): { mimeType: string; buffer: Buffer } 
   };
 }
 
+function normalizeShotPromptForStartFrame(value: unknown): string {
+  let output = cleanText(value);
+  if (!output) return "";
+
+  // Remove prompt metadata/syntax that can conflict with frame generation
+  output = output
+    .replace(/\bno dialogue\b\.?/gi, " ")
+    .replace(/character\s*lock\s*:[^.;\n]+/gi, " ")
+    .replace(/(^|\s)@[a-z0-9_-]+(?=\s|$)/gi, " ")
+    .replace(/\[[^\]]*\]/g, " ")
+    .replace(/\{[^\}]*\}/g, " ")
+    .replace(/<[^>]*>/g, " ");
+
+  // Start frame should represent first instant, not later action in a sequence.
+  const beforeThen = output.split(/\bthen\b/i)[0] || output;
+  return cleanText(beforeThen);
+}
+
 function buildStartFramePrompt(args: {
   appName: string;
   formatType: string;
@@ -108,8 +127,11 @@ function buildStartFramePrompt(args: {
   const firstBeat = Array.isArray(plan.script?.beats) ? plan.script?.beats?.[0] : null;
   const firstBeatVisual = cleanText(firstBeat?.visual);
   const firstBeatNarration = cleanText(firstBeat?.narration);
-  const firstScene = Array.isArray(plan.higgsfieldPrompts) ? plan.higgsfieldPrompts?.[0] : null;
-  const firstScenePrompt = cleanText(firstScene?.prompt);
+  const firstScene = Array.isArray(plan.higgsfieldPrompts)
+    ? plan.higgsfieldPrompts.find((item) => cleanText(item?.shotId).toLowerCase() === "shot1") ||
+      plan.higgsfieldPrompts?.[0]
+    : null;
+  const firstScenePrompt = normalizeShotPromptForStartFrame(firstScene?.prompt);
 
   const characterInstruction = character
     ? `Use the selected recurring character identity (${character.character_name}). Keep face identity and styling consistent.`
@@ -118,13 +140,15 @@ function buildStartFramePrompt(args: {
   return [
     `Generate ONE photorealistic opening start frame for a short-form vertical video concept.`,
     `This is frame zero (first moment before motion) and must match the script tone exactly.`,
+    `Use Shot 1 as the highest-priority visual authority. Hook/beat context is secondary support only.`,
     `App context: ${appName}.`,
     `Format type: ${formatType}.`,
     `Source video title/context: ${video.title || video.description || "N/A"}.`,
     `Script hook: ${hook || "N/A"}.`,
     `First beat visual intent: ${firstBeatVisual || "N/A"}.`,
     `First beat narration intent: ${firstBeatNarration || "N/A"}.`,
-    `Shot prompt cue: ${firstScenePrompt || "N/A"}.`,
+    `Shot 1 cue (start-state only): ${firstScenePrompt || "N/A"}.`,
+    `Render the first instant before any major action begins. If script later includes jump/dive/run/fall, do NOT depict that later action in this frame.`,
     characterInstruction,
     `Vertical 9:16 composition. Cinematic but natural.`,
     `If a person appears, enforce modest, non-sexual framing: neutral posture, respectful body language, and modest wardrobe with no tight/transparent clothing.`,
