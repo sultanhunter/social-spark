@@ -7,6 +7,7 @@ import {
   ChevronDown,
   Clapperboard,
   Clock,
+  Download,
   ExternalLink,
   FileText,
   Loader2,
@@ -216,6 +217,7 @@ type VideoNodeData = {
   onSelect: (formatId: string, videoId: string) => void;
   onPlay: (formatId: string, videoId: string) => void;
   onOpen: (url: string) => void;
+  onDownload: (url: string, title: string | null) => void;
   onAspect: (videoId: string, ratio: number) => void;
 };
 
@@ -260,6 +262,29 @@ function getVideoDirectMediaUrl(video: LibraryVideo): string | null {
   const analysis = getVideoFormatAnalysis(video);
   const url = analysis?.directMediaUrl;
   return typeof url === "string" && url.trim().length > 0 ? url : null;
+}
+
+function inferVideoExtension(url: string): string {
+  try {
+    const parsed = new URL(url);
+    const filename = parsed.pathname.split("/").pop() || "";
+    const ext = filename.includes(".") ? filename.split(".").pop() || "" : "";
+    const normalized = ext.toLowerCase();
+    if (["mp4", "mov", "webm", "m4v"].includes(normalized)) return normalized;
+  } catch {
+    // ignore
+  }
+  return "mp4";
+}
+
+function toSafeVideoFilename(title: string | null, ext: string): string {
+  const base = (title || "video")
+    .trim()
+    .replace(/[^a-zA-Z0-9-_\s]/g, "")
+    .replace(/\s+/g, "-")
+    .slice(0, 80)
+    .replace(/^-+|-+$/g, "");
+  return `${base || "video"}.${ext}`;
 }
 
 function FormatCanvasNode({ data }: NodeProps<Node<FormatNodeData>>) {
@@ -362,18 +387,29 @@ function VideoCanvasNode({ data }: NodeProps<Node<VideoNodeData>>) {
 
       <div className="mt-2 flex items-center justify-between">
         {data.directMediaUrl ? (
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => {
-              data.onSelect(data.formatId, data.video.id);
-              data.onPlay(data.formatId, data.video.id);
-            }}
-            className="nodrag"
-          >
-            <Play className="mr-1 h-3.5 w-3.5" />
-            Play
-          </Button>
+          <div className="flex items-center gap-0.5">
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => {
+                data.onSelect(data.formatId, data.video.id);
+                data.onPlay(data.formatId, data.video.id);
+              }}
+              className="nodrag"
+            >
+              <Play className="mr-1 h-3.5 w-3.5" />
+              Play
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => data.onDownload(data.directMediaUrl || "", data.video.title)}
+              className="nodrag"
+              title="Download video"
+            >
+              <Download className="h-3.5 w-3.5" />
+            </Button>
+          </div>
         ) : <span />}
 
         <div className="flex items-center gap-0.5">
@@ -835,6 +871,41 @@ export function VideoAgentView({ collectionId }: { collectionId: string }) {
     window.open(url, "_blank", "noopener,noreferrer");
   }, []);
 
+  const handleDownloadVideo = useCallback(async (url: string, title: string | null) => {
+    if (!url) {
+      setError("No downloadable video URL available.");
+      return;
+    }
+
+    setError("");
+    setSuccess("");
+
+    try {
+      const response = await fetch(url);
+      if (!response.ok) {
+        throw new Error(`Failed to download video (${response.status}).`);
+      }
+
+      const blob = await response.blob();
+      const objectUrl = URL.createObjectURL(blob);
+      const extension = inferVideoExtension(url);
+      const filename = toSafeVideoFilename(title, extension);
+
+      const anchor = document.createElement("a");
+      anchor.href = objectUrl;
+      anchor.download = filename;
+      document.body.appendChild(anchor);
+      anchor.click();
+      document.body.removeChild(anchor);
+
+      setTimeout(() => URL.revokeObjectURL(objectUrl), 2000);
+      setSuccess("Video download started.");
+    } catch {
+      window.open(url, "_blank", "noopener,noreferrer");
+      setSuccess("Opened video URL. Save it manually from the browser if auto-download is blocked.");
+    }
+  }, []);
+
   const handleAspect = useCallback((videoId: string, ratio: number) => {
     const nextRatio = clampAspectRatio(ratio);
     setVideoAspectRatios((prev) => {
@@ -1291,6 +1362,7 @@ export function VideoAgentView({ collectionId }: { collectionId: string }) {
               onSelect: handleSelectVideo,
               onPlay: handlePlayVideo,
               onOpen: handleOpenSource,
+              onDownload: handleDownloadVideo,
               onAspect: handleAspect,
             } satisfies VideoNodeData,
           });
@@ -1348,6 +1420,7 @@ export function VideoAgentView({ collectionId }: { collectionId: string }) {
     handleSelectVideo,
     handlePlayVideo,
     handleOpenSource,
+    handleDownloadVideo,
     handleAspect,
     handleGeneratePlan,
     handleGenerateStartFrame,
