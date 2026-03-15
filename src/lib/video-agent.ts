@@ -391,11 +391,29 @@ function ensureAppScreenReplacementDirective(prompt: string): string {
   const cleaned = cleanText(prompt);
   if (!cleaned) return cleaned;
 
-  if (/\b(chroma|green\s*screen|#00ff00|keyable|for\s+replacement)\b/i.test(cleaned)) {
+  const hasChromaCue = /\b(chroma|green\s*screen|#00ff00|keyable|for\s+replacement)\b/i.test(cleaned);
+  const hasStaticCameraCue =
+    /\b(static|locked\s*-?\s*off|tripod|no\s+camera\s+movement|no\s+pan|no\s+tilt|no\s+zoom|no\s+dolly|handheld)\b/i.test(
+      cleaned
+    );
+
+  if (hasChromaCue && hasStaticCameraCue) {
     return cleaned;
   }
 
-  return `Phone screen pure chroma green (#00FF00), no UI/text, minimal glare for replacement. ${cleaned}`;
+  const directives: string[] = [];
+
+  if (!hasChromaCue) {
+    directives.push("Phone screen pure chroma green (#00FF00), no UI/text, minimal glare for replacement.");
+  }
+
+  if (!hasStaticCameraCue) {
+    directives.push(
+      "Static locked-off camera, tripod framing, no pan/tilt/zoom/dolly/handheld movement for clean post screen replacement."
+    );
+  }
+
+  return `${directives.join(" ")} ${cleaned}`.trim();
 }
 
 function buildSeedanceFallbackPrompt(args: {
@@ -429,6 +447,7 @@ function buildSeedanceFallbackPrompt(args: {
       characterLine,
       `Subtle app integration for ${appName} only where naturally relevant.`,
       `Any visible phone/app showcase moment must use a pure chroma green screen (#00FF00) for post screen replacement; no baked UI.`,
+      `During any phone/app showcase moment, camera must stay static and locked off (tripod look): no pan, tilt, zoom, dolly, or handheld movement.`,
       `Natural camera motion, coherent lighting continuity, realistic skin/fabric textures, smooth scene transitions.`,
       `No logos/watermarks, no visual glitches, no jumpy frame interpolation, no abrupt transitions.`,
     ].join(" ")
@@ -939,6 +958,9 @@ RESPONSE RULES:
 - CTA must be soft and non-salesy (example style: save/share/follow/use this method), with optional subtle app reference only if it fits context.
 - For any app overlay moment, specify placement and intent in editNote (for example: "top-right mini overlay of cycle day screen for 2s").
 - Reuse the source transcript style (cadence, phrasing, emotional tone) when drafting narration so output feels native to the original format.
+- Preserve the source opening mechanic in the first 1-2 beats (for example reaction face + hook text + reveal order) instead of converting to generic ad structure.
+- If source has little/no spoken audio, keep the adaptation text-led and visual-led: prioritize hook text + reactions + app screen flow, avoid forcing voiceover-heavy scripting.
+- When transcript is sparse, rely heavily on hookPatterns, shotPattern, onScreenTextPatterns, visualSignals, and user notes from SELECTED FORMAT.
 - Include a socialCaption block with a platform-ready post caption and 3-8 relevant hashtags.
 - If human presence is needed, include execution-ready Kling MultiShot prompts for AI influencer scenes and include persona continuity instructions.
 - Production steps must explicitly describe how to generate and stitch Kling shots with app overlays.
@@ -955,6 +977,7 @@ RESPONSE RULES:
 - Each prompt field must be 77 words maximum (hard limit).
 - Prompts are for video generation, not still photos. Do not use wording like "photo", "portrait photo", "still image", or "snapshot".
 - For any app showcase / phone UI shot, force a keyable phone screen: pure chroma green (#00FF00), no UI/text baked in, minimal glare/reflections.
+- For any app showcase / phone UI shot, enforce static camera only: locked-off/tripod framing, no pan/tilt/zoom/dolly/handheld movement.
 - Ensure prompts are ready for shot-based generation and continuity in Kling MultiShot.
 - Ensure Kling prompts cover required generation types for this concept (at minimum base_ai_video + ai_broll, and ugc_video whenever human talking-head presence is required).
 - Keep the prompt field clean scene direction only. Do NOT include model, reason, or duration text inside prompt; use the dedicated fields.
@@ -1165,7 +1188,55 @@ JSON SHAPE:
         }))
       : adjustedBeats;
 
-  const fallbackCaption = [adjustedHook, adjustedBeatsForMode[0]?.narration || "", adjustedCta]
+  const sourceHasSparseAudio =
+    cleanText(sourceVideo.transcriptText).length === 0 &&
+    cleanText(sourceVideo.transcriptSummary).length === 0 &&
+    !format.transcriptAvailable;
+
+  const openingMechanicHint = [
+    format.hookPatterns[0] || "",
+    format.onScreenTextPatterns[0] || "",
+    format.shotPattern[0] || "",
+  ]
+    .map((item) => cleanText(item))
+    .filter(Boolean)
+    .slice(0, 3)
+    .join(" | ");
+
+  const sourceAlignedBeats = adjustedBeatsForMode.map((beat, index) => {
+    if (!sourceHasSparseAudio) return beat;
+
+    const beatNarration = cleanText(beat.narration);
+    const beatOnScreenText = cleanText(beat.onScreenText);
+    const fallbackText = index === 0 ? cleanText(adjustedHook) : beatNarration;
+
+    return {
+      ...beat,
+      narration: "",
+      onScreenText: beatOnScreenText || fallbackText,
+    };
+  });
+
+  const sourceAlignedBeatsWithOpeningHint =
+    openingMechanicHint && sourceAlignedBeats.length > 0
+      ? sourceAlignedBeats.map((beat, index) => {
+          if (index !== 0) return beat;
+          const existingNote = cleanText(beat.editNote);
+          if (/preserve source opening mechanic/i.test(existingNote)) return beat;
+          return {
+            ...beat,
+            editNote: cleanText(
+              `${existingNote}${existingNote ? " " : ""}Preserve source opening mechanic: ${openingMechanicHint}.`
+            ),
+          };
+        })
+      : sourceAlignedBeats;
+
+  const fallbackCaption = [
+    adjustedHook,
+    sourceAlignedBeatsWithOpeningHint[0]?.onScreenText || sourceAlignedBeatsWithOpeningHint[0]?.narration || "",
+    adjustedCta,
+  ]
     .map((line) => cleanText(line))
     .filter(Boolean)
     .join(" ");
@@ -1208,7 +1279,7 @@ JSON SHAPE:
     },
     script: {
       hook: enforcePrayerStruggleTone(enforceFaithPositiveFraming(adjustedHook)),
-      beats: adjustedBeatsForMode,
+      beats: sourceAlignedBeatsWithOpeningHint,
       cta: enforcePrayerStruggleTone(enforceFaithPositiveFraming(adjustedCta)),
     },
     socialCaption: {

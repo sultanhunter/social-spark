@@ -61,8 +61,54 @@ type VideoUgcCharacterRow = {
   is_default?: boolean | null;
 };
 
+type SourceFormatSignals = Partial<VideoFormatAnalysis>;
+
 function asText(value: unknown): string {
   return typeof value === "string" ? value.trim() : "";
+}
+
+function asStringArray(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+
+  const output: string[] = [];
+  const seen = new Set<string>();
+  for (const item of value) {
+    if (typeof item !== "string") continue;
+    const cleaned = item.trim();
+    if (!cleaned) continue;
+    const key = cleaned.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    output.push(cleaned);
+  }
+
+  return output;
+}
+
+function asFiniteNumber(value: unknown): number | null {
+  if (typeof value !== "number" || !Number.isFinite(value)) return null;
+  return value;
+}
+
+function asNullableText(value: unknown): string | null {
+  const cleaned = asText(value);
+  return cleaned.length > 0 ? cleaned : null;
+}
+
+function mergeStringArrays(preferred: string[], fallback: string[]): string[] {
+  const output: string[] = [];
+  const seen = new Set<string>();
+
+  for (const item of [...preferred, ...fallback]) {
+    const cleaned = item.trim();
+    if (!cleaned) continue;
+    const key = cleaned.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    output.push(cleaned);
+  }
+
+  return output;
 }
 
 function isMissingTableError(error: unknown): boolean {
@@ -108,36 +154,100 @@ async function fetchCollectionRow(collectionId: string): Promise<CollectionRow |
   return null;
 }
 
-function toFormatAnalysis(row: VideoFormatRow): VideoFormatAnalysis {
+function getSourceFormatSignalsFromAnalysisPayload(payload: unknown): SourceFormatSignals {
+  if (!payload || typeof payload !== "object") return {};
+  const root = payload as Record<string, unknown>;
+  if (!root.formatAnalysis || typeof root.formatAnalysis !== "object") return {};
+
+  const formatAnalysis = root.formatAnalysis as Record<string, unknown>;
+
+  const sourceDurationSeconds = asFiniteNumber(formatAnalysis.sourceDurationSeconds);
+  const sampledFrameCountRaw = asFiniteNumber(formatAnalysis.sampledFrameCount);
+
   return {
-    formatName: row.format_name,
+    sourceDurationSeconds,
+    sampledFrameCount:
+      sampledFrameCountRaw && sampledFrameCountRaw > 0
+        ? Math.round(sampledFrameCountRaw)
+        : 0,
+    sampledFrameSources: asStringArray(formatAnalysis.sampledFrameSources),
+    directMediaUrl: asNullableText(formatAnalysis.directMediaUrl),
+    r2VideoUrl: asNullableText(formatAnalysis.r2VideoUrl),
+    transcriptAvailable: Boolean(formatAnalysis.transcriptAvailable),
+    transcriptSummary: asText(formatAnalysis.transcriptSummary),
+    transcriptText: asText(formatAnalysis.transcriptText),
+    transcriptHighlights: asStringArray(formatAnalysis.transcriptHighlights),
+    visualSignals: asStringArray(formatAnalysis.visualSignals),
+    onScreenTextPatterns: asStringArray(formatAnalysis.onScreenTextPatterns),
+    summary: asText(formatAnalysis.summary),
+    whyItWorks: asStringArray(formatAnalysis.whyItWorks),
+    hookPatterns: asStringArray(formatAnalysis.hookPatterns),
+    shotPattern: asStringArray(formatAnalysis.shotPattern),
+    editingStyle: asStringArray(formatAnalysis.editingStyle),
+    scriptScaffold: asText(formatAnalysis.scriptScaffold),
+    higgsfieldPromptTemplate: asText(formatAnalysis.higgsfieldPromptTemplate),
+    recreationChecklist: asStringArray(formatAnalysis.recreationChecklist),
+    durationGuidance: asText(formatAnalysis.durationGuidance),
+    confidence: asFiniteNumber(formatAnalysis.confidence) ?? undefined,
+  };
+}
+
+function toFormatAnalysis(row: VideoFormatRow, sourceSignals: SourceFormatSignals): VideoFormatAnalysis {
+  const sourceHookPatterns = asStringArray(sourceSignals.hookPatterns);
+  const sourceShotPattern = asStringArray(sourceSignals.shotPattern);
+  const sourceEditingStyle = asStringArray(sourceSignals.editingStyle);
+  const sourceWhyItWorks = asStringArray(sourceSignals.whyItWorks);
+
+  return {
+    formatName: asText(sourceSignals.formatName) || row.format_name,
     formatType:
       row.format_type === "ugc" || row.format_type === "ai_video" || row.format_type === "editorial"
         ? row.format_type
         : "hybrid",
-    formatSignature: row.format_signature,
+    formatSignature: asText(sourceSignals.formatSignature) || row.format_signature,
     analysisMethod: "frame_aware",
-    sourceDurationSeconds: null,
-    sampledFrameCount: 0,
-    sampledFrameSources: [],
-    directMediaUrl: null,
-    r2VideoUrl: null,
-    transcriptAvailable: false,
-    transcriptSummary: "",
-    transcriptText: "",
-    transcriptHighlights: [],
-    visualSignals: [],
-    onScreenTextPatterns: [],
-    summary: row.summary,
-    whyItWorks: Array.isArray(row.why_it_works) ? row.why_it_works : [],
-    hookPatterns: Array.isArray(row.hook_patterns) ? row.hook_patterns : [],
-    shotPattern: Array.isArray(row.shot_pattern) ? row.shot_pattern : [],
-    editingStyle: Array.isArray(row.editing_style) ? row.editing_style : [],
-    scriptScaffold: row.script_scaffold || "",
-    higgsfieldPromptTemplate: row.higgsfield_prompt_template || "",
-    recreationChecklist: Array.isArray(row.recreation_checklist) ? row.recreation_checklist : [],
-    durationGuidance: row.duration_guidance || "",
-    confidence: typeof row.confidence === "number" ? row.confidence : 0.64,
+    sourceDurationSeconds: asFiniteNumber(sourceSignals.sourceDurationSeconds),
+    sampledFrameCount:
+      typeof sourceSignals.sampledFrameCount === "number" && sourceSignals.sampledFrameCount > 0
+        ? sourceSignals.sampledFrameCount
+        : 0,
+    sampledFrameSources: asStringArray(sourceSignals.sampledFrameSources),
+    directMediaUrl: asNullableText(sourceSignals.directMediaUrl),
+    r2VideoUrl: asNullableText(sourceSignals.r2VideoUrl),
+    transcriptAvailable: Boolean(sourceSignals.transcriptAvailable),
+    transcriptSummary: asText(sourceSignals.transcriptSummary),
+    transcriptText: asText(sourceSignals.transcriptText),
+    transcriptHighlights: asStringArray(sourceSignals.transcriptHighlights),
+    visualSignals: asStringArray(sourceSignals.visualSignals),
+    onScreenTextPatterns: asStringArray(sourceSignals.onScreenTextPatterns),
+    summary: asText(sourceSignals.summary) || row.summary,
+    whyItWorks: mergeStringArrays(
+      sourceWhyItWorks,
+      Array.isArray(row.why_it_works) ? row.why_it_works : []
+    ),
+    hookPatterns: mergeStringArrays(
+      sourceHookPatterns,
+      Array.isArray(row.hook_patterns) ? row.hook_patterns : []
+    ),
+    shotPattern: mergeStringArrays(
+      sourceShotPattern,
+      Array.isArray(row.shot_pattern) ? row.shot_pattern : []
+    ),
+    editingStyle: mergeStringArrays(
+      sourceEditingStyle,
+      Array.isArray(row.editing_style) ? row.editing_style : []
+    ),
+    scriptScaffold: asText(sourceSignals.scriptScaffold) || row.script_scaffold || "",
+    higgsfieldPromptTemplate:
+      asText(sourceSignals.higgsfieldPromptTemplate) || row.higgsfield_prompt_template || "",
+    recreationChecklist: mergeStringArrays(
+      asStringArray(sourceSignals.recreationChecklist),
+      Array.isArray(row.recreation_checklist) ? row.recreation_checklist : []
+    ),
+    durationGuidance: asText(sourceSignals.durationGuidance) || row.duration_guidance || "",
+    confidence:
+      asFiniteNumber(sourceSignals.confidence) ??
+      (typeof row.confidence === "number" ? row.confidence : 0.64),
   };
 }
 
@@ -353,6 +463,19 @@ export async function POST(request: NextRequest) {
     const appName = (collection.app_name || "Muslimah Pro").trim() || "Muslimah Pro";
     const appContext = (collection.app_description || collection.app_context || "").trim();
     const transcriptContext = getSourceTranscriptFromAnalysisPayload(sourceVideo.analysis_payload);
+    const sourceSignals = getSourceFormatSignalsFromAnalysisPayload(sourceVideo.analysis_payload);
+    const mergedSignals: SourceFormatSignals = {
+      ...sourceSignals,
+      transcriptSummary: transcriptContext.summary || sourceSignals.transcriptSummary || "",
+      transcriptText: transcriptContext.text || sourceSignals.transcriptText || "",
+      sourceDurationSeconds:
+        transcriptContext.sourceDurationSeconds ??
+        asFiniteNumber(sourceSignals.sourceDurationSeconds),
+      transcriptAvailable:
+        Boolean(sourceSignals.transcriptAvailable) ||
+        Boolean(transcriptContext.summary) ||
+        Boolean(transcriptContext.text),
+    };
 
     const plan = await buildVideoRecreationPlan({
       appName,
@@ -367,7 +490,7 @@ export async function POST(request: NextRequest) {
         transcriptText: transcriptContext.text,
         sourceDurationSeconds: transcriptContext.sourceDurationSeconds,
       },
-      format: toFormatAnalysis(format),
+      format: toFormatAnalysis(format, mergedSignals),
       ugcCharacter,
       reasoningModel,
     });
