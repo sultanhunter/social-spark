@@ -104,6 +104,10 @@ export interface VideoRecreationPlan {
     beats: PlanBeat[];
     cta: string;
   };
+  socialCaption: {
+    caption: string;
+    hashtags: string[];
+  };
   seedanceSinglePrompt: {
     model: string;
     prompt: string;
@@ -167,6 +171,25 @@ function sanitizeStringArray(value: unknown, max = 8): string[] {
     if (seen.has(key)) continue;
     seen.add(key);
     output.push(cleaned);
+    if (output.length >= max) break;
+  }
+
+  return output;
+}
+
+function sanitizeHashtagArray(value: unknown, max = 8): string[] {
+  const base = sanitizeStringArray(value, max * 2);
+  const output: string[] = [];
+  const seen = new Set<string>();
+
+  for (const item of base) {
+    const compact = item.replace(/\s+/g, "").replace(/^#+/, "").trim();
+    if (!compact) continue;
+    const tag = `#${compact}`;
+    const key = tag.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    output.push(tag);
     if (output.length >= max) break;
   }
 
@@ -916,6 +939,7 @@ RESPONSE RULES:
 - CTA must be soft and non-salesy (example style: save/share/follow/use this method), with optional subtle app reference only if it fits context.
 - For any app overlay moment, specify placement and intent in editNote (for example: "top-right mini overlay of cycle day screen for 2s").
 - Reuse the source transcript style (cadence, phrasing, emotional tone) when drafting narration so output feels native to the original format.
+- Include a socialCaption block with a platform-ready post caption and 3-8 relevant hashtags.
 - If human presence is needed, include execution-ready Kling MultiShot prompts for AI influencer scenes and include persona continuity instructions.
 - Production steps must explicitly describe how to generate and stitch Kling shots with app overlays.
 - Add a dedicated finalCutProSteps list with explicit, ordered Final Cut Pro execution steps from project setup to export.
@@ -969,6 +993,10 @@ JSON SHAPE:
     ],
     "cta": "string"
   },
+  "socialCaption": {
+    "caption": "string",
+    "hashtags": ["string"]
+  },
   "seedanceSinglePrompt": {
     "model": "Seedance 1.5 Pro",
     "prompt": "string",
@@ -997,6 +1025,7 @@ JSON SHAPE:
   const row = isRecord(parsed) ? parsed : {};
   const deliverableSpecRow = isRecord(row.deliverableSpec) ? row.deliverableSpec : {};
   const scriptRow = isRecord(row.script) ? row.script : {};
+  const socialCaptionRow = isRecord(row.socialCaption) ? row.socialCaption : {};
   const seedanceRow = isRecord(row.seedanceSinglePrompt) ? row.seedanceSinglePrompt : {};
   const maxBeats =
     typeof sourceVideo.sourceDurationSeconds === "number" && Number.isFinite(sourceVideo.sourceDurationSeconds)
@@ -1136,6 +1165,16 @@ JSON SHAPE:
         }))
       : adjustedBeats;
 
+  const fallbackCaption = [adjustedHook, adjustedBeatsForMode[0]?.narration || "", adjustedCta]
+    .map((line) => cleanText(line))
+    .filter(Boolean)
+    .join(" ");
+  const socialCaption = sanitizeString(
+    socialCaptionRow.caption,
+    fallbackCaption || "Save this flow and try it today for a calmer, more consistent routine."
+  );
+  const socialHashtags = sanitizeHashtagArray(socialCaptionRow.hashtags, 8);
+
   return {
     title: sanitizeString(row.title, `${appName} format recreation plan`),
     strategy: (() => {
@@ -1171,6 +1210,13 @@ JSON SHAPE:
       hook: enforcePrayerStruggleTone(enforceFaithPositiveFraming(adjustedHook)),
       beats: adjustedBeatsForMode,
       cta: enforcePrayerStruggleTone(enforceFaithPositiveFraming(adjustedCta)),
+    },
+    socialCaption: {
+      caption: enforcePrayerStruggleTone(enforceFaithPositiveFraming(socialCaption)),
+      hashtags:
+        socialHashtags.length > 0
+          ? socialHashtags
+          : ["#MuslimahLifestyle", "#FaithBasedHabits", "#ProductiveRoutine"],
     },
     seedanceSinglePrompt: {
       model: sanitizeString(seedanceRow.model, "Seedance 1.5 Pro"),

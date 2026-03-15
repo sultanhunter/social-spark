@@ -126,6 +126,10 @@ type VideoPlan = {
     beats: PlanBeat[];
     cta: string;
   };
+  socialCaption?: {
+    caption?: string;
+    hashtags?: string[];
+  };
   seedanceSinglePrompt?: {
     model?: string;
     prompt?: string;
@@ -648,6 +652,22 @@ function VideoCanvasNode({ data }: NodeProps<Node<VideoNodeData>>) {
                           <p className="text-xs leading-relaxed text-slate-700">{plan.script.cta}</p>
                         </div>
                       ) : null}
+                    </div>
+                  ) : null}
+
+                  {plan.socialCaption?.caption ? (
+                    <div>
+                      <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">Post Caption</p>
+                      <div className="mt-1.5 rounded border border-fuchsia-200 bg-fuchsia-50 px-2.5 py-2">
+                        <p className="text-xs leading-relaxed text-slate-700">{plan.socialCaption.caption}</p>
+                        {plan.socialCaption.hashtags?.length ? (
+                          <div className="mt-1.5 flex flex-wrap gap-1">
+                            {plan.socialCaption.hashtags.map((tag, i) => (
+                              <Badge key={`caption-tag-${i}`} variant="default">{tag}</Badge>
+                            ))}
+                          </div>
+                        ) : null}
+                      </div>
                     </div>
                   ) : null}
 
