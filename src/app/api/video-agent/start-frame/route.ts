@@ -8,6 +8,11 @@ import {
   isImageGenerationModel,
   type ImageGenerationModel,
 } from "@/lib/image-generation-model";
+import fs from "fs";
+import { promisify } from "util";
+import { extractVideoFrame, parseStartTimeSeconds, cleanupTempFile } from "@/lib/video-extractor";
+
+const readFile = promisify(fs.readFile);
 
 export const runtime = "nodejs";
 
@@ -28,6 +33,7 @@ type VideoRow = {
   title: string | null;
   description: string | null;
   thumbnail_url: string | null;
+  source_url: string | null;
 };
 
 type FormatRow = {
@@ -213,7 +219,7 @@ export async function POST(request: NextRequest) {
     const [videoResult, latestPlanResult] = await Promise.all([
       supabase
         .from("video_format_videos")
-        .select("id, format_id, platform, title, description, thumbnail_url")
+        .select("id, format_id, platform, title, description, thumbnail_url, source_url")
         .eq("id", videoId)
         .eq("collection_id", collectionId)
         .single(),
@@ -287,11 +293,38 @@ export async function POST(request: NextRequest) {
       segmentIndex,
     });
 
+    let extractedFrameDataUrl: string | null = null;
+    let extractedFramePath: string | null = null;
+
+    // We try to extract the exact frame from the source video using FFmpeg.
+    // If it fails, we fall back to the generic video.thumbnail_url
+    if (video.source_url) {
+      try {
+        let timecodeSeconds = 0;
+        if (typeof segmentIndex === "number" && plan.motionControlSegments && plan.motionControlSegments[segmentIndex]) {
+          timecodeSeconds = parseStartTimeSeconds(plan.motionControlSegments[segmentIndex].timecode);
+        }
+
+        extractedFramePath = await extractVideoFrame(video.source_url, timecodeSeconds);
+        const imageBuffer = await readFile(extractedFramePath);
+        extractedFrameDataUrl = `data:image/jpeg;base64,${imageBuffer.toString("base64")}`;
+      } catch (err) {
+        console.warn(`[start-frame] Failed to extract exact video frame, falling back to thumbnail. Error:`, err);
+      }
+    }
+
+    const referenceImageUrls: string[] = [];
+    if (extractedFrameDataUrl) {
+      referenceImageUrls.push(extractedFrameDataUrl);
+    } else if (video.thumbnail_url) {
+      referenceImageUrls.push(video.thumbnail_url);
+    }
+
     const generatedDataUrl = await generateImage(prompt, {
       platform: "tiktok",
       uiGenerationMode: "ai_creative",
       visualVariant: format.format_type === "ugc" ? "ugc_real" : "brand_optimized",
-      referenceImageUrls: video.thumbnail_url ? [video.thumbnail_url] : [],
+      referenceImageUrls,
       characterReferenceImageUrls:
         character?.reference_image_url && character.reference_image_url.trim().length > 0
           ? [character.reference_image_url]
@@ -307,6 +340,10 @@ export async function POST(request: NextRequest) {
     const generatedAt = new Date().toISOString();
     const key = `collections/${collectionId}/video-agent/start-frames/${videoId}/${generatedAt.replace(/[:.]/g, "-")}-${randomUUID()}.png`;
     const imageUrl = await uploadToR2(key, buffer, mimeType || "image/png");
+
+    if (extractedFramePath) {
+      void cleanupTempFile(extractedFramePath);
+    }
 
     const nextStartFrame = {
       imageUrl,
