@@ -8,11 +8,23 @@ import {
   isImageGenerationModel,
   type ImageGenerationModel,
 } from "@/lib/image-generation-model";
-import fs from "fs";
-import { promisify } from "util";
-import { extractVideoFrame, parseStartTimeSeconds, cleanupTempFile } from "@/lib/video-extractor";
 
-const readFile = promisify(fs.readFile);
+function parseStartTimeSeconds(timecode?: string): number {
+  if (!timecode) return 0;
+
+  const startPart = timecode.split("-")[0]?.trim();
+  if (!startPart) return 0;
+
+  const parts = startPart.split(":").map(Number);
+
+  if (parts.length === 2 && !isNaN(parts[0]) && !isNaN(parts[1])) {
+    return parts[0] * 60 + parts[1];
+  } else if (parts.length === 3 && !isNaN(parts[0]) && !isNaN(parts[1]) && !isNaN(parts[2])) {
+    return parts[0] * 3600 + parts[1] * 60 + parts[2];
+  }
+
+  return 0;
+}
 
 export const runtime = "nodejs";
 
@@ -294,9 +306,8 @@ export async function POST(request: NextRequest) {
     });
 
     let extractedFrameDataUrl: string | null = null;
-    let extractedFramePath: string | null = null;
 
-    // We try to extract the exact frame from the source video using FFmpeg.
+    // We try to extract the exact frame from the source video using the Render Extractor service.
     // If it fails, we fall back to the generic video.thumbnail_url
     if (video.source_url) {
       try {
@@ -305,11 +316,33 @@ export async function POST(request: NextRequest) {
           timecodeSeconds = parseStartTimeSeconds(plan.motionControlSegments[segmentIndex].timecode);
         }
 
-        extractedFramePath = await extractVideoFrame(video.source_url, timecodeSeconds);
-        const imageBuffer = await readFile(extractedFramePath);
-        extractedFrameDataUrl = `data:image/jpeg;base64,${imageBuffer.toString("base64")}`;
+        const extractorUrl = process.env.NEXT_PUBLIC_SOCIAL_EXTRACTOR_URL || "https://social-extractor-production.up.railway.app";
+        const extractorToken = process.env.SOCIAL_EXTRACTOR_API_TOKEN || "";
+
+        const response = await fetch(`${extractorUrl}/api/extract-single-frame`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            ...(extractorToken ? { Authorization: `Bearer ${extractorToken}` } : {}),
+          },
+          body: JSON.stringify({
+            url: video.source_url,
+            platform: video.platform || "tiktok",
+            timeSeconds: timecodeSeconds,
+          }),
+        });
+
+        if (response.ok) {
+          const json = await response.json();
+          if (json.data) {
+            extractedFrameDataUrl = json.data;
+          }
+        } else {
+          const errText = await response.text();
+          console.warn(`[start-frame] Extractor service returned error (${response.status}): ${errText}`);
+        }
       } catch (err) {
-        console.warn(`[start-frame] Failed to extract exact video frame, falling back to thumbnail. Error:`, err);
+        console.warn(`[start-frame] Failed to extract exact video frame via service, falling back to thumbnail. Error:`, err);
       }
     }
 
@@ -340,10 +373,6 @@ export async function POST(request: NextRequest) {
     const generatedAt = new Date().toISOString();
     const key = `collections/${collectionId}/video-agent/start-frames/${videoId}/${generatedAt.replace(/[:.]/g, "-")}-${randomUUID()}.png`;
     const imageUrl = await uploadToR2(key, buffer, mimeType || "image/png");
-
-    if (extractedFramePath) {
-      void cleanupTempFile(extractedFramePath);
-    }
 
     const nextStartFrame = {
       imageUrl,
