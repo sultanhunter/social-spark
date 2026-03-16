@@ -316,10 +316,11 @@ export async function POST(request: NextRequest) {
           timecodeSeconds = parseStartTimeSeconds(plan.motionControlSegments[segmentIndex].timecode);
         }
 
-        const extractorUrl = process.env.NEXT_PUBLIC_SOCIAL_EXTRACTOR_URL || "https://social-extractor-production.up.railway.app";
-        const extractorToken = process.env.SOCIAL_EXTRACTOR_API_TOKEN || "";
+        const extractorUrl = process.env.SOCIAL_EXTRACTOR_API_URL || process.env.EXTRACTOR_API_URL || "https://social-extractor-render.onrender.com";
+        const cleanUrl = extractorUrl.replace(/\/+$/, "");
+        const extractorToken = process.env.SOCIAL_EXTRACTOR_API_TOKEN || process.env.EXTRACTOR_API_TOKEN || "";
 
-        const response = await fetch(`${extractorUrl}/api/extract-single-frame`, {
+        const response = await fetch(`${cleanUrl}/api/extract-single-frame`, {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
