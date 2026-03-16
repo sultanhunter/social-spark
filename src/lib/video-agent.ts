@@ -86,10 +86,28 @@ type HiggsfieldPrompt = {
   shotDuration: string;
 };
 
+export interface VideoStartFrame {
+  imageUrl?: string;
+  prompt?: string;
+  generatedAt?: string;
+  characterId?: string | null;
+  imageModel?: string;
+}
+
+export interface MotionControlSegment {
+  segmentId: number;
+  timecode: string;
+  durationSeconds: number;
+  startFramePrompt: string;
+  startFrame?: VideoStartFrame;
+}
+
 export interface VideoRecreationPlan {
   title: string;
   strategy: string;
   objective: string;
+  useMotionControl?: boolean;
+  motionControlSegments?: MotionControlSegment[];
   integrationMode: "standard_adaptation" | "public_figure_overlay_only";
   publicFigureNotes: string;
   overlayOpportunities: string[];
@@ -892,6 +910,7 @@ interface BuildRecreationPlanArgs {
   format: VideoFormatAnalysis;
   ugcCharacter?: UGCCharacterProfile | null;
   reasoningModel?: ReasoningModel;
+  useMotionControl?: boolean;
 }
 
 export async function buildVideoRecreationPlan({
@@ -901,6 +920,7 @@ export async function buildVideoRecreationPlan({
   format,
   ugcCharacter,
   reasoningModel = DEFAULT_REASONING_MODEL,
+  useMotionControl = false,
 }: BuildRecreationPlanArgs): Promise<VideoRecreationPlan> {
   requireGeminiKey();
   const model = genAI.getGenerativeModel({ model: reasoningModel });
@@ -987,6 +1007,12 @@ RESPONSE RULES:
   - Do NOT rewrite their core spoken lines or impersonate them.
   - Keep original speech/audio moments and only integrate app via subtle overlays/screenshots/screen recordings.
   - Avoid making it look like endorsement by that public figure.
+${useMotionControl ? `
+KLING MOTION CONTROL 3.0 CONSTRAINTS:
+- You must generate motionControlSegments because Kling 3.0 has a strict 30-second duration limit.
+- If the total video is longer than 30 seconds, split it into roughly equal logical segments (max 30s each).
+- For each segment, provide a startFramePrompt describing the exact visual of the very first frame of that segment (including character identity, clothing, setting, and exact framing).
+` : ""}
 - Return strict JSON only.
 
 JSON SHAPE:
@@ -1025,6 +1051,14 @@ JSON SHAPE:
     "prompt": "string",
     "targetDuration": "string"
   },
+${useMotionControl ? `  "motionControlSegments": [
+    {
+      "segmentId": 1,
+      "timecode": "0:00-0:30",
+      "durationSeconds": 30,
+      "startFramePrompt": "string"
+    }
+  ],` : ""}
   "higgsfieldPrompts": [
     {
       "shotId": "shot1",
@@ -1109,16 +1143,16 @@ JSON SHAPE:
   const ugcLockedPrompts =
     format.formatType === "ugc" && ugcCharacter
       ? higgsfieldPrompts.map((item) => ({
-          ...item,
-          prompt: promptNeedsCharacterLock(item.prompt, item.generationType)
-            ? enforceKlingPromptWordLimit(
-                ensureHiggsfieldPromptHasPerformanceInstruction(
-                  applyUgcCharacterLock(item.prompt, ugcCharacter)
-                ),
-                77
-              )
-            : item.prompt,
-        }))
+        ...item,
+        prompt: promptNeedsCharacterLock(item.prompt, item.generationType)
+          ? enforceKlingPromptWordLimit(
+            ensureHiggsfieldPromptHasPerformanceInstruction(
+              applyUgcCharacterLock(item.prompt, ugcCharacter)
+            ),
+            77
+          )
+          : item.prompt,
+      }))
       : higgsfieldPrompts;
 
   const faithAdjustedPrompts = ugcLockedPrompts.map((item) => ({
@@ -1180,12 +1214,12 @@ JSON SHAPE:
   const adjustedBeatsForMode =
     integrationMode === "public_figure_overlay_only"
       ? adjustedBeats.map((beat) => ({
-          ...beat,
-          narration:
-            sanitizeString(beat.narration, "").length > 0 && /original|keep|source audio|use source/i.test(beat.narration)
-              ? beat.narration
-              : "Keep original source speech/audio for this beat; no rewritten voice line.",
-        }))
+        ...beat,
+        narration:
+          sanitizeString(beat.narration, "").length > 0 && /original|keep|source audio|use source/i.test(beat.narration)
+            ? beat.narration
+            : "Keep original source speech/audio for this beat; no rewritten voice line.",
+      }))
       : adjustedBeats;
 
   const sourceHasSparseAudio =
@@ -1220,16 +1254,16 @@ JSON SHAPE:
   const sourceAlignedBeatsWithOpeningHint =
     openingMechanicHint && sourceAlignedBeats.length > 0
       ? sourceAlignedBeats.map((beat, index) => {
-          if (index !== 0) return beat;
-          const existingNote = cleanText(beat.editNote);
-          if (/preserve source opening mechanic/i.test(existingNote)) return beat;
-          return {
-            ...beat,
-            editNote: cleanText(
-              `${existingNote}${existingNote ? " " : ""}Preserve source opening mechanic: ${openingMechanicHint}.`
-            ),
-          };
-        })
+        if (index !== 0) return beat;
+        const existingNote = cleanText(beat.editNote);
+        if (/preserve source opening mechanic/i.test(existingNote)) return beat;
+        return {
+          ...beat,
+          editNote: cleanText(
+            `${existingNote}${existingNote ? " " : ""}Preserve source opening mechanic: ${openingMechanicHint}.`
+          ),
+        };
+      })
       : sourceAlignedBeats;
 
   const fallbackCaption = [
@@ -1246,8 +1280,25 @@ JSON SHAPE:
   );
   const socialHashtags = sanitizeHashtagArray(socialCaptionRow.hashtags, 8);
 
+  const motionControlSegmentsRaw = Array.isArray(row.motionControlSegments) ? row.motionControlSegments : [];
+  const motionControlSegments: MotionControlSegment[] = motionControlSegmentsRaw
+    .map((seg, index) => {
+      if (!isRecord(seg)) return null;
+      return {
+        segmentId: typeof seg.segmentId === "number" ? seg.segmentId : index + 1,
+        timecode: sanitizeString(seg.timecode, "0:00-0:30"),
+        durationSeconds: sanitizeNumber(seg.durationSeconds, 30),
+        startFramePrompt: enforcePrayerStruggleTone(
+          enforceFaithPositiveFraming(sanitizeString(seg.startFramePrompt, ""))
+        ),
+      };
+    })
+    .filter((seg): seg is MotionControlSegment => Boolean(seg));
+
   return {
     title: sanitizeString(row.title, `${appName} format recreation plan`),
+    useMotionControl,
+    motionControlSegments: useMotionControl && motionControlSegments.length > 0 ? motionControlSegments : undefined,
     strategy: (() => {
       const normalized = enforcePrayerStruggleTone(
         enforceFaithPositiveFraming(sanitizeString(row.strategy, ""))

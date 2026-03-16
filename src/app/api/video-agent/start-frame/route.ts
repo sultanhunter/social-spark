@@ -61,6 +61,19 @@ type PlanShape = {
     scene?: string;
     prompt?: string;
   }>;
+  motionControlSegments?: Array<{
+    segmentId: number;
+    timecode: string;
+    durationSeconds: number;
+    startFramePrompt: string;
+    startFrame?: {
+      imageUrl?: string;
+      prompt?: string;
+      generatedAt?: string;
+      characterId?: string | null;
+      imageModel?: string;
+    };
+  }>;
   startFrame?: {
     imageUrl?: string;
     prompt?: string;
@@ -120,8 +133,29 @@ function buildStartFramePrompt(args: {
   video: VideoRow;
   plan: PlanShape;
   character: CharacterRow | null;
+  segmentIndex?: number;
 }): string {
-  const { appName, formatType, video, plan, character } = args;
+  const { appName, formatType, video, plan, character, segmentIndex } = args;
+
+  if (typeof segmentIndex === "number" && plan.motionControlSegments && plan.motionControlSegments[segmentIndex]) {
+    const segment = plan.motionControlSegments[segmentIndex];
+    const characterInstruction = character
+      ? `Use the selected recurring character identity (${character.character_name}). Keep face identity and styling consistent.`
+      : "No fixed character lock required unless script clearly needs a person.";
+
+    return [
+      `Generate ONE photorealistic opening start frame for segment ${segment.segmentId} (timecode: ${segment.timecode}) of this video.`,
+      `This frame will be used as the starting image for Kling Motion Control 3.0.`,
+      `Segment Start Visual Intent: ${cleanText(segment.startFramePrompt) || "N/A"}.`,
+      characterInstruction,
+      `Vertical 9:16 composition at 1080x1920 output framing.`,
+      `Photorealistic ultra-detailed 4K-quality look (high texture fidelity, clean dynamic range, realistic skin and fabric detail).`,
+      `If a person appears, enforce modest, non-sexual framing: neutral posture, respectful body language, and modest wardrobe.`,
+      `No suggestive posing, no cleavage, no lingerie/swimwear styling, no glamourized sensual focus.`,
+      `No text overlays, no subtitles, no logos, no watermark.`,
+      `High realism and coherent scene setup suitable for AI video generation start frame input.`,
+    ].join(" ");
+  }
 
   const hook = cleanText(plan.script?.hook);
   const firstBeat = Array.isArray(plan.script?.beats) ? plan.script?.beats?.[0] : null;
@@ -129,7 +163,7 @@ function buildStartFramePrompt(args: {
   const firstBeatNarration = cleanText(firstBeat?.narration);
   const firstScene = Array.isArray(plan.higgsfieldPrompts)
     ? plan.higgsfieldPrompts.find((item) => cleanText(item?.shotId).toLowerCase() === "shot1") ||
-      plan.higgsfieldPrompts?.[0]
+    plan.higgsfieldPrompts?.[0]
     : null;
   const firstScenePrompt = normalizeShotPromptForStartFrame(firstScene?.prompt);
 
@@ -167,6 +201,7 @@ export async function POST(request: NextRequest) {
     const videoId = asText(body.videoId);
     const explicitFormatId = asText(body.formatId);
     const explicitCharacterId = asText(body.characterId);
+    const segmentIndex = typeof body.segmentIndex === "number" ? body.segmentIndex : undefined;
     const imageGenerationModel: ImageGenerationModel = isImageGenerationModel(body.imageGenerationModel)
       ? body.imageGenerationModel
       : DEFAULT_IMAGE_GENERATION_MODEL;
@@ -249,6 +284,7 @@ export async function POST(request: NextRequest) {
       video,
       plan,
       character,
+      segmentIndex,
     });
 
     const generatedDataUrl = await generateImage(prompt, {
@@ -272,16 +308,31 @@ export async function POST(request: NextRequest) {
     const key = `collections/${collectionId}/video-agent/start-frames/${videoId}/${generatedAt.replace(/[:.]/g, "-")}-${randomUUID()}.png`;
     const imageUrl = await uploadToR2(key, buffer, mimeType || "image/png");
 
-    const nextPlan: PlanShape = {
-      ...plan,
-      startFrame: {
-        imageUrl,
-        prompt,
-        generatedAt,
-        characterId: character?.id || characterId || null,
-        imageModel: imageGenerationModel,
-      },
+    const nextStartFrame = {
+      imageUrl,
+      prompt,
+      generatedAt,
+      characterId: character?.id || characterId || null,
+      imageModel: imageGenerationModel,
     };
+
+    let nextPlan: PlanShape;
+    if (typeof segmentIndex === "number" && plan.motionControlSegments && plan.motionControlSegments[segmentIndex]) {
+      const updatedSegments = [...plan.motionControlSegments];
+      updatedSegments[segmentIndex] = {
+        ...updatedSegments[segmentIndex],
+        startFrame: nextStartFrame,
+      };
+      nextPlan = {
+        ...plan,
+        motionControlSegments: updatedSegments,
+      };
+    } else {
+      nextPlan = {
+        ...plan,
+        startFrame: nextStartFrame,
+      };
+    }
 
     const nextPayload = {
       ...payload,
@@ -303,7 +354,7 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({
       planId: planRow.id,
-      startFrame: nextPlan.startFrame,
+      startFrame: nextStartFrame,
       plan: nextPlan,
     });
   } catch (err) {

@@ -136,6 +136,13 @@ type VideoPlan = {
     targetDuration?: string;
   };
   startFrame?: VideoStartFrame;
+  motionControlSegments?: {
+    segmentId: number;
+    timecode: string;
+    durationSeconds: number;
+    startFramePrompt: string;
+    startFrame?: VideoStartFrame;
+  }[];
   higgsfieldPrompts: HiggsfieldPrompt[];
   finalCutProSteps?: string[];
   productionSteps: string[];
@@ -201,6 +208,8 @@ type VideoNodeData = {
   directMediaUrl: string | null;
   reasoningModel: ReasoningModel;
   onReasoningModelChange: (value: string) => void;
+  useMotionControl: boolean;
+  onUseMotionControlChange: (value: boolean) => void;
   startFrameImageModel: ImageGenerationModel;
   onStartFrameImageModelChange: (value: string) => void;
   isLoadingCharacters: boolean;
@@ -210,8 +219,9 @@ type VideoNodeData = {
   onOpenCharacterStudio: () => void;
   onGeneratePlan: (formatId: string, videoId: string) => void;
   isGeneratingPlan: boolean;
-  onGenerateStartFrame: (formatId: string, videoId: string) => void;
+  onGenerateStartFrame: (formatId: string, videoId: string, segmentIndex?: number) => void;
   isGeneratingStartFrame: boolean;
+  generatingSegmentIndex?: number;
   plan: VideoPlan | null;
   hasR2Url: boolean;
   isRefreshingR2: boolean;
@@ -438,9 +448,8 @@ function VideoCanvasNode({ data }: NodeProps<Node<VideoNodeData>>) {
 
       {/* Expanded controls section */}
       <div
-        className={`nodrag overflow-hidden transition-all duration-300 ease-out ${
-          isSelected ? "mt-2 max-h-[800px] opacity-100" : "max-h-0 opacity-0"
-        }`}
+        className={`nodrag overflow-hidden transition-all duration-300 ease-out ${isSelected ? "mt-2 max-h-[800px] opacity-100" : "max-h-0 opacity-0"
+          }`}
       >
         <div className="space-y-2 rounded-lg border border-slate-200 bg-slate-50 p-2">
           <select
@@ -490,6 +499,22 @@ function VideoCanvasNode({ data }: NodeProps<Node<VideoNodeData>>) {
               </Button>
             </>
           ) : null}
+
+          <div className="flex items-center gap-2 px-1">
+            <input
+              type="checkbox"
+              id={`motion-control-${data.video.id}`}
+              checked={data.useMotionControl}
+              onChange={(e) => data.onUseMotionControlChange(e.target.checked)}
+              className="nodrag h-3.5 w-3.5 rounded border-slate-300 text-rose-500 focus:ring-rose-400"
+            />
+            <label
+              htmlFor={`motion-control-${data.video.id}`}
+              className="text-xs font-medium text-slate-700"
+            >
+              Split for Kling Motion Control 3.0
+            </label>
+          </div>
 
           <Button
             variant="primary"
@@ -618,6 +643,64 @@ function VideoCanvasNode({ data }: NodeProps<Node<VideoNodeData>>) {
                       </p>
                     )}
                   </div>
+
+                  {plan.motionControlSegments?.length ? (
+                    <div>
+                      <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">Motion Control 3.0 Segments</p>
+                      <div className="mt-1.5 space-y-3">
+                        {plan.motionControlSegments.map((segment, idx) => (
+                          <div key={`mc-seg-${idx}`} className="rounded border border-indigo-200 bg-indigo-50/50 p-2.5">
+                            <div className="flex items-center justify-between mb-2">
+                              <div>
+                                <Badge variant="default" className="mr-1.5 bg-indigo-100 text-indigo-700 border-indigo-200 hover:bg-indigo-100">
+                                  Segment {segment.segmentId}
+                                </Badge>
+                                <span className="text-[10px] font-mono font-medium text-slate-500">
+                                  {segment.timecode} ({segment.durationSeconds}s)
+                                </span>
+                              </div>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="nodrag h-7"
+                                onClick={() => data.onGenerateStartFrame(data.formatId, data.video.id, idx)}
+                                isLoading={data.isGeneratingStartFrame && data.generatingSegmentIndex === idx}
+                              >
+                                <Sparkles className="mr-1 h-3.5 w-3.5" />
+                                {segment.startFrame?.imageUrl ? "Regenerate" : "Generate Start Frame"}
+                              </Button>
+                            </div>
+
+                            {segment.startFrame?.imageUrl ? (
+                              <div className="mb-2 rounded border border-slate-200 bg-white p-2">
+                                <img
+                                  src={segment.startFrame.imageUrl}
+                                  alt={`Segment ${segment.segmentId} start frame`}
+                                  className="w-full rounded border border-slate-200 object-cover"
+                                  style={{ aspectRatio: "9 / 16" }}
+                                />
+                                <div className="mt-1.5 flex items-center justify-end">
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    className="nodrag"
+                                    onClick={() => data.onOpen(segment.startFrame?.imageUrl || "")}
+                                  >
+                                    <ExternalLink className="mr-1 h-3.5 w-3.5" />
+                                    Open image
+                                  </Button>
+                                </div>
+                              </div>
+                            ) : null}
+
+                            <p className="text-[11px] leading-relaxed text-slate-600">
+                              <span className="font-semibold text-slate-500">Visual Intent:</span> {segment.startFramePrompt}
+                            </p>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  ) : null}
 
                   {plan.script ? (
                     <div>
@@ -788,6 +871,7 @@ export function VideoAgentView({ collectionId }: { collectionId: string }) {
   const [reasoningModel, setReasoningModel] = useState<ReasoningModel>(DEFAULT_REASONING_MODEL);
   const [startFrameImageModel, setStartFrameImageModel] =
     useState<ImageGenerationModel>(DEFAULT_IMAGE_GENERATION_MODEL);
+  const [useMotionControl, setUseMotionControl] = useState<boolean>(false);
 
   const [library, setLibrary] = useState<LibraryFormat[]>([]);
   const [expandedType, setExpandedType] = useState<string | null>(null);
@@ -804,6 +888,7 @@ export function VideoAgentView({ collectionId }: { collectionId: string }) {
   const [isLoadingCharacters, setIsLoadingCharacters] = useState(false);
   const [isGeneratingPlan, setIsGeneratingPlan] = useState(false);
   const [generatingStartFrameVideoId, setGeneratingStartFrameVideoId] = useState<string | null>(null);
+  const [generatingSegmentIndex, setGeneratingSegmentIndex] = useState<number | undefined>(undefined);
   const [refreshingR2VideoId, setRefreshingR2VideoId] = useState<string | null>(null);
 
   const [error, setError] = useState("");
@@ -1126,6 +1211,7 @@ export function VideoAgentView({ collectionId }: { collectionId: string }) {
           videoId: targetVideo.id,
           characterId: targetFormat.format_type === "ugc" ? selectedUgcCharacter?.id : null,
           reasoningModel,
+          useMotionControl,
         }),
       });
 
@@ -1151,7 +1237,7 @@ export function VideoAgentView({ collectionId }: { collectionId: string }) {
     }
   }, [collectionId, library, selectedFormat, selectedVideo, selectedUgcCharacter, reasoningModel, loadPlans]);
 
-  const handleGenerateStartFrame = useCallback(async (formatIdArg?: string, videoIdArg?: string) => {
+  const handleGenerateStartFrame = useCallback(async (formatIdArg?: string, videoIdArg?: string, segmentIndex?: number) => {
     const targetFormat =
       (formatIdArg ? library.find((item) => item.id === formatIdArg) : null) || selectedFormat;
     const targetVideo =
@@ -1169,6 +1255,7 @@ export function VideoAgentView({ collectionId }: { collectionId: string }) {
     }
 
     setGeneratingStartFrameVideoId(targetVideo.id);
+    setGeneratingSegmentIndex(segmentIndex);
     setError("");
     setSuccess("");
 
@@ -1182,6 +1269,7 @@ export function VideoAgentView({ collectionId }: { collectionId: string }) {
           videoId: targetVideo.id,
           characterId: targetFormat.format_type === "ugc" ? selectedUgcCharacter?.id : null,
           imageGenerationModel: startFrameImageModel,
+          segmentIndex,
         }),
       });
 
@@ -1208,6 +1296,7 @@ export function VideoAgentView({ collectionId }: { collectionId: string }) {
       setError(err instanceof Error ? err.message : "Failed to generate start frame.");
     } finally {
       setGeneratingStartFrameVideoId(null);
+      setGeneratingSegmentIndex(undefined);
     }
   }, [
     collectionId,
@@ -1356,6 +1445,8 @@ export function VideoAgentView({ collectionId }: { collectionId: string }) {
               onReasoningModelChange: (value: string) => {
                 if (isReasoningModel(value)) setReasoningModel(value);
               },
+              useMotionControl,
+              onUseMotionControlChange: setUseMotionControl,
               startFrameImageModel,
               onStartFrameImageModelChange: (value: string) => {
                 if (isImageGenerationModel(value)) setStartFrameImageModel(value);
@@ -1369,10 +1460,11 @@ export function VideoAgentView({ collectionId }: { collectionId: string }) {
                 void handleGeneratePlan(formatId, videoId);
               },
               isGeneratingPlan: isGeneratingPlan && selectedVideoId === video.id,
-              onGenerateStartFrame: (formatId: string, videoId: string) => {
-                void handleGenerateStartFrame(formatId, videoId);
+              onGenerateStartFrame: (formatId: string, videoId: string, segmentIndex?: number) => {
+                void handleGenerateStartFrame(formatId, videoId, segmentIndex);
               },
               isGeneratingStartFrame: generatingStartFrameVideoId === video.id,
+              generatingSegmentIndex,
               plan: videoPlans[video.id] || null,
               hasR2Url: Boolean(getVideoR2Url(video)),
               isRefreshingR2: refreshingR2VideoId === video.id,

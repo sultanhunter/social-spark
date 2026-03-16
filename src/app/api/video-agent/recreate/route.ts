@@ -282,7 +282,7 @@ function getSourceTranscriptFromAnalysisPayload(payload: unknown): {
       ? sourceMetadata.transcriptText.trim()
       : (typeof formatAnalysis?.transcriptText === "string" && formatAnalysis.transcriptText.trim())
         ? formatAnalysis.transcriptText.trim()
-      : null;
+        : null;
 
   const sourceDurationSecondsRaw =
     typeof sourceMetadata?.sourceDurationSeconds === "number"
@@ -324,6 +324,7 @@ export async function POST(request: NextRequest) {
     const formatId = asText(body.formatId);
     const videoId = asText(body.videoId);
     const selectedCharacterId = asText(body.characterId);
+    const useMotionControl = Boolean(body.useMotionControl);
     const reasoningModel = isReasoningModel(body.reasoningModel)
       ? body.reasoningModel
       : DEFAULT_REASONING_MODEL;
@@ -399,33 +400,33 @@ export async function POST(request: NextRequest) {
 
       let characterResult = selectedCharacterId
         ? await supabase
-            .from("video_ugc_characters")
-            .select(fullSelect)
-            .eq("collection_id", collectionId)
-            .eq("id", selectedCharacterId)
-            .maybeSingle()
+          .from("video_ugc_characters")
+          .select(fullSelect)
+          .eq("collection_id", collectionId)
+          .eq("id", selectedCharacterId)
+          .maybeSingle()
         : await supabase
-            .from("video_ugc_characters")
-            .select(fullSelect)
-            .eq("collection_id", collectionId)
-            .eq("is_default", true)
-            .maybeSingle();
+          .from("video_ugc_characters")
+          .select(fullSelect)
+          .eq("collection_id", collectionId)
+          .eq("is_default", true)
+          .maybeSingle();
 
       if (characterResult.error && isMissingColumnError(characterResult.error, "is_default")) {
         characterResult = selectedCharacterId
           ? await supabase
-              .from("video_ugc_characters")
-              .select("id, collection_id, character_name, persona_summary, visual_style, wardrobe_notes, voice_tone, prompt_template, reference_image_url, image_model")
-              .eq("collection_id", collectionId)
-              .eq("id", selectedCharacterId)
-              .maybeSingle()
+            .from("video_ugc_characters")
+            .select("id, collection_id, character_name, persona_summary, visual_style, wardrobe_notes, voice_tone, prompt_template, reference_image_url, image_model")
+            .eq("collection_id", collectionId)
+            .eq("id", selectedCharacterId)
+            .maybeSingle()
           : await supabase
-              .from("video_ugc_characters")
-              .select("id, collection_id, character_name, persona_summary, visual_style, wardrobe_notes, voice_tone, prompt_template, reference_image_url, image_model")
-              .eq("collection_id", collectionId)
-              .order("created_at", { ascending: true })
-              .limit(1)
-              .maybeSingle();
+            .from("video_ugc_characters")
+            .select("id, collection_id, character_name, persona_summary, visual_style, wardrobe_notes, voice_tone, prompt_template, reference_image_url, image_model")
+            .eq("collection_id", collectionId)
+            .order("created_at", { ascending: true })
+            .limit(1)
+            .maybeSingle();
       }
 
       if (characterResult.error) {
@@ -493,6 +494,7 @@ export async function POST(request: NextRequest) {
       format: toFormatAnalysis(format, mergedSignals),
       ugcCharacter,
       reasoningModel,
+      useMotionControl,
     });
 
     const { data: planRecord, error: planInsertError } = await supabase
