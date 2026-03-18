@@ -1,0 +1,28 @@
+{
+  "manifest_version": 3,
+  "name": "Social Spark TikTok Saver",
+  "description": "Auto-scroll TikTok feed and save relevant posts to Social Spark.",
+  "version": "0.1.0",
+  "permissions": ["storage", "tabs", "activeTab"],
+  "host_permissions": [
+    "https://www.tiktok.com/*",
+    "https://m.tiktok.com/*",
+    "https://*/*",
+    "http://localhost/*"
+  ],
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "TikTok Saver"
+  },
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://www.tiktok.com/*", "https://m.tiktok.com/*"],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ]
+}
