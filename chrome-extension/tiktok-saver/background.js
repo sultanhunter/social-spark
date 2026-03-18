@@ -1,6 +1,6 @@
 const DEFAULT_CONFIG = {
   backendUrl: "http://localhost:3000",
-  collectionId: "",
+  collectionId: "7579367d-a324-4995-b326-f21f6deb02ea",
   confidenceThreshold: 0.6,
   batchSize: 3,
   flushIntervalMs: 4000,
@@ -157,7 +157,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       ...state.config,
       ...config,
       backendUrl: String(config.backendUrl || state.config.backendUrl || DEFAULT_CONFIG.backendUrl),
-      collectionId: String(config.collectionId || ""),
+      collectionId: String(config.collectionId || DEFAULT_CONFIG.collectionId),
       confidenceThreshold: Number(config.confidenceThreshold || DEFAULT_CONFIG.confidenceThreshold),
       batchSize: Number(config.batchSize || DEFAULT_CONFIG.batchSize),
       flushIntervalMs: Number(config.flushIntervalMs || DEFAULT_CONFIG.flushIntervalMs),

@@ -3,10 +3,36 @@ let autoScrollTimer = null;
 let isRunning = false;
 
 function getPostUrlsFromDom() {
+  const elements = Array.from(document.querySelectorAll('[data-e2e="video-author-avatar"]'));
+  const urls = [];
+
+  for (const element of elements) {
+    const parentContainer = element.closest('[data-e2e="recommend-list-item-container"], .video-feed-item'); // Trying a few common selectors
+    if(parentContainer) {
+       const wrapperNode = element.closest('a');
+       if(wrapperNode && wrapperNode.href) {
+            let author = wrapperNode.href.split("/").pop(); // Get @username
+            if(!author || !author.startsWith("@")) continue;
+
+            const idNode = parentContainer.querySelector('[id^="xgwrapper-0-"]');
+            if(idNode) {
+               const videoId = idNode.id.split("-").pop();
+               if(videoId) {
+                    urls.push(`https://www.tiktok.com/${author}/video/${videoId}`);
+               }
+            }
+       }
+    }
+  }
+
+  // Backup / fallback for traditional a tags if they exist.
   const anchors = Array.from(document.querySelectorAll('a[href*="/video/"], a[href*="/photo/"]'));
-  const urls = anchors
-    .map((anchor) => anchor.href)
-    .filter((url) => typeof url === "string" && url.startsWith("https://www.tiktok.com/"));
+  anchors.forEach((anchor) => {
+    if(typeof anchor.href === "string" && anchor.href.startsWith("https://www.tiktok.com/")) {
+       urls.push(anchor.href);
+    }
+  });
+
   return Array.from(new Set(urls));
 }
 

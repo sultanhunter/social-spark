@@ -18,6 +18,7 @@ const ids = {
 };
 
 const STORAGE_KEY = "socialSparkTikTokSaverConfig";
+const DEFAULT_COLLECTION_ID = "7579367d-a324-4995-b326-f21f6deb02ea";
 
 function asNumber(input, fallback) {
   const value = Number(input.value);
@@ -45,7 +46,7 @@ async function loadConfig() {
   const config = stored?.[STORAGE_KEY] || {};
 
   ids.backendUrl.value = config.backendUrl || "http://localhost:3000";
-  ids.collectionId.value = config.collectionId || "";
+  ids.collectionId.value = config.collectionId || DEFAULT_COLLECTION_ID;
   ids.confidenceThreshold.value = String(config.confidenceThreshold || 0.6);
   ids.batchSize.value = String(config.batchSize || 3);
   ids.flushIntervalMs.value = String(config.flushIntervalMs || 4000);

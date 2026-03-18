@@ -125,11 +125,12 @@ export async function POST(request: NextRequest) {
 
     const { data: collection, error: collectionError } = await supabase
       .from("collections")
-      .select("id, app_name, app_description, app_context")
+      .select("id, app_name, app_description")
       .eq("id", collectionId)
       .single();
 
     if (collectionError || !collection) {
+      console.error("Collection error:", collectionError);
       return NextResponse.json({ error: "Collection not found." }, { status: 404 });
     }
 
@@ -205,7 +206,7 @@ export async function POST(request: NextRequest) {
             collection: {
               appName: collection.app_name,
               appDescription: collection.app_description || "",
-              appContext: collection.app_context || "",
+              appContext: "",
             },
           });
           decision = videoAnalysis.decision;
@@ -220,7 +221,7 @@ export async function POST(request: NextRequest) {
             collection: {
               appName: collection.app_name,
               appDescription: collection.app_description || "",
-              appContext: collection.app_context || "",
+              appContext: "",
             },
           });
         }
