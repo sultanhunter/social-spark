@@ -759,7 +759,6 @@ async function buildVisualEvidence(source: VideoSourceMetadata, collectionId?: s
     frameCount: FRAME_SAMPLE_TARGET,
     frameWidth: 960,
     includeTranscript: true,
-    transcriptMaxSeconds: 90,
     collectionId,
   });
 
