@@ -170,8 +170,9 @@ function buildStartFramePrompt(args: {
   plan: PlanShape;
   character: CharacterRow | null;
   segmentIndex?: number;
+  previousSegmentStartFrameUrl?: string | null;
 }): string {
-  const { appName, formatType, video, plan, character, segmentIndex } = args;
+  const { appName, formatType, video, plan, character, segmentIndex, previousSegmentStartFrameUrl } = args;
 
   if (typeof segmentIndex === "number" && plan.motionControlSegments && plan.motionControlSegments[segmentIndex]) {
     const segment = plan.motionControlSegments[segmentIndex];
@@ -180,6 +181,14 @@ function buildStartFramePrompt(args: {
     const segmentVisualCue = cleanText(firstSegmentBeat?.visual || firstSegmentBeat?.onScreenText || firstSegmentBeat?.narration);
     const segmentCta = cleanText(segment.script?.cta);
     const firstSegmentPrompt = Array.isArray(segment.multiShotPrompts) ? cleanText(segment.multiShotPrompts?.[0]?.prompt) : "";
+    const continuityInstruction =
+      typeof segmentIndex === "number" && segmentIndex > 0
+        ? "Continuity requirement: this segment must look like an immediate continuation of the previous segment. Keep character identity, outfit, location, lighting, lens style, and scene geometry consistent."
+        : "";
+    const previousFrameInstruction =
+      previousSegmentStartFrameUrl
+        ? "A previous segment continuity reference image is attached. Treat it as the strongest visual continuity anchor."
+        : "";
     const characterInstruction = character
       ? `Use the selected recurring character identity (${character.character_name}). Keep face identity and styling consistent.`
       : "No fixed character lock required unless script clearly needs a person.";
@@ -192,6 +201,8 @@ function buildStartFramePrompt(args: {
       `Segment first beat visual context: ${segmentVisualCue || "N/A"}.`,
       `Segment CTA context: ${segmentCta || "N/A"}.`,
       `Segment first multi-shot prompt cue: ${firstSegmentPrompt || "N/A"}.`,
+      continuityInstruction,
+      previousFrameInstruction,
       characterInstruction,
       `Vertical 9:16 composition at 1080x1920 output framing.`,
       `Photorealistic ultra-detailed 4K-quality look (high texture fidelity, clean dynamic range, realistic skin and fabric detail).`,
@@ -323,6 +334,14 @@ export async function POST(request: NextRequest) {
       }
     }
 
+    const previousSegmentStartFrameUrl =
+      typeof segmentIndex === "number" &&
+        segmentIndex > 0 &&
+        plan.motionControlSegments &&
+        plan.motionControlSegments[segmentIndex - 1]?.startFrame?.imageUrl
+        ? cleanText(plan.motionControlSegments[segmentIndex - 1]?.startFrame?.imageUrl)
+        : null;
+
     const prompt = buildStartFramePrompt({
       appName: asText(planRow.app_name) || "Muslimah Pro",
       formatType: asText(format.format_type) || "hybrid",
@@ -330,6 +349,7 @@ export async function POST(request: NextRequest) {
       plan,
       character,
       segmentIndex,
+      previousSegmentStartFrameUrl,
     });
 
     let extractedFrameDataUrl: string | null = null;
@@ -375,6 +395,10 @@ export async function POST(request: NextRequest) {
     }
 
     const referenceImageUrls: string[] = [];
+    if (previousSegmentStartFrameUrl) {
+      referenceImageUrls.push(previousSegmentStartFrameUrl);
+    }
+
     if (extractedFrameDataUrl) {
       referenceImageUrls.push(extractedFrameDataUrl);
     } else if (video.thumbnail_url) {

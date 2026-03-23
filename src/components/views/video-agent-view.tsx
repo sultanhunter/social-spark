@@ -232,6 +232,14 @@ type VideoNodeData = {
   onGenerateStartFrame: (formatId: string, videoId: string, segmentIndex?: number) => void;
   isGeneratingStartFrame: boolean;
   generatingSegmentIndex?: number;
+  onUploadPreviousSegmentVideo: (
+    formatId: string,
+    videoId: string,
+    segmentIndex: number,
+    file: File
+  ) => void;
+  isUploadingPreviousSegmentVideo: boolean;
+  uploadingPreviousSegmentIndex?: number;
   plan: VideoPlan | null;
   hasR2Url: boolean;
   isRefreshingR2: boolean;
@@ -324,6 +332,70 @@ function formatDurationLabel(seconds: number | null): string {
   const mins = Math.floor(rounded / 60);
   const secs = rounded % 60;
   return `${mins}:${String(secs).padStart(2, "0")}`;
+}
+
+async function extractLastFrameDataUrlFromVideo(file: File): Promise<{
+  dataUrl: string;
+  durationSeconds: number;
+  seekTimeSeconds: number;
+}> {
+  const objectUrl = URL.createObjectURL(file);
+  const video = document.createElement("video");
+
+  try {
+    video.preload = "metadata";
+    video.muted = true;
+    video.playsInline = true;
+    video.src = objectUrl;
+
+    await new Promise<void>((resolve, reject) => {
+      video.onloadedmetadata = () => resolve();
+      video.onerror = () => reject(new Error("Failed to read uploaded video metadata."));
+    });
+
+    const durationSeconds = Number.isFinite(video.duration) ? video.duration : 0;
+    if (durationSeconds <= 0) {
+      throw new Error("Uploaded video has invalid duration.");
+    }
+
+    const seekTimeSeconds = Math.max(0, durationSeconds - 0.08);
+
+    await new Promise<void>((resolve, reject) => {
+      video.onseeked = () => resolve();
+      video.onerror = () => reject(new Error("Failed to seek uploaded video to final frame."));
+      video.currentTime = seekTimeSeconds;
+    });
+
+    const sourceWidth = video.videoWidth || 1080;
+    const sourceHeight = video.videoHeight || 1920;
+    const maxDimension = 1280;
+    const scale = Math.min(1, maxDimension / Math.max(sourceWidth, sourceHeight));
+    const targetWidth = Math.max(2, Math.round(sourceWidth * scale));
+    const targetHeight = Math.max(2, Math.round(sourceHeight * scale));
+
+    const canvas = document.createElement("canvas");
+    canvas.width = targetWidth;
+    canvas.height = targetHeight;
+
+    const ctx = canvas.getContext("2d");
+    if (!ctx) {
+      throw new Error("Failed to initialize canvas context for frame extraction.");
+    }
+
+    ctx.drawImage(video, 0, 0, targetWidth, targetHeight);
+    const dataUrl = canvas.toDataURL("image/jpeg", 0.92);
+    if (!dataUrl || !dataUrl.startsWith("data:image/")) {
+      throw new Error("Failed to extract final frame from uploaded video.");
+    }
+
+    return {
+      dataUrl,
+      durationSeconds,
+      seekTimeSeconds,
+    };
+  } finally {
+    URL.revokeObjectURL(objectUrl);
+  }
 }
 
 function inferVideoExtension(url: string): string {
@@ -718,6 +790,24 @@ function VideoCanvasNode({ data }: NodeProps<Node<VideoNodeData>>) {
                       <div className="mt-1.5 space-y-3">
                         {plan.motionControlSegments.map((segment, idx) => (
                           <div key={`mc-seg-${idx}`} className="rounded border border-indigo-200 bg-indigo-50/50 p-2.5">
+                            {(() => {
+                              const uploadInputId = `upload-prev-segment-${data.video.id}-${idx}`;
+                              return (
+                                <input
+                                  id={uploadInputId}
+                                  type="file"
+                                  accept="video/*"
+                                  className="hidden"
+                                  onChange={(event) => {
+                                    const file = event.currentTarget.files?.[0];
+                                    if (file) {
+                                      data.onUploadPreviousSegmentVideo(data.formatId, data.video.id, idx, file);
+                                    }
+                                    event.currentTarget.value = "";
+                                  }}
+                                />
+                              );
+                            })()}
                             <div className="flex items-center justify-between mb-2">
                               <div>
                                 <Badge variant="default" className="mr-1.5 bg-indigo-100 text-indigo-700 border-indigo-200 hover:bg-indigo-100">
@@ -738,6 +828,33 @@ function VideoCanvasNode({ data }: NodeProps<Node<VideoNodeData>>) {
                                 {segment.startFrame?.imageUrl ? "Regenerate" : "Generate Start Frame"}
                               </Button>
                             </div>
+
+                            {idx > 0 ? (
+                              <div className="mb-2 rounded border border-sky-200 bg-sky-50 px-2 py-1.5">
+                                <div className="flex items-center justify-between gap-2">
+                                  <p className="text-[10px] text-sky-700">
+                                    Upload previous segment generated video to extract its last frame for this segment.
+                                  </p>
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    className="nodrag h-7"
+                                    isLoading={
+                                      data.isUploadingPreviousSegmentVideo &&
+                                      data.uploadingPreviousSegmentIndex === idx
+                                    }
+                                    onClick={() => {
+                                      const uploadInput = document.getElementById(
+                                        `upload-prev-segment-${data.video.id}-${idx}`
+                                      ) as HTMLInputElement | null;
+                                      uploadInput?.click();
+                                    }}
+                                  >
+                                    {segment.startFrame?.imageUrl ? "Replace via Upload" : "Upload Prev Video"}
+                                  </Button>
+                                </div>
+                              </div>
+                            ) : null}
 
                             {segment.startFrame?.imageUrl ? (
                               <div className="mb-2 rounded border border-slate-200 bg-white p-2">
@@ -968,6 +1085,8 @@ export function VideoAgentView({ collectionId }: { collectionId: string }) {
   const [isGeneratingPlan, setIsGeneratingPlan] = useState(false);
   const [generatingStartFrameVideoId, setGeneratingStartFrameVideoId] = useState<string | null>(null);
   const [generatingSegmentIndex, setGeneratingSegmentIndex] = useState<number | undefined>(undefined);
+  const [uploadingPreviousSegmentVideoId, setUploadingPreviousSegmentVideoId] = useState<string | null>(null);
+  const [uploadingPreviousSegmentIndex, setUploadingPreviousSegmentIndex] = useState<number | undefined>(undefined);
   const [refreshingR2VideoId, setRefreshingR2VideoId] = useState<string | null>(null);
 
   const [error, setError] = useState("");
@@ -1314,7 +1433,7 @@ export function VideoAgentView({ collectionId }: { collectionId: string }) {
     } finally {
       setIsGeneratingPlan(false);
     }
-  }, [collectionId, library, selectedFormat, selectedVideo, selectedUgcCharacter, reasoningModel, loadPlans]);
+  }, [collectionId, library, selectedFormat, selectedVideo, selectedUgcCharacter, reasoningModel, useMotionControl, loadPlans]);
 
   const handleGenerateStartFrame = useCallback(async (formatIdArg?: string, videoIdArg?: string, segmentIndex?: number) => {
     const targetFormat =
@@ -1384,6 +1503,94 @@ export function VideoAgentView({ collectionId }: { collectionId: string }) {
     selectedVideo,
     selectedUgcCharacter,
     startFrameImageModel,
+    videoPlans,
+    loadPlans,
+  ]);
+
+  const handleUploadPreviousSegmentVideo = useCallback(async (
+    formatIdArg?: string,
+    videoIdArg?: string,
+    segmentIndex?: number,
+    file?: File
+  ) => {
+    const targetFormat =
+      (formatIdArg ? library.find((item) => item.id === formatIdArg) : null) || selectedFormat;
+    const targetVideo =
+      (targetFormat && videoIdArg ? targetFormat.videos.find((item) => item.id === videoIdArg) : null) || selectedVideo;
+
+    if (!targetFormat || !targetVideo) {
+      setError("Select a format and video first.");
+      return;
+    }
+
+    if (typeof segmentIndex !== "number" || segmentIndex <= 0) {
+      setError("Upload previous segment video is available from segment 2 onward.");
+      return;
+    }
+
+    if (!file) {
+      setError("Select a generated video file from the previous segment.");
+      return;
+    }
+
+    const existingPlan = videoPlans[targetVideo.id] || null;
+    if (!existingPlan) {
+      setError("Generate a recreation plan first.");
+      return;
+    }
+
+    setUploadingPreviousSegmentVideoId(targetVideo.id);
+    setUploadingPreviousSegmentIndex(segmentIndex);
+    setError("");
+    setSuccess("");
+
+    try {
+      const extracted = await extractLastFrameDataUrlFromVideo(file);
+
+      const response = await fetch("/api/video-agent/start-frame/from-upload", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          collectionId,
+          videoId: targetVideo.id,
+          segmentIndex,
+          imageDataUrl: extracted.dataUrl,
+          sourceVideoName: file.name,
+          sourceDurationSeconds: extracted.durationSeconds,
+          sourceSeekTimeSeconds: extracted.seekTimeSeconds,
+        }),
+      });
+
+      const data = (await response.json()) as StartFrameResponse;
+      if (!response.ok) {
+        throw new Error(data.error || "Failed to apply uploaded previous segment frame.");
+      }
+
+      if (!data.startFrame && !data.plan) {
+        throw new Error("No start frame returned from uploaded segment processing.");
+      }
+
+      setVideoPlans((prev) => ({
+        ...prev,
+        [targetVideo.id]: data.plan || {
+          ...existingPlan,
+          startFrame: data.startFrame,
+        },
+      }));
+
+      setSuccess(`Applied last frame from uploaded video at ${formatDurationLabel(extracted.seekTimeSeconds)}.`);
+      void loadPlans();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to extract last frame from uploaded video.");
+    } finally {
+      setUploadingPreviousSegmentVideoId(null);
+      setUploadingPreviousSegmentIndex(undefined);
+    }
+  }, [
+    collectionId,
+    library,
+    selectedFormat,
+    selectedVideo,
     videoPlans,
     loadPlans,
   ]);
@@ -1544,6 +1751,16 @@ export function VideoAgentView({ collectionId }: { collectionId: string }) {
               },
               isGeneratingStartFrame: generatingStartFrameVideoId === video.id,
               generatingSegmentIndex,
+              onUploadPreviousSegmentVideo: (
+                formatId: string,
+                videoId: string,
+                segmentIndex: number,
+                file: File
+              ) => {
+                void handleUploadPreviousSegmentVideo(formatId, videoId, segmentIndex, file);
+              },
+              isUploadingPreviousSegmentVideo: uploadingPreviousSegmentVideoId === video.id,
+              uploadingPreviousSegmentIndex,
               plan: videoPlans[video.id] || null,
               hasR2Url: Boolean(getVideoR2Url(video)),
               isRefreshingR2: refreshingR2VideoId === video.id,
@@ -1595,12 +1812,16 @@ export function VideoAgentView({ collectionId }: { collectionId: string }) {
     selectedVideoId,
     playingVideoId,
     reasoningModel,
+    useMotionControl,
     startFrameImageModel,
     isLoadingCharacters,
     ugcCharacters,
     selectedUgcCharacterId,
     isGeneratingPlan,
     generatingStartFrameVideoId,
+    generatingSegmentIndex,
+    uploadingPreviousSegmentVideoId,
+    uploadingPreviousSegmentIndex,
     error,
     success,
     videoAspectRatios,
@@ -1615,6 +1836,7 @@ export function VideoAgentView({ collectionId }: { collectionId: string }) {
     handleAspect,
     handleGeneratePlan,
     handleGenerateStartFrame,
+    handleUploadPreviousSegmentVideo,
     nodePositions,
   ]);
 
