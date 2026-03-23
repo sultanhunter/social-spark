@@ -11,6 +11,18 @@ type NormalizedFormatType = "ugc" | "ai_video" | "hybrid" | "editorial";
 type AnalysisMethod = "frame_aware";
 type InlineImagePart = { inlineData: { data: string; mimeType: string } };
 const FRAME_SAMPLE_TARGET = 6;
+const MAX_SINGLE_VIDEO_CLIP_SECONDS = 15;
+
+type VideoContentCategory =
+  | "islamic_only"
+  | "islamic_period_pregnancy"
+  | "period_pregnancy_only";
+
+interface VideoContentClassification {
+  category: VideoContentCategory;
+  confidence: number;
+  reason: string;
+}
 
 export interface VideoSourceMetadata {
   url: string;
@@ -99,6 +111,11 @@ export interface MotionControlSegment {
   timecode: string;
   durationSeconds: number;
   startFramePrompt: string;
+  script?: {
+    hook: string;
+    beats: PlanBeat[];
+    cta: string;
+  };
   startFrame?: VideoStartFrame;
 }
 
@@ -106,6 +123,8 @@ export interface VideoRecreationPlan {
   title: string;
   strategy: string;
   objective: string;
+  contentClassification?: VideoContentClassification;
+  maxSingleClipDurationSeconds?: number;
   useMotionControl?: boolean;
   motionControlSegments?: MotionControlSegment[];
   integrationMode: "standard_adaptation" | "public_figure_overlay_only";
@@ -217,6 +236,107 @@ function sanitizeHashtagArray(value: unknown, max = 8): string[] {
 function sanitizeNumber(value: unknown, fallback = 0): number {
   if (typeof value !== "number" || Number.isNaN(value)) return fallback;
   return value;
+}
+
+function sanitizePlanBeats(value: unknown, maxBeats: number): PlanBeat[] {
+  const beatsRaw = Array.isArray(value) ? value : [];
+  return beatsRaw
+    .map((beat) => {
+      if (!isRecord(beat)) return null;
+      return {
+        timecode: sanitizeString(beat.timecode, "0:00-0:04"),
+        visual: sanitizeString(beat.visual, "Match source format visual pacing."),
+        narration: sanitizeString(beat.narration, ""),
+        onScreenText: sanitizeString(beat.onScreenText, ""),
+        editNote: sanitizeString(beat.editNote, ""),
+      };
+    })
+    .filter((beat): beat is PlanBeat => Boolean(beat))
+    .slice(0, maxBeats);
+}
+
+function parseClockToSeconds(value: string): number | null {
+  const cleaned = cleanText(value);
+  if (!cleaned) return null;
+
+  const parts = cleaned.split(":").map((token) => Number(token));
+  if (parts.some((part) => Number.isNaN(part))) return null;
+
+  if (parts.length === 2) {
+    return parts[0] * 60 + parts[1];
+  }
+
+  if (parts.length === 3) {
+    return parts[0] * 3600 + parts[1] * 60 + parts[2];
+  }
+
+  return null;
+}
+
+function parseTimecodeRange(timecode: string): { start: number; end: number } | null {
+  const cleaned = cleanText(timecode);
+  if (!cleaned) return null;
+  const [startRaw, endRaw] = cleaned.split("-").map((token) => token.trim());
+  const start = startRaw ? parseClockToSeconds(startRaw) : null;
+  const end = endRaw ? parseClockToSeconds(endRaw) : null;
+
+  if (typeof start !== "number") return null;
+  if (typeof end === "number" && end > start) {
+    return { start, end };
+  }
+
+  return { start, end: start + 4 };
+}
+
+function formatClock(seconds: number): string {
+  const safe = Math.max(0, Math.round(seconds));
+  const mins = Math.floor(safe / 60);
+  const secs = safe % 60;
+  return `${mins}:${String(secs).padStart(2, "0")}`;
+}
+
+function splitBeatsIntoShotGroups(args: {
+  beats: PlanBeat[];
+  totalDurationSeconds: number;
+  maxSegmentSeconds: number;
+  hook: string;
+  cta: string;
+}): MotionControlSegment[] {
+  const { beats, totalDurationSeconds, maxSegmentSeconds, hook, cta } = args;
+  const safeTotal = Math.max(maxSegmentSeconds, Math.round(totalDurationSeconds));
+  const segmentCount = Math.max(1, Math.ceil(safeTotal / maxSegmentSeconds));
+  const beatChunkSize = Math.max(1, Math.ceil(Math.max(1, beats.length) / segmentCount));
+
+  return Array.from({ length: segmentCount }, (_, index): MotionControlSegment => {
+    const start = index * maxSegmentSeconds;
+    const end = Math.min(safeTotal, start + maxSegmentSeconds);
+
+    const rangedBeats = beats.filter((beat) => {
+      const range = parseTimecodeRange(beat.timecode);
+      if (!range) return false;
+      return range.start >= start && range.start < end;
+    });
+
+    const chunkStart = index * beatChunkSize;
+    const chunkEnd = chunkStart + beatChunkSize;
+    const fallbackChunk = beats.slice(chunkStart, chunkEnd);
+    const segmentBeats = rangedBeats.length > 0 ? rangedBeats : fallbackChunk;
+    const leadBeat = segmentBeats[0] || beats[0];
+
+    return {
+      segmentId: index + 1,
+      timecode: `${formatClock(start)}-${formatClock(end)}`,
+      durationSeconds: Math.max(1, end - start),
+      startFramePrompt: cleanText(
+        leadBeat?.visual || leadBeat?.onScreenText || leadBeat?.narration || `Open shot for segment ${index + 1}.`
+      ),
+      script: {
+        hook: index === 0 ? cleanText(hook) : "",
+        beats: segmentBeats,
+        cta: index === segmentCount - 1 ? cleanText(cta) : "",
+      },
+    };
+  });
 }
 
 function truncateToWordLimit(text: string, maxWords: number): string {
@@ -662,6 +782,94 @@ async function buildVisualEvidence(source: VideoSourceMetadata, collectionId?: s
   };
 }
 
+function inferVideoContentCategoryFallback(sourceVideo: BuildRecreationPlanArgs["sourceVideo"]): VideoContentCategory {
+  const text = cleanText(
+    [
+      sourceVideo.title,
+      sourceVideo.description,
+      sourceVideo.userNotes,
+      sourceVideo.transcriptSummary,
+      sourceVideo.transcriptText,
+    ]
+      .filter(Boolean)
+      .join(" ")
+  ).toLowerCase();
+
+  const hasIslamicSignal = /(allah|dua|quran|hadith|salah|islam|islamic|deen|ramadan|hijab|muslim)/i.test(text);
+  const hasPeriodPregnancySignal =
+    /(period|menstrual|cycle|ovulation|pms|pcos|pregnan|fertility|postpartum|trimester|breastfeed|conception)/i.test(text);
+
+  if (hasIslamicSignal && hasPeriodPregnancySignal) return "islamic_period_pregnancy";
+  if (hasIslamicSignal) return "islamic_only";
+  return "period_pregnancy_only";
+}
+
+async function classifyVideoContentCategory(args: {
+  model: ReturnType<GoogleGenerativeAI["getGenerativeModel"]>;
+  sourceVideo: BuildRecreationPlanArgs["sourceVideo"];
+  appName: string;
+  appContext: string;
+}): Promise<VideoContentClassification> {
+  const { model, sourceVideo, appName, appContext } = args;
+
+  const prompt = `You are a strict content classifier for short-form video rewriting.
+
+Classify the source video into exactly ONE category:
+- islamic_only
+- islamic_period_pregnancy
+- period_pregnancy_only
+
+APP CONTEXT:
+- App Name: ${appName}
+- App Context: ${appContext || "N/A"}
+
+SOURCE VIDEO:
+- Title: ${sourceVideo.title || "N/A"}
+- Description: ${sourceVideo.description || "N/A"}
+- User Notes: ${sourceVideo.userNotes || "N/A"}
+- Transcript Summary: ${sourceVideo.transcriptSummary || "N/A"}
+- Transcript Text: ${(sourceVideo.transcriptText || "N/A").slice(0, 8000)}
+
+Classification guide:
+- islamic_only: Islamic/spiritual framing is central, but period/pregnancy topic is absent.
+- islamic_period_pregnancy: Islamic/spiritual framing and period/pregnancy are both clearly present.
+- period_pregnancy_only: Period/pregnancy is central and Islamic framing is absent or minor.
+
+Return strict JSON only:
+{
+  "category": "islamic_only|islamic_period_pregnancy|period_pregnancy_only",
+  "confidence": 0.0,
+  "reason": "short reason"
+}`;
+
+  try {
+    const result = await model.generateContent(prompt);
+    const parsed = parseJsonFromModel(result.response.text());
+    const row = isRecord(parsed) ? parsed : {};
+
+    const categoryRaw = sanitizeString(row.category, "").toLowerCase();
+    const category: VideoContentCategory =
+      categoryRaw === "islamic_only" ||
+      categoryRaw === "islamic_period_pregnancy" ||
+      categoryRaw === "period_pregnancy_only"
+        ? categoryRaw
+        : inferVideoContentCategoryFallback(sourceVideo);
+
+    return {
+      category,
+      confidence: clamp(sanitizeNumber(row.confidence, 0.6), 0, 1),
+      reason: sanitizeString(row.reason, "Category inferred from source transcript and metadata."),
+    };
+  } catch {
+    const fallback = inferVideoContentCategoryFallback(sourceVideo);
+    return {
+      category: fallback,
+      confidence: 0.55,
+      reason: "Fallback classification from source metadata and transcript keywords.",
+    };
+  }
+}
+
 export async function fetchVideoSourceMetadata(url: string): Promise<VideoSourceMetadata> {
   const platform = extractPlatform(url);
   let title: string | null = null;
@@ -925,6 +1133,48 @@ export async function buildVideoRecreationPlan({
   requireGeminiKey();
   const model = genAI.getGenerativeModel({ model: reasoningModel });
 
+  const sourceDurationSeconds =
+    typeof sourceVideo.sourceDurationSeconds === "number" && Number.isFinite(sourceVideo.sourceDurationSeconds)
+      ? sourceVideo.sourceDurationSeconds
+      : typeof format.sourceDurationSeconds === "number" && Number.isFinite(format.sourceDurationSeconds)
+        ? format.sourceDurationSeconds
+        : null;
+
+  const autoSplitLongUgc =
+    format.formatType === "ugc" &&
+    typeof sourceDurationSeconds === "number" &&
+    sourceDurationSeconds > MAX_SINGLE_VIDEO_CLIP_SECONDS;
+  const shouldGenerateShotGroups = useMotionControl || autoSplitLongUgc;
+
+  const contentClassification = await classifyVideoContentCategory({
+    model,
+    sourceVideo,
+    appName,
+    appContext,
+  });
+
+  const categoryStrategyBlock =
+    contentClassification.category === "islamic_only"
+      ? `
+CATEGORY SCRIPT STRATEGY (islamic_only):
+- Keep the source's Islamic tone and structure faithful.
+- Add one natural bridge beat that introduces a relevant period/pregnancy challenge to make app context genuinely useful.
+- Then connect that bridge to an app-supported action without hard selling.
+`
+      : contentClassification.category === "islamic_period_pregnancy"
+        ? `
+CATEGORY SCRIPT STRATEGY (islamic_period_pregnancy):
+- Preserve both Islamic framing and period/pregnancy topic throughout the script.
+- Integrate app context as a practical support mechanism within the main flow.
+- Use app mention as proof/help moment, not ad language.
+`
+        : `
+CATEGORY SCRIPT STRATEGY (period_pregnancy_only):
+- Preserve the period/pregnancy core topic and original structure.
+- Add light faith-aware framing where natural and respectful (not preachy).
+- Integrate app context as a practical daily-use support in a native way.
+`;
+
   const prompt = `You are a senior short-form video strategist.
 
 Goal:
@@ -959,7 +1209,14 @@ REFERENCE VIDEO:
 - Notes: ${sourceVideo.userNotes || "N/A"}
 - Transcript Summary: ${sourceVideo.transcriptSummary || "N/A"}
 - Transcript Text: ${sourceVideo.transcriptText || "N/A"}
-- Source Duration: ${sourceDurationHint(sourceVideo.sourceDurationSeconds)}
+- Source Duration: ${sourceDurationHint(sourceDurationSeconds)}
+
+FIXED CONTENT CLASSIFICATION (already decided):
+- category: ${contentClassification.category}
+- confidence: ${contentClassification.confidence}
+- reason: ${contentClassification.reason}
+
+${categoryStrategyBlock}
 
 RESPONSE RULES:
 - Build for Muslim women audience and keep tone faith-aware, practical, and respectful.
@@ -972,8 +1229,8 @@ RESPONSE RULES:
 - If mentioning difficult phases, keep compassionate tone and guide toward faith-positive actions and recovery, not disengagement.
 - If the narrative includes being unable to pray, missing salah, or spiritual inconsistency, depict it as concern/struggle/recovery — never as relief, celebration, or comedic victory.
 - Keep this value-first, not ad-first. The video should feel like native educational/lifestyle content.
-- Do NOT force app mention in every script. Mention the app only when naturally relevant.
-- If app insertion is useful, prefer subtle visual integration (screen recording/screenshot overlay, UI callout, or quick proof moment) instead of hard-selling narration.
+- Include one clear app hook moment naturally in the script (do not skip app context).
+- Prefer subtle app integration (screen recording/screenshot overlay, UI callout, or quick proof moment) instead of hard-selling narration.
 - Keep explicit app name mentions to a maximum of 1 in the entire script (hook + beats + CTA).
 - CTA must be soft and non-salesy (example style: save/share/follow/use this method), with optional subtle app reference only if it fits context.
 - For any app overlay moment, specify placement and intent in editNote (for example: "top-right mini overlay of cycle day screen for 2s").
@@ -1007,11 +1264,12 @@ RESPONSE RULES:
   - Do NOT rewrite their core spoken lines or impersonate them.
   - Keep original speech/audio moments and only integrate app via subtle overlays/screenshots/screen recordings.
   - Avoid making it look like endorsement by that public figure.
-${useMotionControl ? `
+${shouldGenerateShotGroups ? `
 KLING MOTION CONTROL 3.0 CONSTRAINTS:
-- You must generate motionControlSegments because Kling 3.0 has a strict 30-second duration limit.
-- If the total video is longer than 30 seconds, split it into roughly equal logical segments (max 30s each).
-- For each segment, provide a startFramePrompt describing the exact visual of the very first frame of that segment (including character identity, clothing, setting, and exact framing).
+- You must generate motionControlSegments (shot groups) because generation clips have a strict ${MAX_SINGLE_VIDEO_CLIP_SECONDS}-second limit.
+- Split the full script into sequential logical groups with each group <= ${MAX_SINGLE_VIDEO_CLIP_SECONDS} seconds.
+- For each segment, provide a startFramePrompt describing the exact visual of the very first frame (character identity, clothing, setting, framing).
+- For each segment, provide segment-level script (hook/beats/cta) that covers only that segment's time window.
 ` : ""}
 - Return strict JSON only.
 
@@ -1051,12 +1309,25 @@ JSON SHAPE:
     "prompt": "string",
     "targetDuration": "string"
   },
-${useMotionControl ? `  "motionControlSegments": [
+${shouldGenerateShotGroups ? `  "motionControlSegments": [
     {
       "segmentId": 1,
-      "timecode": "0:00-0:30",
-      "durationSeconds": 30,
-      "startFramePrompt": "string"
+      "timecode": "0:00-0:15",
+      "durationSeconds": 15,
+      "startFramePrompt": "string",
+      "script": {
+        "hook": "string",
+        "beats": [
+          {
+            "timecode": "0:00-0:04",
+            "visual": "string",
+            "narration": "string",
+            "onScreenText": "string",
+            "editNote": "string"
+          }
+        ],
+        "cta": "string"
+      }
     }
   ],` : ""}
   "higgsfieldPrompts": [
@@ -1085,24 +1356,11 @@ ${useMotionControl ? `  "motionControlSegments": [
   const socialCaptionRow = isRecord(row.socialCaption) ? row.socialCaption : {};
   const seedanceRow = isRecord(row.seedanceSinglePrompt) ? row.seedanceSinglePrompt : {};
   const maxBeats =
-    typeof sourceVideo.sourceDurationSeconds === "number" && Number.isFinite(sourceVideo.sourceDurationSeconds)
-      ? clamp(Math.round(sourceVideo.sourceDurationSeconds / 4), 6, 24)
+    typeof sourceDurationSeconds === "number" && Number.isFinite(sourceDurationSeconds)
+      ? clamp(Math.round(sourceDurationSeconds / 4), 6, 24)
       : 12;
 
-  const beatsRaw = Array.isArray(scriptRow.beats) ? scriptRow.beats : [];
-  const beats: PlanBeat[] = beatsRaw
-    .map((beat) => {
-      if (!isRecord(beat)) return null;
-      return {
-        timecode: sanitizeString(beat.timecode, "0:00-0:04"),
-        visual: sanitizeString(beat.visual, "Match source format visual pacing."),
-        narration: sanitizeString(beat.narration, ""),
-        onScreenText: sanitizeString(beat.onScreenText, ""),
-        editNote: sanitizeString(beat.editNote, ""),
-      };
-    })
-    .filter((beat): beat is PlanBeat => Boolean(beat))
-    .slice(0, maxBeats);
+  const beats: PlanBeat[] = sanitizePlanBeats(scriptRow.beats, maxBeats);
 
   const promptsRaw = Array.isArray(row.higgsfieldPrompts) ? row.higgsfieldPrompts : [];
   const higgsfieldPrompts: HiggsfieldPrompt[] = promptsRaw
@@ -1194,7 +1452,7 @@ ${useMotionControl ? `  "motionControlSegments": [
 
   const targetDurationForSeedance = sanitizeString(
     seedanceRow.targetDuration,
-    sanitizeString(deliverableSpecRow.duration, sourceMatchedDurationFallback(sourceVideo.sourceDurationSeconds))
+    sanitizeString(deliverableSpecRow.duration, sourceMatchedDurationFallback(sourceDurationSeconds))
   );
   const seedancePrompt = ensureSeedanceQualityDirectives(
     sanitizeString(
@@ -1281,24 +1539,100 @@ ${useMotionControl ? `  "motionControlSegments": [
   const socialHashtags = sanitizeHashtagArray(socialCaptionRow.hashtags, 8);
 
   const motionControlSegmentsRaw = Array.isArray(row.motionControlSegments) ? row.motionControlSegments : [];
-  const motionControlSegments: MotionControlSegment[] = motionControlSegmentsRaw
-    .map((seg, index) => {
+  const modelShotGroups: MotionControlSegment[] = motionControlSegmentsRaw
+    .map((seg, index): MotionControlSegment | null => {
       if (!isRecord(seg)) return null;
+
+      const segmentScriptRow = isRecord(seg.script) ? seg.script : {};
+      const segmentBeats = sanitizePlanBeats(segmentScriptRow.beats, Math.max(1, Math.ceil(maxBeats / 2))).map((beat) => ({
+        ...beat,
+        narration: enforcePrayerStruggleTone(enforceFaithPositiveFraming(beat.narration)),
+        onScreenText: enforcePrayerStruggleTone(enforceFaithPositiveFraming(beat.onScreenText)),
+        editNote: enforcePrayerStruggleTone(enforceFaithPositiveFraming(beat.editNote)),
+      }));
+      const segmentScript =
+        cleanText(sanitizeString(segmentScriptRow.hook, "")).length > 0 ||
+          segmentBeats.length > 0 ||
+          cleanText(sanitizeString(segmentScriptRow.cta, "")).length > 0
+          ? {
+            hook: enforcePrayerStruggleTone(
+              enforceFaithPositiveFraming(sanitizeString(segmentScriptRow.hook, ""))
+            ),
+            beats: segmentBeats,
+            cta: enforcePrayerStruggleTone(
+              enforceFaithPositiveFraming(sanitizeString(segmentScriptRow.cta, ""))
+            ),
+          }
+          : undefined;
+
       return {
         segmentId: typeof seg.segmentId === "number" ? seg.segmentId : index + 1,
-        timecode: sanitizeString(seg.timecode, "0:00-0:30"),
-        durationSeconds: sanitizeNumber(seg.durationSeconds, 30),
+        timecode: sanitizeString(
+          seg.timecode,
+          `${formatClock(index * MAX_SINGLE_VIDEO_CLIP_SECONDS)}-${formatClock((index + 1) * MAX_SINGLE_VIDEO_CLIP_SECONDS)}`
+        ),
+        durationSeconds: clamp(
+          Math.round(sanitizeNumber(seg.durationSeconds, MAX_SINGLE_VIDEO_CLIP_SECONDS)),
+          1,
+          MAX_SINGLE_VIDEO_CLIP_SECONDS
+        ),
         startFramePrompt: enforcePrayerStruggleTone(
           enforceFaithPositiveFraming(sanitizeString(seg.startFramePrompt, ""))
         ),
+        ...(segmentScript ? { script: segmentScript } : {}),
       };
     })
-    .filter((seg): seg is MotionControlSegment => Boolean(seg));
+    .filter((seg): seg is MotionControlSegment => seg !== null);
+
+  const fallbackShotGroups = shouldGenerateShotGroups
+    ? splitBeatsIntoShotGroups({
+      beats: sourceAlignedBeatsWithOpeningHint,
+      totalDurationSeconds:
+          typeof sourceDurationSeconds === "number" && Number.isFinite(sourceDurationSeconds)
+            ? sourceDurationSeconds
+            : Math.max(MAX_SINGLE_VIDEO_CLIP_SECONDS, sourceAlignedBeatsWithOpeningHint.length * 4),
+      maxSegmentSeconds: MAX_SINGLE_VIDEO_CLIP_SECONDS,
+      hook: adjustedHook,
+      cta: adjustedCta,
+    })
+    : [];
+
+  const shotGroups = (modelShotGroups.length > 0 ? modelShotGroups : fallbackShotGroups).map((segment, index) => {
+    const fallbackSegment = fallbackShotGroups[index];
+    const fallbackScript = fallbackSegment?.script;
+    const nextScript = segment.script || fallbackScript;
+
+    return {
+      ...segment,
+      startFramePrompt:
+        cleanText(segment.startFramePrompt).length > 0
+          ? segment.startFramePrompt
+          : cleanText(fallbackSegment?.startFramePrompt) || `Opening frame for segment ${segment.segmentId}.`,
+      durationSeconds: clamp(segment.durationSeconds, 1, MAX_SINGLE_VIDEO_CLIP_SECONDS),
+      script: nextScript
+        ? {
+          hook: enforcePrayerStruggleTone(enforceFaithPositiveFraming(sanitizeString(nextScript.hook, ""))),
+          beats: sanitizePlanBeats(nextScript.beats, Math.max(1, Math.ceil(maxBeats / 2))).map((beat) => ({
+            ...beat,
+            narration: enforcePrayerStruggleTone(enforceFaithPositiveFraming(beat.narration)),
+            onScreenText: enforcePrayerStruggleTone(enforceFaithPositiveFraming(beat.onScreenText)),
+            editNote: enforcePrayerStruggleTone(enforceFaithPositiveFraming(beat.editNote)),
+          })),
+          cta: enforcePrayerStruggleTone(enforceFaithPositiveFraming(sanitizeString(nextScript.cta, ""))),
+        }
+        : undefined,
+    };
+  });
 
   return {
     title: sanitizeString(row.title, `${appName} format recreation plan`),
-    useMotionControl,
-    motionControlSegments: useMotionControl && motionControlSegments.length > 0 ? motionControlSegments : undefined,
+    contentClassification,
+    maxSingleClipDurationSeconds: MAX_SINGLE_VIDEO_CLIP_SECONDS,
+    useMotionControl: shouldGenerateShotGroups,
+    motionControlSegments:
+      shouldGenerateShotGroups && shotGroups.length > 0
+        ? shotGroups
+        : undefined,
     strategy: (() => {
       const normalized = enforcePrayerStruggleTone(
         enforceFaithPositiveFraming(sanitizeString(row.strategy, ""))
@@ -1322,7 +1656,7 @@ ${useMotionControl ? `  "motionControlSegments": [
     deliverableSpec: {
       duration: sanitizeString(
         deliverableSpecRow.duration,
-        sourceMatchedDurationFallback(sourceVideo.sourceDurationSeconds)
+        sourceMatchedDurationFallback(sourceDurationSeconds)
       ),
       aspectRatio: sanitizeString(deliverableSpecRow.aspectRatio, "9:16"),
       platforms: sanitizeStringArray(deliverableSpecRow.platforms, 4),
@@ -1349,7 +1683,7 @@ ${useMotionControl ? `  "motionControlSegments": [
     finalCutProSteps:
       finalCutProSteps.length > 0
         ? finalCutProSteps
-        : buildFinalCutProFallbackSteps(sourceVideo.sourceDurationSeconds),
+        : buildFinalCutProFallbackSteps(sourceDurationSeconds),
     productionSteps: sanitizeStringArray(row.productionSteps, 12),
     editingTimeline: sanitizeStringArray(row.editingTimeline, 12),
     assetsChecklist: sanitizeStringArray(row.assetsChecklist, 12),

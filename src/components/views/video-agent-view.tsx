@@ -115,6 +115,12 @@ type VideoPlan = {
   title: string;
   strategy: string;
   objective: string;
+  contentClassification?: {
+    category?: string;
+    confidence?: number;
+    reason?: string;
+  };
+  maxSingleClipDurationSeconds?: number;
   deliverableSpec: {
     duration: string;
     aspectRatio: string;
@@ -141,6 +147,11 @@ type VideoPlan = {
     timecode: string;
     durationSeconds: number;
     startFramePrompt: string;
+    script?: {
+      hook?: string;
+      beats?: PlanBeat[];
+      cta?: string;
+    };
     startFrame?: VideoStartFrame;
   }[];
   higgsfieldPrompts: HiggsfieldPrompt[];
@@ -583,6 +594,21 @@ function VideoCanvasNode({ data }: NodeProps<Node<VideoNodeData>>) {
                     <p className="mt-0.5 text-xs leading-relaxed text-slate-700">{plan.objective}</p>
                   </div>
 
+                  {plan.contentClassification?.category ? (
+                    <div>
+                      <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">Content Category</p>
+                      <div className="mt-1 flex flex-wrap items-center gap-1.5">
+                        <Badge variant="default">{plan.contentClassification.category.replace(/_/g, " ")}</Badge>
+                        {typeof plan.maxSingleClipDurationSeconds === "number" ? (
+                          <Badge variant="default">{`Max clip ${plan.maxSingleClipDurationSeconds}s`}</Badge>
+                        ) : null}
+                      </div>
+                      {plan.contentClassification.reason ? (
+                        <p className="mt-1 text-xs leading-relaxed text-slate-600">{plan.contentClassification.reason}</p>
+                      ) : null}
+                    </div>
+                  ) : null}
+
                   {plan.deliverableSpec ? (
                     <div>
                       <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">Deliverable</p>
@@ -696,6 +722,36 @@ function VideoCanvasNode({ data }: NodeProps<Node<VideoNodeData>>) {
                             <p className="text-[11px] leading-relaxed text-slate-600">
                               <span className="font-semibold text-slate-500">Visual Intent:</span> {segment.startFramePrompt}
                             </p>
+
+                            {segment.script?.hook || segment.script?.beats?.length || segment.script?.cta ? (
+                              <div className="mt-2 rounded border border-indigo-200 bg-white/80 px-2 py-1.5">
+                                <p className="text-[10px] font-semibold uppercase tracking-wide text-indigo-600">Segment Script</p>
+                                {segment.script?.hook ? (
+                                  <p className="mt-1 text-[11px] text-slate-600">
+                                    <span className="font-semibold text-slate-500">Hook:</span> {segment.script.hook}
+                                  </p>
+                                ) : null}
+                                {segment.script?.beats?.length ? (
+                                  <div className="mt-1 space-y-1">
+                                    {segment.script.beats.map((beat, beatIndex) => (
+                                      <div key={`segment-beat-${segment.segmentId}-${beatIndex}`} className="rounded border border-slate-200 bg-white px-2 py-1">
+                                        <div className="flex items-center gap-1 text-[10px] font-mono text-slate-500">
+                                          <Clock className="h-3 w-3" />
+                                          <span>{beat.timecode}</span>
+                                        </div>
+                                        {beat.narration ? <p className="text-[11px] text-slate-600"><span className="font-semibold text-slate-500">VO:</span> {beat.narration}</p> : null}
+                                        {beat.onScreenText ? <p className="text-[11px] text-slate-600"><span className="font-semibold text-slate-500">Text:</span> {beat.onScreenText}</p> : null}
+                                      </div>
+                                    ))}
+                                  </div>
+                                ) : null}
+                                {segment.script?.cta ? (
+                                  <p className="mt-1 text-[11px] text-slate-600">
+                                    <span className="font-semibold text-slate-500">CTA:</span> {segment.script.cta}
+                                  </p>
+                                ) : null}
+                              </div>
+                            ) : null}
                           </div>
                         ))}
                       </div>

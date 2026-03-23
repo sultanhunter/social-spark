@@ -84,6 +84,17 @@ type PlanShape = {
     timecode: string;
     durationSeconds: number;
     startFramePrompt: string;
+    script?: {
+      hook?: string;
+      beats?: Array<{
+        timecode?: string;
+        visual?: string;
+        narration?: string;
+        onScreenText?: string;
+        editNote?: string;
+      }>;
+      cta?: string;
+    };
     startFrame?: {
       imageUrl?: string;
       prompt?: string;
@@ -157,6 +168,10 @@ function buildStartFramePrompt(args: {
 
   if (typeof segmentIndex === "number" && plan.motionControlSegments && plan.motionControlSegments[segmentIndex]) {
     const segment = plan.motionControlSegments[segmentIndex];
+    const segmentHook = cleanText(segment.script?.hook);
+    const firstSegmentBeat = Array.isArray(segment.script?.beats) ? segment.script?.beats?.[0] : null;
+    const segmentVisualCue = cleanText(firstSegmentBeat?.visual || firstSegmentBeat?.onScreenText || firstSegmentBeat?.narration);
+    const segmentCta = cleanText(segment.script?.cta);
     const characterInstruction = character
       ? `Use the selected recurring character identity (${character.character_name}). Keep face identity and styling consistent.`
       : "No fixed character lock required unless script clearly needs a person.";
@@ -165,6 +180,9 @@ function buildStartFramePrompt(args: {
       `Generate ONE photorealistic opening start frame for segment ${segment.segmentId} (timecode: ${segment.timecode}) of this video.`,
       `This frame will be used as the starting image for Kling Motion Control 3.0.`,
       `Segment Start Visual Intent: ${cleanText(segment.startFramePrompt) || "N/A"}.`,
+      `Segment hook context: ${segmentHook || "N/A"}.`,
+      `Segment first beat visual context: ${segmentVisualCue || "N/A"}.`,
+      `Segment CTA context: ${segmentCta || "N/A"}.`,
       characterInstruction,
       `Vertical 9:16 composition at 1080x1920 output framing.`,
       `Photorealistic ultra-detailed 4K-quality look (high texture fidelity, clean dynamic range, realistic skin and fabric detail).`,
