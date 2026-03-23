@@ -288,6 +288,44 @@ function getVideoDirectMediaUrl(video: LibraryVideo): string | null {
   return typeof url === "string" && url.trim().length > 0 ? url : null;
 }
 
+function getVideoSourceDurationSeconds(video: LibraryVideo): number | null {
+  const payload = video.analysis_payload;
+  if (!payload || typeof payload !== "object") return null;
+
+  const root = payload as Record<string, unknown>;
+  const sourceMetadata =
+    root.sourceMetadata && typeof root.sourceMetadata === "object"
+      ? (root.sourceMetadata as Record<string, unknown>)
+      : null;
+  const formatAnalysis =
+    root.formatAnalysis && typeof root.formatAnalysis === "object"
+      ? (root.formatAnalysis as Record<string, unknown>)
+      : null;
+
+  const sourceDuration = sourceMetadata?.sourceDurationSeconds;
+  if (typeof sourceDuration === "number" && Number.isFinite(sourceDuration) && sourceDuration > 0) {
+    return sourceDuration;
+  }
+
+  const formatDuration = formatAnalysis?.sourceDurationSeconds;
+  if (typeof formatDuration === "number" && Number.isFinite(formatDuration) && formatDuration > 0) {
+    return formatDuration;
+  }
+
+  return null;
+}
+
+function formatDurationLabel(seconds: number | null): string {
+  if (typeof seconds !== "number" || !Number.isFinite(seconds) || seconds <= 0) {
+    return "unknown";
+  }
+
+  const rounded = Math.round(seconds);
+  const mins = Math.floor(rounded / 60);
+  const secs = rounded % 60;
+  return `${mins}:${String(secs).padStart(2, "0")}`;
+}
+
 function inferVideoExtension(url: string): string {
   try {
     const parsed = new URL(url);
@@ -336,6 +374,8 @@ function VideoCanvasNode({ data }: NodeProps<Node<VideoNodeData>>) {
   const isSelected = data.selectedVideoId === data.video.id;
   const isPlaying = data.directMediaUrl && data.playingVideoId === data.video.id;
   const plan = data.plan;
+  const sourceDurationSeconds = getVideoSourceDurationSeconds(data.video);
+  const sourceDurationLabel = formatDurationLabel(sourceDurationSeconds);
   const [isPlanModalOpen, setIsPlanModalOpen] = useState(false);
 
   return (
@@ -406,7 +446,10 @@ function VideoCanvasNode({ data }: NodeProps<Node<VideoNodeData>>) {
       <p className="mt-1.5 truncate text-xs font-semibold text-slate-800">{data.video.title || "Untitled source"}</p>
       <div className="mt-1 flex items-center justify-between gap-2">
         <p className="truncate text-[11px] text-slate-500">{data.video.platform}</p>
-        {plan ? <Badge variant="success">Plan Ready</Badge> : null}
+        <div className="flex items-center gap-1">
+          <Badge variant="default">{`Source ${sourceDurationLabel}`}</Badge>
+          {plan ? <Badge variant="success">Plan Ready</Badge> : null}
+        </div>
       </div>
 
       <div className="mt-2 flex items-center justify-between">
