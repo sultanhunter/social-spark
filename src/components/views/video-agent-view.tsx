@@ -98,8 +98,6 @@ type HiggsfieldPrompt = {
   generationType?: string;
   scene: string;
   prompt: string;
-  recommendedModel?: string;
-  modelReason?: string;
   shotDuration?: string;
 };
 
@@ -152,9 +150,10 @@ type VideoPlan = {
       beats?: PlanBeat[];
       cta?: string;
     };
+    multiShotPrompts?: HiggsfieldPrompt[];
     startFrame?: VideoStartFrame;
   }[];
-  higgsfieldPrompts: HiggsfieldPrompt[];
+  higgsfieldPrompts?: HiggsfieldPrompt[];
   finalCutProSteps?: string[];
   productionSteps: string[];
   editingTimeline: string[];
@@ -523,7 +522,7 @@ function VideoCanvasNode({ data }: NodeProps<Node<VideoNodeData>>) {
               htmlFor={`motion-control-${data.video.id}`}
               className="text-xs font-medium text-slate-700"
             >
-              Split for Kling Motion Control 3.0
+              Enable shot grouping (15s max)
             </label>
           </div>
 
@@ -672,7 +671,7 @@ function VideoCanvasNode({ data }: NodeProps<Node<VideoNodeData>>) {
 
                   {plan.motionControlSegments?.length ? (
                     <div>
-                      <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">Motion Control 3.0 Segments</p>
+                      <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">Shot Groups (15s max each)</p>
                       <div className="mt-1.5 space-y-3">
                         {plan.motionControlSegments.map((segment, idx) => (
                           <div key={`mc-seg-${idx}`} className="rounded border border-indigo-200 bg-indigo-50/50 p-2.5">
@@ -752,6 +751,25 @@ function VideoCanvasNode({ data }: NodeProps<Node<VideoNodeData>>) {
                                 ) : null}
                               </div>
                             ) : null}
+
+                            {segment.multiShotPrompts?.length ? (
+                              <div className="mt-2 rounded border border-blue-200 bg-blue-50/70 px-2 py-1.5">
+                                <p className="text-[10px] font-semibold uppercase tracking-wide text-blue-700">Segment Multi-Shot Prompts</p>
+                                <div className="mt-1 space-y-1">
+                                  {segment.multiShotPrompts.map((prompt, promptIndex) => (
+                                    <div key={`seg-prompt-${segment.segmentId}-${promptIndex}`} className="rounded border border-blue-200 bg-white px-2 py-1.5">
+                                      <div className="mb-0.5 flex flex-wrap items-center gap-1">
+                                        <Badge variant="default">{prompt.shotId || `shot${promptIndex + 1}`}</Badge>
+                                        {prompt.generationType ? <Badge variant="default">{prompt.generationType.replace(/_/g, " ")}</Badge> : null}
+                                        {prompt.shotDuration ? <Badge variant="default">{prompt.shotDuration}</Badge> : null}
+                                      </div>
+                                      {prompt.scene ? <p className="text-[11px] font-semibold text-blue-700">{prompt.scene}</p> : null}
+                                      <p className="text-[11px] leading-relaxed text-slate-700">{prompt.prompt}</p>
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+                            ) : null}
                           </div>
                         ))}
                       </div>
@@ -806,44 +824,6 @@ function VideoCanvasNode({ data }: NodeProps<Node<VideoNodeData>>) {
                             ))}
                           </div>
                         ) : null}
-                      </div>
-                    </div>
-                  ) : null}
-
-                  {plan.higgsfieldPrompts?.length > 0 ? (
-                    <div>
-                      <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">Kling MultiShot Prompts</p>
-                      <div className="mt-1.5 space-y-1.5">
-                        {plan.higgsfieldPrompts.map((hp, i) => (
-                          <div key={`hf-${i}`} className="rounded border border-blue-200 bg-blue-50 px-2.5 py-2">
-                            {hp.shotId ? (
-                              <Badge variant="default" className="mb-1 mr-1">{hp.shotId}</Badge>
-                            ) : (
-                              <Badge variant="default" className="mb-1 mr-1">{`shot${i + 1}`}</Badge>
-                            )}
-                            {hp.generationType ? (
-                              <Badge variant="default" className="mb-1">{hp.generationType.replace(/_/g, " ")}</Badge>
-                            ) : null}
-                            <p className="text-[10px] font-semibold text-blue-700">{hp.scene}{hp.shotDuration ? ` (${hp.shotDuration})` : ""}</p>
-                            <p className="text-xs leading-relaxed text-slate-700">{hp.prompt}</p>
-                            {hp.recommendedModel ? <p className="mt-0.5 text-[10px] text-blue-500">Model: {hp.recommendedModel}</p> : null}
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  ) : null}
-
-                  {plan.seedanceSinglePrompt?.prompt ? (
-                    <div>
-                      <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">Seedance 1.5 Pro Single Prompt</p>
-                      <div className="mt-1.5 rounded border border-indigo-200 bg-indigo-50 px-2.5 py-2">
-                        <div className="mb-1 flex flex-wrap items-center gap-1">
-                          <Badge variant="default">{plan.seedanceSinglePrompt.model || "Seedance 1.5 Pro"}</Badge>
-                          {plan.seedanceSinglePrompt.targetDuration ? (
-                            <Badge variant="default">{plan.seedanceSinglePrompt.targetDuration}</Badge>
-                          ) : null}
-                        </div>
-                        <p className="text-xs leading-relaxed text-slate-700">{plan.seedanceSinglePrompt.prompt}</p>
                       </div>
                     </div>
                   ) : null}

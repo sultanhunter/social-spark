@@ -95,6 +95,13 @@ type PlanShape = {
       }>;
       cta?: string;
     };
+    multiShotPrompts?: Array<{
+      shotId?: string;
+      generationType?: string;
+      scene?: string;
+      prompt?: string;
+      shotDuration?: string;
+    }>;
     startFrame?: {
       imageUrl?: string;
       prompt?: string;
@@ -172,17 +179,19 @@ function buildStartFramePrompt(args: {
     const firstSegmentBeat = Array.isArray(segment.script?.beats) ? segment.script?.beats?.[0] : null;
     const segmentVisualCue = cleanText(firstSegmentBeat?.visual || firstSegmentBeat?.onScreenText || firstSegmentBeat?.narration);
     const segmentCta = cleanText(segment.script?.cta);
+    const firstSegmentPrompt = Array.isArray(segment.multiShotPrompts) ? cleanText(segment.multiShotPrompts?.[0]?.prompt) : "";
     const characterInstruction = character
       ? `Use the selected recurring character identity (${character.character_name}). Keep face identity and styling consistent.`
       : "No fixed character lock required unless script clearly needs a person.";
 
     return [
       `Generate ONE photorealistic opening start frame for segment ${segment.segmentId} (timecode: ${segment.timecode}) of this video.`,
-      `This frame will be used as the starting image for Kling Motion Control 3.0.`,
+      `This frame will be used as the starting image for this segment's video generation group.`,
       `Segment Start Visual Intent: ${cleanText(segment.startFramePrompt) || "N/A"}.`,
       `Segment hook context: ${segmentHook || "N/A"}.`,
       `Segment first beat visual context: ${segmentVisualCue || "N/A"}.`,
       `Segment CTA context: ${segmentCta || "N/A"}.`,
+      `Segment first multi-shot prompt cue: ${firstSegmentPrompt || "N/A"}.`,
       characterInstruction,
       `Vertical 9:16 composition at 1080x1920 output framing.`,
       `Photorealistic ultra-detailed 4K-quality look (high texture fidelity, clean dynamic range, realistic skin and fabric detail).`,

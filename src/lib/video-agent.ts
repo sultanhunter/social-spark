@@ -88,13 +88,11 @@ type PlanBeat = {
   editNote: string;
 };
 
-type HiggsfieldPrompt = {
+type MultiShotPrompt = {
   shotId: string;
   generationType: "base_ai_video" | "ugc_video" | "ai_broll" | "product_ui_overlay" | "transition_fx";
   scene: string;
   prompt: string;
-  recommendedModel: string;
-  modelReason: string;
   shotDuration: string;
 };
 
@@ -116,6 +114,7 @@ export interface MotionControlSegment {
     beats: PlanBeat[];
     cta: string;
   };
+  multiShotPrompts?: MultiShotPrompt[];
   startFrame?: VideoStartFrame;
 }
 
@@ -145,12 +144,12 @@ export interface VideoRecreationPlan {
     caption: string;
     hashtags: string[];
   };
-  seedanceSinglePrompt: {
+  seedanceSinglePrompt?: {
     model: string;
     prompt: string;
     targetDuration: string;
   };
-  higgsfieldPrompts: HiggsfieldPrompt[];
+  higgsfieldPrompts?: MultiShotPrompt[];
   finalCutProSteps: string[];
   productionSteps: string[];
   editingTimeline: string[];
@@ -339,6 +338,129 @@ function splitBeatsIntoShotGroups(args: {
   });
 }
 
+function normalizeBeatsToTargetDuration(args: {
+  beats: PlanBeat[];
+  targetDurationSeconds: number;
+  minBeatCount: number;
+  hook: string;
+}): PlanBeat[] {
+  const { beats, targetDurationSeconds, minBeatCount, hook } = args;
+  const safeDuration = Math.max(MAX_SINGLE_VIDEO_CLIP_SECONDS, Math.round(targetDurationSeconds));
+  const safeMinBeats = Math.max(1, minBeatCount);
+
+  const seedBeats = beats.length > 0
+    ? [...beats]
+    : [{
+      timecode: "0:00-0:04",
+      visual: cleanText(hook) || "Open with the source style hook scene.",
+      narration: cleanText(hook),
+      onScreenText: cleanText(hook),
+      editNote: "",
+    }];
+
+  const expanded: PlanBeat[] = [...seedBeats];
+  while (expanded.length < safeMinBeats) {
+    const base = seedBeats[expanded.length % seedBeats.length];
+    expanded.push({
+      ...base,
+      editNote: cleanText(`${base.editNote || ""} Continue this progression naturally.`),
+    });
+  }
+
+  const totalBeats = expanded.length;
+  const step = safeDuration / totalBeats;
+
+  return expanded.map((beat, index) => {
+    const start = Math.max(0, Math.round(index * step));
+    const nextRaw = index === totalBeats - 1 ? safeDuration : Math.round((index + 1) * step);
+    const end = Math.max(start + 1, nextRaw);
+    return {
+      ...beat,
+      timecode: `${formatClock(start)}-${formatClock(end)}`,
+    };
+  });
+}
+
+function sanitizeMultiShotPrompts(value: unknown, max = 8): MultiShotPrompt[] {
+  const rows = Array.isArray(value) ? value : [];
+  return rows
+    .map((item, index): MultiShotPrompt | null => {
+      if (!isRecord(item)) return null;
+      const generationType = sanitizeHiggsfieldGenerationType(item.generationType);
+      const scene = sanitizeString(item.scene, `Segment scene ${index + 1}`);
+      const basePrompt = sanitizeString(
+        item.prompt,
+        "Create a high-retention vertical 9:16 scene with natural motion continuity, realistic textures, clean lighting, and faithful emotional tone from the script."
+      );
+      const withPerformance = ensureHiggsfieldPromptHasPerformanceInstruction(
+        stripPromptMetaTags(basePrompt)
+      );
+      const withScreenCue = needsAppScreenReplacementCue(generationType, scene, withPerformance)
+        ? ensureAppScreenReplacementDirective(withPerformance)
+        : withPerformance;
+
+      return {
+        shotId: sanitizeKlingShotId(item.shotId, index),
+        generationType,
+        scene,
+        prompt: enforceKlingPromptWordLimit(withScreenCue, 77),
+        shotDuration: sanitizeString(item.shotDuration, "4s"),
+      };
+    })
+    .filter((item): item is MultiShotPrompt => Boolean(item))
+    .slice(0, max);
+}
+
+function buildFallbackMultiShotPrompts(segment: MotionControlSegment, segmentIndex: number): MultiShotPrompt[] {
+  const beats = segment.script?.beats || [];
+  const source = beats.length > 0 ? beats : [
+    {
+      timecode: segment.timecode,
+      visual: segment.startFramePrompt,
+      narration: segment.script?.hook || "",
+      onScreenText: "",
+      editNote: "",
+    },
+  ];
+
+  const prompts = source.slice(0, 6).map((beat, beatIndex): MultiShotPrompt => {
+    const range = parseTimecodeRange(beat.timecode);
+    const duration = range ? Math.max(1, range.end - range.start) : Math.max(2, Math.round(segment.durationSeconds / Math.max(1, source.length)));
+    const scene = cleanText(beat.visual) || `Segment ${segment.segmentId} scene ${beatIndex + 1}`;
+    const prompt = cleanText(
+      [
+        scene,
+        beat.narration ? `Narration intent: ${beat.narration}.` : "",
+        beat.onScreenText ? `On-screen text direction: ${beat.onScreenText}.` : "",
+        "Vertical 9:16, cinematic but natural realism, smooth temporal continuity, clean transitions, no visual artifacts.",
+      ].join(" ")
+    );
+
+    return {
+      shotId: `group${segmentIndex + 1}_shot${beatIndex + 1}`,
+      generationType: "ai_broll",
+      scene,
+      prompt: enforceKlingPromptWordLimit(ensureHiggsfieldPromptHasPerformanceInstruction(prompt), 77),
+      shotDuration: `${duration}s`,
+    };
+  });
+
+  return prompts.length > 0 ? prompts : [
+    {
+      shotId: `group${segmentIndex + 1}_shot1`,
+      generationType: "ai_broll",
+      scene: `Segment ${segment.segmentId} opening scene`,
+      prompt: enforceKlingPromptWordLimit(
+        ensureHiggsfieldPromptHasPerformanceInstruction(
+          `${segment.startFramePrompt}. Vertical 9:16, realistic motion, coherent lighting, no artifacts.`
+        ),
+        77
+      ),
+      shotDuration: `${Math.max(3, Math.min(6, segment.durationSeconds))}s`,
+    },
+  ];
+}
+
 function truncateToWordLimit(text: string, maxWords: number): string {
   const cleaned = cleanText(text);
   if (!cleaned) return "";
@@ -387,53 +509,6 @@ function stripPromptMetaTags(prompt: string): string {
   return cleaned;
 }
 
-function enforceFaithPositiveFraming(text: string): string {
-  let output = cleanText(text);
-  if (!output) return output;
-
-  const replacements: Array<[RegExp, string]> = [
-    [/\b(can(?:'|’)t|cannot|unable to|not able to)\s+(pray|make salah|pray on time)\b/gi, "able to pray consistently"],
-    [/\b(skip(?:ping)?|miss(?:ing)?)\s+(prayer|salah)\b/gi, "maintain prayer consistency"],
-    [/\bno prayer\b/gi, "consistent prayer"],
-    [/\bwithout prayer\b/gi, "with prayer consistency"],
-    [/\b(celebrate|love|enjoy)\s+(not praying|skipping prayer|missing salah)\b/gi, "celebrate being able to pray and stay spiritually grounded"],
-  ];
-
-  for (const [pattern, replacement] of replacements) {
-    output = output.replace(pattern, replacement);
-  }
-
-  return output;
-}
-
-function enforcePrayerStruggleTone(text: string): string {
-  let output = cleanText(text);
-  if (!output) return output;
-
-  const hasPrayerStruggleSignal =
-    /\b(can(?:'|’)t|cannot|unable to|not able to|struggling to|miss(?:ed|ing)?|skip(?:ped|ping)?)\s+(pray|make salah|prayer|salah)\b/i.test(
-      output
-    ) || /\b(not praying|missing salah|skipping prayer)\b/i.test(output);
-
-  if (!hasPrayerStruggleSignal) return output;
-
-  const emotionalReplacements: Array<[RegExp, string]> = [
-    [/\blooks\s+relieved\b/gi, "looks concerned"],
-    [/\bfeel(?:s)?\s+relieved\b/gi, "feels concerned"],
-    [/\brelieved\b/gi, "concerned"],
-    [/\bhappy\b/gi, "concerned"],
-    [/\bexcited\b/gi, "concerned"],
-    [/\bjoyful\b/gi, "reflective"],
-    [/\bcelebrat(?:e|es|ing|ed)\b/gi, "seeks improvement"],
-  ];
-
-  for (const [pattern, replacement] of emotionalReplacements) {
-    output = output.replace(pattern, replacement);
-  }
-
-  return cleanText(output);
-}
-
 function sourceDurationHint(seconds: number | null | undefined): string {
   if (typeof seconds !== "number" || !Number.isFinite(seconds) || seconds <= 0) {
     return "unknown";
@@ -454,7 +529,7 @@ function sourceMatchedDurationFallback(seconds: number | null | undefined): stri
   return `${min}-${max} seconds (match source around ${base}s)`;
 }
 
-function sanitizeHiggsfieldGenerationType(value: unknown): HiggsfieldPrompt["generationType"] {
+function sanitizeHiggsfieldGenerationType(value: unknown): MultiShotPrompt["generationType"] {
   const cleaned = sanitizeString(value, "").toLowerCase();
   if (cleaned === "base_ai_video") return "base_ai_video";
   if (cleaned === "ugc_video") return "ugc_video";
@@ -481,7 +556,7 @@ function buildFinalCutProFallbackSteps(sourceDurationSeconds: number | null | un
   return [
     "Create a new Final Cut Pro library and event; set project to vertical 1080x1920, 30fps, Rec.709 color space.",
     `Set project duration target to ${targetDuration} and create primary timeline markers for hook, body beats, and CTA.`,
-    "Import all generated Kling MultiShot clips, app screen recordings, source overlays, SFX, and music into organized keyword collections.",
+    "Import all generated multi-shot clips, app screen recordings, source overlays, SFX, and music into organized keyword collections.",
     "Build the rough cut on the primary storyline following script timecodes; trim clips on motion/action to keep retention pacing.",
     "Place UGC/talking-head shots on primary storyline and keep framing continuity between adjacent cuts.",
     "Add AI B-roll and cutaway layers above primary clips (connected clips) to visually support each narration beat.",
@@ -496,25 +571,8 @@ function buildFinalCutProFallbackSteps(sourceDurationSeconds: number | null | un
   ];
 }
 
-function ensureSeedanceQualityDirectives(prompt: string): string {
-  const cleaned = cleanText(prompt);
-  if (!cleaned) return cleaned;
-
-  const needsArtifactsDirective = !/no\s+ai\s+artifacts/i.test(cleaned);
-  const needsCutsDirective = !/no\s+(hard\s+)?cuts?/i.test(cleaned);
-  const needsFlickerDirective = !/no\s+flicker/i.test(cleaned);
-
-  const directives: string[] = [];
-  if (needsArtifactsDirective) directives.push("No AI artifacts");
-  if (needsCutsDirective) directives.push("no hard cuts");
-  if (needsFlickerDirective) directives.push("no flicker");
-
-  if (directives.length === 0) return cleaned;
-  return `${cleaned}. ${directives.join(", ")}, maintain temporal consistency and natural motion continuity.`;
-}
-
 function needsAppScreenReplacementCue(
-  generationType: HiggsfieldPrompt["generationType"],
+  generationType: MultiShotPrompt["generationType"],
   scene: string,
   prompt: string
 ): boolean {
@@ -554,44 +612,6 @@ function ensureAppScreenReplacementDirective(prompt: string): string {
   return `${directives.join(" ")} ${cleaned}`.trim();
 }
 
-function buildSeedanceFallbackPrompt(args: {
-  appName: string;
-  format: VideoFormatAnalysis;
-  sourceVideo: BuildRecreationPlanArgs["sourceVideo"];
-  hook: string;
-  beats: PlanBeat[];
-  ugcCharacter?: UGCCharacterProfile | null;
-  targetDuration: string;
-}): string {
-  const { appName, format, sourceVideo, hook, beats, ugcCharacter, targetDuration } = args;
-  const beatSummary = beats
-    .slice(0, 5)
-    .map((beat, index) => `Beat ${index + 1}: ${cleanText(beat.visual || beat.narration || "")}`)
-    .filter(Boolean)
-    .join(" | ");
-
-  const characterLine =
-    format.formatType === "ugc" && ugcCharacter
-      ? `Character lock: ${ugcCharacter.characterName}, consistent identity, modest styling, natural expression.`
-      : "No mandatory recurring character lock unless script requires a person.";
-
-  return ensureSeedanceQualityDirectives(
-    [
-      `Seedance 1.5 Pro single-video prompt for a ${targetDuration} vertical 9:16 short.`,
-      `Concept: ${hook || format.summary || sourceVideo.title || "Value-first lifestyle guidance"}.`,
-      `Tone: realistic, cinematic UGC pacing, faith-aware and respectful for Muslim women audience.`,
-      `Structure: ${beatSummary || "Clear hook, practical middle section, soft CTA ending"}.`,
-      `Context: ${sourceVideo.description || sourceVideo.userNotes || "N/A"}.`,
-      characterLine,
-      `Subtle app integration for ${appName} only where naturally relevant.`,
-      `Any visible phone/app showcase moment must use a pure chroma green screen (#00FF00) for post screen replacement; no baked UI.`,
-      `During any phone/app showcase moment, camera must stay static and locked off (tripod look): no pan, tilt, zoom, dolly, or handheld movement.`,
-      `Natural camera motion, coherent lighting continuity, realistic skin/fabric textures, smooth scene transitions.`,
-      `No logos/watermarks, no visual glitches, no jumpy frame interpolation, no abrupt transitions.`,
-    ].join(" ")
-  );
-}
-
 function toCharacterLockToken(characterName: string): string {
   const cleaned = characterName
     .toLowerCase()
@@ -601,7 +621,7 @@ function toCharacterLockToken(characterName: string): string {
   return cleaned || "character";
 }
 
-function promptNeedsCharacterLock(prompt: string, generationType: HiggsfieldPrompt["generationType"]): boolean {
+function promptNeedsCharacterLock(prompt: string, generationType: MultiShotPrompt["generationType"]): boolean {
   if (generationType === "ugc_video" || generationType === "base_ai_video") return true;
   return /\b(woman|female|girl|lady|muslimah|hijab|she|her|talking[-\s]?head|portrait|face|creator|influencer)\b/i.test(
     prompt
@@ -1140,11 +1160,13 @@ export async function buildVideoRecreationPlan({
         ? format.sourceDurationSeconds
         : null;
 
-  const autoSplitLongUgc =
-    format.formatType === "ugc" &&
-    typeof sourceDurationSeconds === "number" &&
-    sourceDurationSeconds > MAX_SINGLE_VIDEO_CLIP_SECONDS;
-  const shouldGenerateShotGroups = useMotionControl || autoSplitLongUgc;
+  const targetDurationSeconds =
+    typeof sourceDurationSeconds === "number" && Number.isFinite(sourceDurationSeconds)
+      ? Math.max(MAX_SINGLE_VIDEO_CLIP_SECONDS, Math.round(sourceDurationSeconds))
+      : 60;
+  const shouldGenerateShotGroups =
+    useMotionControl || targetDurationSeconds > MAX_SINGLE_VIDEO_CLIP_SECONDS;
+  const minBeatCount = Math.max(8, Math.ceil(targetDurationSeconds / 4));
 
   const contentClassification = await classifyVideoContentCategory({
     model,
@@ -1185,12 +1207,12 @@ APP:
 - Context: ${appContext || "N/A"}
 
 TOOLS AVAILABLE:
-- Kling MultiShot for AI video generation (shot-based workflow)
+- AI multi-shot video generation tools (shot-based workflow)
 - Professional video editing tools
 
 CREATOR CONSTRAINT:
 - Assume there are no real human creators available for collaboration.
-- If this format requires on-camera human presence (UGC, testimonial, talking-head, lifestyle human actions), you must use AI influencer shots generated in Higgsfield.
+- If this format requires on-camera human presence (UGC, testimonial, talking-head, lifestyle human actions), use AI-generated creator shots.
 - Keep one consistent influencer persona across scenes (face, age range, modest styling, tone, lighting continuity).
 - Do not mention "AI" or "generated" inside the public-facing script unless explicitly needed.
 - If formatType is ugc, ALWAYS use the provided UGC character profile consistently across all scenes.
@@ -1222,14 +1244,12 @@ RESPONSE RULES:
 - Build for Muslim women audience and keep tone faith-aware, practical, and respectful.
 - Keep output execution-ready, not high-level fluff.
 - Match the source video length by default (target within +/-10% of source duration when source duration is available).
-- Use enough timing beats to cover the full source-matched duration (not compressed short-form unless source itself is short).
-- Include Kling MultiShot prompts that can be copied directly.
-- Never celebrate anti-religious behavior. Do not frame skipping prayer, neglecting salah, or distancing from worship as a positive outcome.
-- Prefer positive faith framing: celebrate being able to pray, spiritual consistency, barakah-oriented routines, and practical habits that support worship.
-- If mentioning difficult phases, keep compassionate tone and guide toward faith-positive actions and recovery, not disengagement.
-- If the narrative includes being unable to pray, missing salah, or spiritual inconsistency, depict it as concern/struggle/recovery — never as relief, celebration, or comedic victory.
+- Use enough timing beats to cover the full source-matched duration.
+- Target duration: ${targetDurationSeconds}s.
+- Minimum beat count: ${minBeatCount}.
+- Beat timecodes should span nearly the full target duration.
 - Keep this value-first, not ad-first. The video should feel like native educational/lifestyle content.
-- Include one clear app hook moment naturally in the script (do not skip app context).
+- Include app context in at least one natural beat, without turning the script into an ad.
 - Prefer subtle app integration (screen recording/screenshot overlay, UI callout, or quick proof moment) instead of hard-selling narration.
 - Keep explicit app name mentions to a maximum of 1 in the entire script (hook + beats + CTA).
 - CTA must be soft and non-salesy (example style: save/share/follow/use this method), with optional subtle app reference only if it fits context.
@@ -1239,24 +1259,21 @@ RESPONSE RULES:
 - If source has little/no spoken audio, keep the adaptation text-led and visual-led: prioritize hook text + reactions + app screen flow, avoid forcing voiceover-heavy scripting.
 - When transcript is sparse, rely heavily on hookPatterns, shotPattern, onScreenTextPatterns, visualSignals, and user notes from SELECTED FORMAT.
 - Include a socialCaption block with a platform-ready post caption and 3-8 relevant hashtags.
-- If human presence is needed, include execution-ready Kling MultiShot prompts for AI influencer scenes and include persona continuity instructions.
-- Production steps must explicitly describe how to generate and stitch Kling shots with app overlays.
+- If human presence is needed, include execution-ready multi-shot prompts with persona continuity instructions.
+- Production steps must explicitly describe how to generate and stitch shot groups with app overlays.
 - Add a dedicated finalCutProSteps list with explicit, ordered Final Cut Pro execution steps from project setup to export.
-- Also provide one single consolidated Seedance 1.5 Pro prompt for full-video generation (seedanceSinglePrompt).
-- Seedance prompt must be optimized for Seedance 1.5 Pro with smooth temporal continuity and explicit anti-artifact directives (no AI artifacts, no flicker, no hard cuts, no broken anatomy).
-- Every Kling shot prompt must include performance instruction:
+- Every multi-shot prompt must include performance instruction:
   - If character speaks on camera, include the exact spoken line in quotes and prefix with "Dialogue:".
   - If character does not speak, explicitly write "No dialogue" and describe facial/body expression intent.
-- For every Kling shot, include a recommended Kling model and why it is the best fit for that shot.
-- For every Kling shot, include individual shotDuration (for example: "3.5s" or "0:08").
-- For every Kling shot, include generationType from: base_ai_video | ugc_video | ai_broll | product_ui_overlay | transition_fx.
-- For every Kling shot, include shotId in strict sequence format: shot1, shot2, shot3, ...
+- For every multi-shot prompt, include individual shotDuration (for example: "3.5s" or "0:08").
+- For every multi-shot prompt, include generationType from: base_ai_video | ugc_video | ai_broll | product_ui_overlay | transition_fx.
+- For every multi-shot prompt, include shotId in strict sequence format: shot1, shot2, shot3, ...
 - Each prompt field must be 77 words maximum (hard limit).
 - Prompts are for video generation, not still photos. Do not use wording like "photo", "portrait photo", "still image", or "snapshot".
 - For any app showcase / phone UI shot, force a keyable phone screen: pure chroma green (#00FF00), no UI/text baked in, minimal glare/reflections.
 - For any app showcase / phone UI shot, enforce static camera only: locked-off/tripod framing, no pan/tilt/zoom/dolly/handheld movement.
-- Ensure prompts are ready for shot-based generation and continuity in Kling MultiShot.
-- Ensure Kling prompts cover required generation types for this concept (at minimum base_ai_video + ai_broll, and ugc_video whenever human talking-head presence is required).
+- Ensure prompts are ready for shot-based generation and continuity across groups.
+- Ensure prompts cover required generation types for this concept (at minimum base_ai_video + ai_broll, and ugc_video whenever human talking-head presence is required).
 - Keep the prompt field clean scene direction only. Do NOT include model, reason, or duration text inside prompt; use the dedicated fields.
 - For ugc format, include a Character Lock continuity directive in each scene using the provided UGC character profile.
 - If source content appears to include a famous public figure, public speech, or recognisable creator persona that should not be rewritten:
@@ -1265,11 +1282,12 @@ RESPONSE RULES:
   - Keep original speech/audio moments and only integrate app via subtle overlays/screenshots/screen recordings.
   - Avoid making it look like endorsement by that public figure.
 ${shouldGenerateShotGroups ? `
-KLING MOTION CONTROL 3.0 CONSTRAINTS:
+SHOT GROUP CONSTRAINTS:
 - You must generate motionControlSegments (shot groups) because generation clips have a strict ${MAX_SINGLE_VIDEO_CLIP_SECONDS}-second limit.
 - Split the full script into sequential logical groups with each group <= ${MAX_SINGLE_VIDEO_CLIP_SECONDS} seconds.
 - For each segment, provide a startFramePrompt describing the exact visual of the very first frame (character identity, clothing, setting, framing).
 - For each segment, provide segment-level script (hook/beats/cta) that covers only that segment's time window.
+- For each segment, provide multiShotPrompts tailored to that segment only.
 ` : ""}
 - Return strict JSON only.
 
@@ -1304,11 +1322,6 @@ JSON SHAPE:
     "caption": "string",
     "hashtags": ["string"]
   },
-  "seedanceSinglePrompt": {
-    "model": "Seedance 1.5 Pro",
-    "prompt": "string",
-    "targetDuration": "string"
-  },
 ${shouldGenerateShotGroups ? `  "motionControlSegments": [
     {
       "segmentId": 1,
@@ -1327,20 +1340,26 @@ ${shouldGenerateShotGroups ? `  "motionControlSegments": [
           }
         ],
         "cta": "string"
-      }
+      },
+      "multiShotPrompts": [
+        {
+          "shotId": "shot1",
+          "generationType": "base_ai_video|ugc_video|ai_broll|product_ui_overlay|transition_fx",
+          "scene": "string",
+          "prompt": "string with Dialogue: \"...\" OR No dialogue: ...",
+          "shotDuration": "string"
+        }
+      ]
     }
-  ],` : ""}
-  "higgsfieldPrompts": [
+  ],` : `  "higgsfieldPrompts": [
     {
       "shotId": "shot1",
       "generationType": "base_ai_video|ugc_video|ai_broll|product_ui_overlay|transition_fx",
       "scene": "string",
       "prompt": "string with Dialogue: \"...\" OR No dialogue: ...",
-      "recommendedModel": "string",
-      "modelReason": "string",
       "shotDuration": "string"
     }
-  ],
+  ],`}
   "finalCutProSteps": ["string"],
   "productionSteps": ["string"],
   "editingTimeline": ["string"],
@@ -1354,53 +1373,19 @@ ${shouldGenerateShotGroups ? `  "motionControlSegments": [
   const deliverableSpecRow = isRecord(row.deliverableSpec) ? row.deliverableSpec : {};
   const scriptRow = isRecord(row.script) ? row.script : {};
   const socialCaptionRow = isRecord(row.socialCaption) ? row.socialCaption : {};
-  const seedanceRow = isRecord(row.seedanceSinglePrompt) ? row.seedanceSinglePrompt : {};
   const maxBeats =
     typeof sourceDurationSeconds === "number" && Number.isFinite(sourceDurationSeconds)
-      ? clamp(Math.round(sourceDurationSeconds / 4), 6, 24)
-      : 12;
+      ? clamp(Math.round(sourceDurationSeconds / 3), minBeatCount, 64)
+      : Math.max(minBeatCount, 20);
 
-  const beats: PlanBeat[] = sanitizePlanBeats(scriptRow.beats, maxBeats);
+  const beatsRaw: PlanBeat[] = sanitizePlanBeats(scriptRow.beats, maxBeats);
 
   const promptsRaw = Array.isArray(row.higgsfieldPrompts) ? row.higgsfieldPrompts : [];
-  const higgsfieldPrompts: HiggsfieldPrompt[] = promptsRaw
-    .map((item, index) => {
-      if (!isRecord(item)) return null;
-      const generationType = sanitizeHiggsfieldGenerationType(item.generationType);
-      const scene = sanitizeString(item.scene, "Scene");
-      const basePrompt = sanitizeString(
-        item.prompt,
-        "Create a vertical 9:16 AI influencer shot for Muslimah audience: modest outfit, natural expression, soft daylight, realistic movement, clean background, consistent character identity across scenes. No dialogue: character conveys reassurance through calm facial expression and gentle nod."
-      );
-      const withPerformance = ensureHiggsfieldPromptHasPerformanceInstruction(
-        stripPromptMetaTags(basePrompt)
-      );
-      const withScreenCue = needsAppScreenReplacementCue(generationType, scene, withPerformance)
-        ? ensureAppScreenReplacementDirective(withPerformance)
-        : withPerformance;
-
-      return {
-        shotId: sanitizeKlingShotId(item.shotId, index),
-        generationType,
-        scene,
-        prompt: enforceKlingPromptWordLimit(withScreenCue, 77),
-        recommendedModel: sanitizeString(
-          item.recommendedModel,
-          "Kling 1.6 Pro"
-        ),
-        modelReason: sanitizeString(
-          item.modelReason,
-          "Strong for cinematic realism, coherent motion, and shot-to-shot continuity in MultiShot workflows."
-        ),
-        shotDuration: sanitizeString(item.shotDuration, "4s"),
-      };
-    })
-    .filter((item): item is HiggsfieldPrompt => Boolean(item))
-    .slice(0, 8);
+  const parsedGlobalPrompts = sanitizeMultiShotPrompts(promptsRaw, 24);
 
   const ugcLockedPrompts =
     format.formatType === "ugc" && ugcCharacter
-      ? higgsfieldPrompts.map((item) => ({
+      ? parsedGlobalPrompts.map((item) => ({
         ...item,
         prompt: promptNeedsCharacterLock(item.prompt, item.generationType)
           ? enforceKlingPromptWordLimit(
@@ -1411,15 +1396,7 @@ ${shouldGenerateShotGroups ? `  "motionControlSegments": [
           )
           : item.prompt,
       }))
-      : higgsfieldPrompts;
-
-  const faithAdjustedPrompts = ugcLockedPrompts.map((item) => ({
-    ...item,
-    prompt: enforceKlingPromptWordLimit(
-      enforcePrayerStruggleTone(enforceFaithPositiveFraming(item.prompt)),
-      77
-    ),
-  }));
+      : parsedGlobalPrompts;
 
   const finalCutProSteps = sanitizeStringArray(row.finalCutProSteps, 20);
 
@@ -1434,39 +1411,24 @@ ${shouldGenerateShotGroups ? `  "motionControlSegments": [
     appName,
     mentionState
   );
-  const adjustedBeats = beats.map((beat) => ({
+
+  const beats = normalizeBeatsToTargetDuration({
+    beats: beatsRaw,
+    targetDurationSeconds,
+    minBeatCount,
+    hook: adjustedHook,
+  });
+
+  const adjustedBeats = beats.map((beat): PlanBeat => ({
     ...beat,
-    narration: enforcePrayerStruggleTone(
-      enforceFaithPositiveFraming(limitAppNameMentions(beat.narration, appName, mentionState))
-    ),
-    onScreenText: enforcePrayerStruggleTone(
-      enforceFaithPositiveFraming(limitAppNameMentions(beat.onScreenText, appName, mentionState))
-    ),
-    editNote: enforcePrayerStruggleTone(enforceFaithPositiveFraming(beat.editNote)),
+    narration: limitAppNameMentions(beat.narration, appName, mentionState),
+    onScreenText: limitAppNameMentions(beat.onScreenText, appName, mentionState),
+    editNote: beat.editNote,
   }));
   const adjustedCta = limitAppNameMentions(
     sanitizeString(scriptRow.cta, "Save this and try the routine today; use your tracker to stay consistent."),
     appName,
     mentionState
-  );
-
-  const targetDurationForSeedance = sanitizeString(
-    seedanceRow.targetDuration,
-    sanitizeString(deliverableSpecRow.duration, sourceMatchedDurationFallback(sourceDurationSeconds))
-  );
-  const seedancePrompt = ensureSeedanceQualityDirectives(
-    sanitizeString(
-      seedanceRow.prompt,
-      buildSeedanceFallbackPrompt({
-        appName,
-        format,
-        sourceVideo,
-        hook: sanitizeString(scriptRow.hook, ""),
-        beats,
-        ugcCharacter,
-        targetDuration: targetDurationForSeedance,
-      })
-    )
   );
 
   const adjustedBeatsForMode =
@@ -1546,24 +1508,21 @@ ${shouldGenerateShotGroups ? `  "motionControlSegments": [
       const segmentScriptRow = isRecord(seg.script) ? seg.script : {};
       const segmentBeats = sanitizePlanBeats(segmentScriptRow.beats, Math.max(1, Math.ceil(maxBeats / 2))).map((beat) => ({
         ...beat,
-        narration: enforcePrayerStruggleTone(enforceFaithPositiveFraming(beat.narration)),
-        onScreenText: enforcePrayerStruggleTone(enforceFaithPositiveFraming(beat.onScreenText)),
-        editNote: enforcePrayerStruggleTone(enforceFaithPositiveFraming(beat.editNote)),
+        narration: beat.narration,
+        onScreenText: beat.onScreenText,
+        editNote: beat.editNote,
       }));
       const segmentScript =
         cleanText(sanitizeString(segmentScriptRow.hook, "")).length > 0 ||
           segmentBeats.length > 0 ||
           cleanText(sanitizeString(segmentScriptRow.cta, "")).length > 0
           ? {
-            hook: enforcePrayerStruggleTone(
-              enforceFaithPositiveFraming(sanitizeString(segmentScriptRow.hook, ""))
-            ),
+            hook: sanitizeString(segmentScriptRow.hook, ""),
             beats: segmentBeats,
-            cta: enforcePrayerStruggleTone(
-              enforceFaithPositiveFraming(sanitizeString(segmentScriptRow.cta, ""))
-            ),
+            cta: sanitizeString(segmentScriptRow.cta, ""),
           }
           : undefined;
+      const segmentPrompts = sanitizeMultiShotPrompts(seg.multiShotPrompts, 8);
 
       return {
         segmentId: typeof seg.segmentId === "number" ? seg.segmentId : index + 1,
@@ -1576,10 +1535,9 @@ ${shouldGenerateShotGroups ? `  "motionControlSegments": [
           1,
           MAX_SINGLE_VIDEO_CLIP_SECONDS
         ),
-        startFramePrompt: enforcePrayerStruggleTone(
-          enforceFaithPositiveFraming(sanitizeString(seg.startFramePrompt, ""))
-        ),
+        startFramePrompt: sanitizeString(seg.startFramePrompt, ""),
         ...(segmentScript ? { script: segmentScript } : {}),
+        ...(segmentPrompts.length > 0 ? { multiShotPrompts: segmentPrompts } : {}),
       };
     })
     .filter((seg): seg is MotionControlSegment => seg !== null);
@@ -1587,20 +1545,46 @@ ${shouldGenerateShotGroups ? `  "motionControlSegments": [
   const fallbackShotGroups = shouldGenerateShotGroups
     ? splitBeatsIntoShotGroups({
       beats: sourceAlignedBeatsWithOpeningHint,
-      totalDurationSeconds:
-          typeof sourceDurationSeconds === "number" && Number.isFinite(sourceDurationSeconds)
-            ? sourceDurationSeconds
-            : Math.max(MAX_SINGLE_VIDEO_CLIP_SECONDS, sourceAlignedBeatsWithOpeningHint.length * 4),
+      totalDurationSeconds: targetDurationSeconds,
       maxSegmentSeconds: MAX_SINGLE_VIDEO_CLIP_SECONDS,
       hook: adjustedHook,
       cta: adjustedCta,
     })
     : [];
 
-  const shotGroups = (modelShotGroups.length > 0 ? modelShotGroups : fallbackShotGroups).map((segment, index) => {
+  const resolvedBaseGroups = modelShotGroups.length > 0 ? modelShotGroups : fallbackShotGroups;
+  const globalPromptChunkSize = Math.max(1, Math.ceil(ugcLockedPrompts.length / Math.max(1, resolvedBaseGroups.length)));
+
+  const shotGroups = resolvedBaseGroups.map((segment, index) => {
     const fallbackSegment = fallbackShotGroups[index];
     const fallbackScript = fallbackSegment?.script;
     const nextScript = segment.script || fallbackScript;
+    const inheritedGlobalPrompts = ugcLockedPrompts.slice(
+      index * globalPromptChunkSize,
+      (index + 1) * globalPromptChunkSize
+    );
+    const basePrompts = segment.multiShotPrompts && segment.multiShotPrompts.length > 0
+      ? segment.multiShotPrompts
+      : inheritedGlobalPrompts;
+    const fallbackSegmentPrompts = buildFallbackMultiShotPrompts(
+      {
+        ...segment,
+        script: nextScript,
+      },
+      index
+    );
+    const mergedPrompts = (basePrompts.length > 0 ? basePrompts : fallbackSegmentPrompts).map((prompt, promptIndex) => ({
+      ...prompt,
+      shotId: `group${segment.segmentId}_shot${promptIndex + 1}`,
+      prompt: promptNeedsCharacterLock(prompt.prompt, prompt.generationType) && format.formatType === "ugc" && ugcCharacter
+        ? enforceKlingPromptWordLimit(
+          ensureHiggsfieldPromptHasPerformanceInstruction(
+            applyUgcCharacterLock(prompt.prompt, ugcCharacter)
+          ),
+          77
+        )
+        : prompt.prompt,
+    }));
 
     return {
       ...segment,
@@ -1611,16 +1595,17 @@ ${shouldGenerateShotGroups ? `  "motionControlSegments": [
       durationSeconds: clamp(segment.durationSeconds, 1, MAX_SINGLE_VIDEO_CLIP_SECONDS),
       script: nextScript
         ? {
-          hook: enforcePrayerStruggleTone(enforceFaithPositiveFraming(sanitizeString(nextScript.hook, ""))),
+          hook: sanitizeString(nextScript.hook, ""),
           beats: sanitizePlanBeats(nextScript.beats, Math.max(1, Math.ceil(maxBeats / 2))).map((beat) => ({
             ...beat,
-            narration: enforcePrayerStruggleTone(enforceFaithPositiveFraming(beat.narration)),
-            onScreenText: enforcePrayerStruggleTone(enforceFaithPositiveFraming(beat.onScreenText)),
-            editNote: enforcePrayerStruggleTone(enforceFaithPositiveFraming(beat.editNote)),
+            narration: beat.narration,
+            onScreenText: beat.onScreenText,
+            editNote: beat.editNote,
           })),
-          cta: enforcePrayerStruggleTone(enforceFaithPositiveFraming(sanitizeString(nextScript.cta, ""))),
+          cta: sanitizeString(nextScript.cta, ""),
         }
         : undefined,
+      multiShotPrompts: mergedPrompts,
     };
   });
 
@@ -1634,15 +1619,11 @@ ${shouldGenerateShotGroups ? `  "motionControlSegments": [
         ? shotGroups
         : undefined,
     strategy: (() => {
-      const normalized = enforcePrayerStruggleTone(
-        enforceFaithPositiveFraming(sanitizeString(row.strategy, ""))
-      );
-      return normalized || "Reuse the selected format skeleton as value-first content, generate any required human scenes with a consistent Higgsfield AI influencer, and add subtle app integration where naturally relevant.";
+      const normalized = sanitizeString(row.strategy, "");
+      return normalized || "Reuse the selected format skeleton as value-first content, maintain native source pacing, and add subtle app integration where naturally relevant.";
     })(),
     objective: (() => {
-      const normalized = enforcePrayerStruggleTone(
-        enforceFaithPositiveFraming(sanitizeString(row.objective, ""))
-      );
+      const normalized = sanitizeString(row.objective, "");
       return normalized || "Deliver practical guidance with authentic retention flow and optional low-friction app visibility.";
     })(),
     integrationMode,
@@ -1663,23 +1644,18 @@ ${shouldGenerateShotGroups ? `  "motionControlSegments": [
       voiceStyle: sanitizeString(deliverableSpecRow.voiceStyle, "Warm, direct, practical"),
     },
     script: {
-      hook: enforcePrayerStruggleTone(enforceFaithPositiveFraming(adjustedHook)),
+      hook: adjustedHook,
       beats: sourceAlignedBeatsWithOpeningHint,
-      cta: enforcePrayerStruggleTone(enforceFaithPositiveFraming(adjustedCta)),
+      cta: adjustedCta,
     },
     socialCaption: {
-      caption: enforcePrayerStruggleTone(enforceFaithPositiveFraming(socialCaption)),
+      caption: socialCaption,
       hashtags:
         socialHashtags.length > 0
           ? socialHashtags
           : ["#MuslimahLifestyle", "#FaithBasedHabits", "#ProductiveRoutine"],
     },
-    seedanceSinglePrompt: {
-      model: sanitizeString(seedanceRow.model, "Seedance 1.5 Pro"),
-      prompt: seedancePrompt,
-      targetDuration: targetDurationForSeedance,
-    },
-    higgsfieldPrompts: faithAdjustedPrompts,
+    higgsfieldPrompts: shotGroups.flatMap((segment) => segment.multiShotPrompts || []).slice(0, 24),
     finalCutProSteps:
       finalCutProSteps.length > 0
         ? finalCutProSteps
