@@ -199,6 +199,14 @@ FORCED OUTPUT MODE:
 `
     : "";
 
+  const appMentionBlock = forcedAdaptationMode === "app_context"
+    ? `
+APP CONTEXT ENFORCEMENT:
+- Because adaptation mode is app_context, you MUST mention ${appName} verbatim at least once in the slide copy (Headline, Supporting, or Body).
+- Do not output Adaptation Mode: app_context unless ${appName} appears in at least one slide.
+`
+    : "";
+
   const prompt = `You are a social content strategist.
 
 ORIGINAL POST DETAILS:
@@ -212,6 +220,7 @@ APP:
 - App Context: ${appContext}
 ${relevanceBlock}
 ${forcedModeBlock}
+${appMentionBlock}
 
 CRITICAL ADAPTATION RULE:
 1) If canRecreate is false, do not force app context.
@@ -283,6 +292,12 @@ export async function generateHookStrategyScript({
 }): Promise<string> {
   const model = genAI.getGenerativeModel({ model: reasoningModel });
 
+  const appMentionRule = adaptationMode === "app_context"
+    ? `
+- Because adaptation mode is app_context, ${appName} must appear verbatim in at least one slide's Headline, Supporting, or Body.
+`
+    : "";
+
   const prompt = `You are an expert Instagram carousel strategist and copywriter.
 
 You must rewrite the SOURCE SCRIPT into a new high-retention carousel script that follows the provided playbook exactly.
@@ -307,6 +322,7 @@ NON-NEGOTIABLE RULES:
 - Keep adaptation mode fixed: ${adaptationMode}
 - Start output with exactly: Adaptation Mode: ${adaptationMode}
 - Produce 6-8 slides.
+${appMentionRule}
 - Enforce playbook rhythm:
   * Slide 1 = pattern-break primary hook
   * Slide 2 = standalone second hook

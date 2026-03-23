@@ -62,7 +62,13 @@ function startCapture(autoScrollIntervalMs) {
 
   autoScrollTimer = window.setInterval(() => {
     if (!isRunning) return;
+    
+    // TikTok usually traps scroll, so pressing "ArrowDown" works best to go to the next video
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', keyCode: 40, bubbles: true }));
+    
+    // Fallback normal scroll just in case
     window.scrollBy({ top: window.innerHeight * 0.9, left: 0, behavior: "smooth" });
+    
     sendUrls(getPostUrlsFromDom());
   }, Math.max(500, Number(autoScrollIntervalMs) || 1500));
 }
