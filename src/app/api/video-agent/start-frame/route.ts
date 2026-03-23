@@ -119,6 +119,24 @@ type PlanShape = {
   };
 };
 
+function getPriorSegmentStartFrameUrls(plan: PlanShape, segmentIndex?: number): string[] {
+  if (typeof segmentIndex !== "number" || segmentIndex <= 0) return [];
+  if (!Array.isArray(plan.motionControlSegments)) return [];
+
+  const urls: string[] = [];
+  const seen = new Set<string>();
+
+  for (let i = 0; i < segmentIndex; i += 1) {
+    const url = cleanText(plan.motionControlSegments[i]?.startFrame?.imageUrl);
+    if (!url || seen.has(url)) continue;
+    seen.add(url);
+    urls.push(url);
+  }
+
+  if (urls.length <= 3) return urls;
+  return urls.slice(-3);
+}
+
 function asText(value: unknown): string {
   return typeof value === "string" ? value.trim() : "";
 }
@@ -171,8 +189,18 @@ function buildStartFramePrompt(args: {
   character: CharacterRow | null;
   segmentIndex?: number;
   previousSegmentStartFrameUrl?: string | null;
+  continuityReferenceCount?: number;
 }): string {
-  const { appName, formatType, video, plan, character, segmentIndex, previousSegmentStartFrameUrl } = args;
+  const {
+    appName,
+    formatType,
+    video,
+    plan,
+    character,
+    segmentIndex,
+    previousSegmentStartFrameUrl,
+    continuityReferenceCount = 0,
+  } = args;
 
   if (typeof segmentIndex === "number" && plan.motionControlSegments && plan.motionControlSegments[segmentIndex]) {
     const segment = plan.motionControlSegments[segmentIndex];
@@ -183,14 +211,22 @@ function buildStartFramePrompt(args: {
     const firstSegmentPrompt = Array.isArray(segment.multiShotPrompts) ? cleanText(segment.multiShotPrompts?.[0]?.prompt) : "";
     const continuityInstruction =
       typeof segmentIndex === "number" && segmentIndex > 0
-        ? "Continuity requirement: this segment must look like an immediate continuation of the previous segment. Keep character identity, outfit, location, lighting, lens style, and scene geometry consistent."
+        ? "Continuity requirement: this segment must look like an immediate continuation of earlier generated segments. Keep the same main character identity unless script explicitly introduces a new person."
+        : "";
+    const strictIdentityRule =
+      typeof segmentIndex === "number" && segmentIndex > 0
+        ? "Do not change face identity, skin tone, age range, hair style, body proportions, or core wardrobe silhouette across segments."
         : "";
     const previousFrameInstruction =
       previousSegmentStartFrameUrl
         ? "A previous segment continuity reference image is attached. Treat it as the strongest visual continuity anchor."
         : "";
+    const continuityReferenceInstruction =
+      continuityReferenceCount > 0
+        ? `${continuityReferenceCount} continuity reference image(s) from earlier segments are attached. Prioritize identity consistency over stylistic variation.`
+        : "";
     const characterInstruction = character
-      ? `Use the selected recurring character identity (${character.character_name}). Keep face identity and styling consistent.`
+      ? `Use the selected recurring character identity (${character.character_name}). Character lock descriptor: ${cleanText(character.prompt_template) || "Keep same face, styling, and wardrobe family in every segment."}`
       : "No fixed character lock required unless script clearly needs a person.";
 
     return [
@@ -202,7 +238,9 @@ function buildStartFramePrompt(args: {
       `Segment CTA context: ${segmentCta || "N/A"}.`,
       `Segment first multi-shot prompt cue: ${firstSegmentPrompt || "N/A"}.`,
       continuityInstruction,
+      strictIdentityRule,
       previousFrameInstruction,
+      continuityReferenceInstruction,
       characterInstruction,
       `Vertical 9:16 composition at 1080x1920 output framing.`,
       `Photorealistic ultra-detailed 4K-quality look (high texture fidelity, clean dynamic range, realistic skin and fabric detail).`,
@@ -341,6 +379,7 @@ export async function POST(request: NextRequest) {
         plan.motionControlSegments[segmentIndex - 1]?.startFrame?.imageUrl
         ? cleanText(plan.motionControlSegments[segmentIndex - 1]?.startFrame?.imageUrl)
         : null;
+    const priorSegmentFrameUrls = getPriorSegmentStartFrameUrls(plan, segmentIndex);
 
     const prompt = buildStartFramePrompt({
       appName: asText(planRow.app_name) || "Muslimah Pro",
@@ -350,6 +389,7 @@ export async function POST(request: NextRequest) {
       character,
       segmentIndex,
       previousSegmentStartFrameUrl,
+      continuityReferenceCount: priorSegmentFrameUrls.length,
     });
 
     let extractedFrameDataUrl: string | null = null;
@@ -395,13 +435,13 @@ export async function POST(request: NextRequest) {
     }
 
     const referenceImageUrls: string[] = [];
-    if (previousSegmentStartFrameUrl) {
-      referenceImageUrls.push(previousSegmentStartFrameUrl);
+    if (priorSegmentFrameUrls.length > 0) {
+      referenceImageUrls.push(...priorSegmentFrameUrls);
     }
 
-    if (extractedFrameDataUrl) {
+    if (referenceImageUrls.length === 0 && extractedFrameDataUrl) {
       referenceImageUrls.push(extractedFrameDataUrl);
-    } else if (video.thumbnail_url) {
+    } else if (referenceImageUrls.length === 0 && video.thumbnail_url) {
       referenceImageUrls.push(video.thumbnail_url);
     }
 
