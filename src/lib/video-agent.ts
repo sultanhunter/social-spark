@@ -11,7 +11,7 @@ type NormalizedFormatType = "ugc" | "ai_video" | "hybrid" | "editorial";
 type AnalysisMethod = "frame_aware";
 type InlineImagePart = { inlineData: { data: string; mimeType: string } };
 const FRAME_SAMPLE_TARGET = 6;
-const MAX_SINGLE_VIDEO_CLIP_SECONDS = 12;
+const MAX_SINGLE_VIDEO_CLIP_SECONDS = 8;
 
 type VideoContentCategory =
   | "islamic_only"
@@ -122,6 +122,7 @@ export interface MotionControlSegment {
     shots: SegmentScriptShot[];
     cta: string;
   };
+  veoPrompt?: string;
   multiShotPrompts?: MultiShotPrompt[];
   startFrame?: VideoStartFrame;
 }
@@ -373,6 +374,74 @@ function enforceSegmentBoundaryTransitions(segments: MotionControlSegment[]): Mo
       },
     };
   });
+}
+
+function buildVeo31SegmentPrompt(args: {
+  segment: MotionControlSegment;
+  nextSegment?: MotionControlSegment;
+  styleHint: string;
+  appName: string;
+  ugcCharacter?: UGCCharacterProfile | null;
+}): string {
+  const { segment, nextSegment, styleHint, appName, ugcCharacter } = args;
+  const shots = segment.script?.shots || [];
+
+  const shotLines = (shots.length > 0 ? shots : [
+    {
+      shotId: "shot1",
+      visual: segment.startFramePrompt,
+      narration: segment.script?.hook || "",
+      onScreenText: "",
+      editNote: "",
+    },
+  ])
+    .map((shot, index) => {
+      const narration = closeOpenEndedLine(shot.narration);
+      const dialogue = narration
+        ? `Dialogue: "${narration.replace(/"/g, "'")}".`
+        : "No dialogue: performance carries emotion through subtle facial expression and natural body language.";
+      const textCue = cleanText(shot.onScreenText)
+        ? ` On-screen text: ${closeOpenEndedLine(shot.onScreenText)}`
+        : "";
+      const editCue = cleanText(shot.editNote) ? ` Edit intent: ${shot.editNote}.` : "";
+      return `Shot ${index + 1}: ${cleanText(shot.visual)}. ${dialogue}${textCue}${editCue}`;
+    })
+    .join(" ");
+
+  const characterLock = ugcCharacter
+    ? `Character lock: ${ugcCharacter.characterName}. ${cleanText(ugcCharacter.promptTemplate)}.`
+    : "Character consistency: keep same person identity, face geometry, and wardrobe continuity throughout this segment.";
+
+  const transitionHint = nextSegment
+    ? `End frame transition: finish with a clean match-cut handoff toward the next segment opening (${shortenForTransition(nextSegment.startFramePrompt, 14)}).`
+    : "End frame transition: finish cleanly with no abrupt visual jump so final edit can close naturally.";
+
+  return cleanText(
+    [
+      `Veo 3.1 prompt. Generate an ${MAX_SINGLE_VIDEO_CLIP_SECONDS}-second vertical 9:16 ${styleHint} segment (segment ${segment.segmentId}).`,
+      `Quality target: photorealistic, true-to-life UGC realism, natural skin texture and pores, realistic fabric physics, authentic handheld smartphone camera behavior, physically plausible lighting, no waxy skin, no plastic look, no AI artifacts or uncanny facial motion.`,
+      `Environment continuity: keep location, camera axis, lens feel, and light direction stable across all shots in this segment.`,
+      characterLock,
+      `App integration: if app is referenced, keep it subtle and practical. Mention ${appName} at most once.`,
+      `Shot plan: ${shotLines}`,
+      transitionHint,
+    ].join(" ")
+  );
+}
+
+function ensureVeoPromptQuality(prompt: string, fallback: string): string {
+  const cleaned = cleanText(prompt);
+  if (!cleaned) return fallback;
+
+  const hasShotStructure = /\bshot\s*1\b/i.test(cleaned);
+  const hasRealismCue =
+    /\b(photoreal|realistic|natural skin|micro-expression|handheld|no ai artifacts|no uncanny)\b/i.test(cleaned);
+
+  if (!hasShotStructure || !hasRealismCue) {
+    return fallback;
+  }
+
+  return cleaned;
 }
 
 function parseClockToSeconds(value: string): number | null {
@@ -1432,6 +1501,8 @@ SHOT GROUP CONSTRAINTS:
 - End every segment's spoken lines as complete thoughts with full stop punctuation.
 - In each segment script, shots are ordered by shotId only (shot1, shot2, ...). Do NOT use per-shot timing.
 - The last shot of each segment must be transition-friendly with the next segment opening (matching camera axis/lighting/subject position where possible).
+- For each segment, provide one complete detailed veoPrompt optimized for Veo 3.1. It must be copy-paste ready, include shot-wise structure (Shot 1: ... Shot 2: ...), and push photorealistic UGC realism.
+- Veo prompt realism directives: natural skin texture and pores, realistic eye blinks/micro-expressions, physically plausible lighting, authentic handheld phone motion, no uncanny facial artifacts, no waxy/plastic skin look.
 - For each segment, provide multiShotPrompts tailored to that segment only.
 ` : ""}
 - Return strict JSON only.
@@ -1470,8 +1541,8 @@ JSON SHAPE:
 ${shouldGenerateShotGroups ? `  "motionControlSegments": [
     {
       "segmentId": 1,
-      "timecode": "0:00-0:12",
-      "durationSeconds": 12,
+      "timecode": "0:00-0:08",
+      "durationSeconds": 8,
       "startFramePrompt": "string",
       "script": {
         "hook": "string",
@@ -1486,6 +1557,7 @@ ${shouldGenerateShotGroups ? `  "motionControlSegments": [
         ],
         "cta": "string"
       },
+      "veoPrompt": "single detailed Veo 3.1 prompt with Shot 1 / Shot 2 / ...",
       "multiShotPrompts": [
         {
           "shotId": "shot1",
@@ -1668,6 +1740,7 @@ ${shouldGenerateShotGroups ? `  "motionControlSegments": [
           }
           : undefined;
       const segmentPrompts = sanitizeMultiShotPrompts(seg.multiShotPrompts, 8);
+      const segmentVeoPrompt = sanitizeString(seg.veoPrompt, "");
 
       return {
         segmentId: typeof seg.segmentId === "number" ? seg.segmentId : index + 1,
@@ -1682,6 +1755,7 @@ ${shouldGenerateShotGroups ? `  "motionControlSegments": [
         ),
         startFramePrompt: sanitizeString(seg.startFramePrompt, ""),
         ...(segmentScript ? { script: segmentScript } : {}),
+        ...(segmentVeoPrompt ? { veoPrompt: segmentVeoPrompt } : {}),
         ...(segmentPrompts.length > 0 ? { multiShotPrompts: segmentPrompts } : {}),
       };
     })
@@ -1749,6 +1823,25 @@ ${shouldGenerateShotGroups ? `  "motionControlSegments": [
     };
   });
   const transitionReadyShotGroups = enforceSegmentBoundaryTransitions(shotGroups);
+  const styleHint =
+    format.formatType === "ugc"
+      ? "ugc creator-style live-action"
+      : format.formatType === "ai_video"
+        ? "live-action style ai video"
+        : "social-first live-action style";
+  const veoReadyShotGroups = transitionReadyShotGroups.map((segment, index, all) => ({
+    ...segment,
+    veoPrompt: ensureVeoPromptQuality(
+      segment.veoPrompt || "",
+      buildVeo31SegmentPrompt({
+        segment,
+        nextSegment: all[index + 1],
+        styleHint,
+        appName,
+        ugcCharacter,
+      })
+    ),
+  }));
 
   return {
     title: sanitizeString(row.title, `${appName} format recreation plan`),
@@ -1756,8 +1849,8 @@ ${shouldGenerateShotGroups ? `  "motionControlSegments": [
     maxSingleClipDurationSeconds: MAX_SINGLE_VIDEO_CLIP_SECONDS,
     useMotionControl: shouldGenerateShotGroups,
     motionControlSegments:
-      shouldGenerateShotGroups && transitionReadyShotGroups.length > 0
-        ? transitionReadyShotGroups
+      shouldGenerateShotGroups && veoReadyShotGroups.length > 0
+        ? veoReadyShotGroups
         : undefined,
     strategy: (() => {
       const normalized = sanitizeString(row.strategy, "");
@@ -1796,7 +1889,7 @@ ${shouldGenerateShotGroups ? `  "motionControlSegments": [
           ? socialHashtags
           : ["#MuslimahLifestyle", "#FaithBasedHabits", "#ProductiveRoutine"],
     },
-    higgsfieldPrompts: transitionReadyShotGroups.flatMap((segment) => segment.multiShotPrompts || []).slice(0, 24),
+    higgsfieldPrompts: veoReadyShotGroups.flatMap((segment) => segment.multiShotPrompts || []).slice(0, 24),
     finalCutProSteps:
       finalCutProSteps.length > 0
         ? finalCutProSteps
@@ -1867,9 +1960,12 @@ RULES:
 - Beat timecodes should span almost full duration.
 - Split into shot groups of max ${MAX_SINGLE_VIDEO_CLIP_SECONDS}s each.
 - Each shot group must include startFramePrompt, segment script (hook/shots/cta), and multiShotPrompts.
+- Each shot group must include startFramePrompt, segment script (hook/shots/cta), and one copy-paste-ready veoPrompt for Veo 3.1.
 - Segment scripts must be self-contained per group with no unfinished sentence that continues into the next segment.
 - Use shotId ordering inside each segment (shot1, shot2, ...), no per-shot timing.
 - Last shot in each segment should transition smoothly into next segment opening for clean final merge.
+- Veo prompt must be a single detailed prompt with explicit shot-wise structure (Shot 1: ..., Shot 2: ...).
+- Veo prompt realism directives: natural skin texture and pores, realistic eye blinks/micro-expressions, physically plausible lighting, authentic handheld phone motion, no uncanny facial artifacts, no waxy/plastic skin look.
 
 MULTI-SHOT PROMPT RULES:
 - Each prompt must be <= 77 words.
@@ -1914,8 +2010,8 @@ Return strict JSON only:
   "motionControlSegments": [
     {
       "segmentId": 1,
-      "timecode": "0:00-0:12",
-      "durationSeconds": 12,
+      "timecode": "0:00-0:08",
+      "durationSeconds": 8,
       "startFramePrompt": "string",
       "script": {
         "hook": "string",
@@ -1930,6 +2026,7 @@ Return strict JSON only:
         ],
         "cta": "string"
       },
+      "veoPrompt": "single detailed Veo 3.1 prompt with Shot 1 / Shot 2 / ...",
       "multiShotPrompts": [
         {
           "shotId": "shot1",
@@ -2004,6 +2101,7 @@ Return strict JSON only:
           ),
           cta: closeOpenEndedLine(sanitizeString(segmentScriptRow.cta, "")),
         },
+        veoPrompt: sanitizeString(seg.veoPrompt, ""),
         multiShotPrompts: sanitizeMultiShotPrompts(seg.multiShotPrompts, 8),
       };
     })
@@ -2085,6 +2183,27 @@ Return strict JSON only:
     };
   });
   const transitionReadySegments = enforceSegmentBoundaryTransitions(resolvedSegments);
+  const scriptAgentStyleHint =
+    resolvedVideoType === "ugc"
+      ? "ugc creator-style live-action"
+      : resolvedVideoType === "ai_animation"
+        ? "animated explainer with realistic motion and texture"
+        : resolvedVideoType === "faceless_broll"
+          ? "faceless b-roll educational live-action"
+          : "hybrid social explainer";
+  const veoReadySegments = transitionReadySegments.map((segment, index, all) => ({
+    ...segment,
+    veoPrompt: ensureVeoPromptQuality(
+      segment.veoPrompt || "",
+      buildVeo31SegmentPrompt({
+        segment,
+        nextSegment: all[index + 1],
+        styleHint: scriptAgentStyleHint,
+        appName,
+        ugcCharacter,
+      })
+    ),
+  }));
 
   return {
     title: sanitizeString(row.title, `${appName} informational video plan`),
@@ -2109,7 +2228,7 @@ Return strict JSON only:
       beats,
       cta,
     },
-    motionControlSegments: transitionReadySegments,
+    motionControlSegments: veoReadySegments,
     socialCaption: {
       caption: sanitizeString(
         isRecord(row.socialCaption) ? row.socialCaption.caption : "",

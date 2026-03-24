@@ -84,6 +84,7 @@ type PlanShape = {
     timecode: string;
     durationSeconds: number;
     startFramePrompt: string;
+    veoPrompt?: string;
     script?: {
       hook?: string;
       shots?: Array<{
@@ -202,6 +203,7 @@ function buildStartFramePrompt(args: {
     const segmentVisualCue = cleanText(firstSegmentShot?.visual || firstSegmentShot?.onScreenText || firstSegmentShot?.narration);
     const segmentCta = cleanText(segment.script?.cta);
     const firstSegmentPrompt = Array.isArray(segment.multiShotPrompts) ? cleanText(segment.multiShotPrompts?.[0]?.prompt) : "";
+    const veoPromptCue = cleanText(segment.veoPrompt || "").slice(0, 260);
     const continuityInstruction =
       typeof segmentIndex === "number" && segmentIndex > 0
         ? "Continuity requirement: this segment must look like an immediate continuation of earlier generated segments. Keep the same main character identity unless script explicitly introduces a new person."
@@ -241,6 +243,7 @@ function buildStartFramePrompt(args: {
       `Segment first beat visual context: ${segmentVisualCue || "N/A"}.`,
       `Segment CTA context: ${segmentCta || "N/A"}.`,
       `Segment first multi-shot prompt cue: ${firstSegmentPrompt || "N/A"}.`,
+      `Segment Veo prompt cue: ${veoPromptCue || "N/A"}.`,
       continuityInstruction,
       environmentContinuityInstruction,
       hardEnvironmentLockInstruction,

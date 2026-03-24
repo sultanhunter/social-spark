@@ -6,6 +6,7 @@ import {
   ArrowLeft,
   ChevronDown,
   Clapperboard,
+  Copy,
   Clock,
   Download,
   ExternalLink,
@@ -158,6 +159,7 @@ type VideoPlan = {
       shots?: SegmentScriptShot[];
       cta?: string;
     };
+    veoPrompt?: string;
     multiShotPrompts?: HiggsfieldPrompt[];
     startFrame?: VideoStartFrame;
   }[];
@@ -206,6 +208,7 @@ type ScriptAgentPlan = {
       shots: SegmentScriptShot[];
       cta: string;
     };
+    veoPrompt?: string;
     multiShotPrompts?: HiggsfieldPrompt[];
   }[];
   socialCaption: {
@@ -498,6 +501,21 @@ function VideoCanvasNode({ data }: NodeProps<Node<VideoNodeData>>) {
   const sourceDurationSeconds = getVideoSourceDurationSeconds(data.video);
   const sourceDurationLabel = formatDurationLabel(sourceDurationSeconds);
   const [isPlanModalOpen, setIsPlanModalOpen] = useState(false);
+  const [copiedVeoSegmentId, setCopiedVeoSegmentId] = useState<number | null>(null);
+
+  const handleCopyVeoPrompt = useCallback(async (segmentId: number, prompt: string) => {
+    const text = prompt.trim();
+    if (!text) return;
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopiedVeoSegmentId(segmentId);
+      window.setTimeout(() => {
+        setCopiedVeoSegmentId((current) => (current === segmentId ? null : current));
+      }, 1800);
+    } catch {
+      setCopiedVeoSegmentId(null);
+    }
+  }, []);
 
   return (
     <div className={`w-[260px] rounded-2xl border bg-white p-2.5 shadow-sm ${isSelected ? "border-rose-300 ring-2 ring-rose-100" : "border-slate-200"}`}>
@@ -686,7 +704,7 @@ function VideoCanvasNode({ data }: NodeProps<Node<VideoNodeData>>) {
               htmlFor={`motion-control-${data.video.id}`}
               className="text-xs font-medium text-slate-700"
             >
-              Enable shot grouping (12s max)
+              Enable shot grouping (8s max)
             </label>
           </div>
 
@@ -836,7 +854,7 @@ function VideoCanvasNode({ data }: NodeProps<Node<VideoNodeData>>) {
                   {plan.motionControlSegments?.length ? (
                     <div>
                       <div className="flex items-center justify-between gap-2">
-                        <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">Shot Groups (12s max each)</p>
+                        <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">Shot Groups (8s max each)</p>
                         <Button
                           variant="ghost"
                           size="sm"
@@ -933,6 +951,24 @@ function VideoCanvasNode({ data }: NodeProps<Node<VideoNodeData>>) {
                                     </div>
                                   ))}
                                 </div>
+                              </div>
+                            ) : null}
+
+                            {segment.veoPrompt ? (
+                              <div className="mt-2 rounded border border-emerald-200 bg-emerald-50/70 px-2 py-1.5">
+                                <div className="mb-1 flex items-center justify-between gap-2">
+                                  <p className="text-[10px] font-semibold uppercase tracking-wide text-emerald-700">Veo 3.1 Prompt</p>
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    className="nodrag h-7"
+                                    onClick={() => void handleCopyVeoPrompt(segment.segmentId, segment.veoPrompt || "")}
+                                  >
+                                    <Copy className="mr-1 h-3.5 w-3.5" />
+                                    {copiedVeoSegmentId === segment.segmentId ? "Copied" : "Copy"}
+                                  </Button>
+                                </div>
+                                <p className="whitespace-pre-wrap text-[11px] leading-relaxed text-slate-700">{segment.veoPrompt}</p>
                               </div>
                             ) : null}
                           </div>
@@ -1104,6 +1140,7 @@ export function VideoAgentView({ collectionId }: { collectionId: string }) {
   const [scriptAgentPlan, setScriptAgentPlan] = useState<ScriptAgentPlan | null>(null);
   const [scriptAgentError, setScriptAgentError] = useState("");
   const [scriptAgentSuccess, setScriptAgentSuccess] = useState("");
+  const [copiedScriptAgentSegmentId, setCopiedScriptAgentSegmentId] = useState<number | null>(null);
   const [nodePositions, setNodePositions] = useState<Record<string, { x: number; y: number }>>({});
 
   const selectedFormat = useMemo(
@@ -1658,6 +1695,20 @@ export function VideoAgentView({ collectionId }: { collectionId: string }) {
     selectedUgcCharacterId,
   ]);
 
+  const handleCopyScriptAgentVeoPrompt = useCallback(async (segmentId: number, prompt: string) => {
+    const text = prompt.trim();
+    if (!text) return;
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopiedScriptAgentSegmentId(segmentId);
+      window.setTimeout(() => {
+        setCopiedScriptAgentSegmentId((current) => (current === segmentId ? null : current));
+      }, 1800);
+    } catch {
+      setCopiedScriptAgentSegmentId(null);
+    }
+  }, []);
+
   const handleRefreshR2 = useCallback(async (videoId: string) => {
     setRefreshingR2VideoId(videoId);
     setError("");
@@ -2112,6 +2163,23 @@ export function VideoAgentView({ collectionId }: { collectionId: string }) {
                           <div key={`agent-segment-${segment.segmentId}`} className="rounded border border-indigo-200 bg-white px-2 py-1.5">
                             <p className="text-xs font-semibold text-indigo-700">{`Segment ${segment.segmentId} - ${segment.timecode}`}</p>
                             <p className="text-[11px] text-slate-700"><span className="font-semibold text-slate-500">Start Frame:</span> {segment.startFramePrompt}</p>
+                            {segment.veoPrompt ? (
+                              <div className="mt-1 rounded border border-emerald-200 bg-emerald-50 px-2 py-1.5">
+                                <div className="mb-1 flex items-center justify-between gap-2">
+                                  <p className="text-[10px] font-semibold uppercase tracking-wide text-emerald-700">Veo 3.1 Prompt</p>
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    className="h-7"
+                                    onClick={() => void handleCopyScriptAgentVeoPrompt(segment.segmentId, segment.veoPrompt || "")}
+                                  >
+                                    <Copy className="mr-1 h-3.5 w-3.5" />
+                                    {copiedScriptAgentSegmentId === segment.segmentId ? "Copied" : "Copy"}
+                                  </Button>
+                                </div>
+                                <p className="whitespace-pre-wrap text-[11px] text-slate-700">{segment.veoPrompt}</p>
+                              </div>
+                            ) : null}
                             {segment.multiShotPrompts?.length ? (
                               <div className="mt-1 space-y-1">
                                 {segment.multiShotPrompts.map((shot, idx) => (
