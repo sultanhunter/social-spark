@@ -379,18 +379,11 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    const previousSegmentStartFrameUrl =
-      getPreviousSegmentStartFrameUrl(plan, segmentIndex);
+    const hasShotGroups = Array.isArray(plan.motionControlSegments) && plan.motionControlSegments.length > 0;
+    const effectiveSegmentIndex = hasShotGroups ? 0 : segmentIndex;
 
-    if (typeof segmentIndex === "number" && segmentIndex > 0 && !previousSegmentStartFrameUrl) {
-      return NextResponse.json(
-        {
-          error:
-            "Generate or upload start frame for previous segment(s) first, so this segment can use prior segment references for continuity.",
-        },
-        { status: 400 }
-      );
-    }
+    const previousSegmentStartFrameUrl =
+      hasShotGroups ? null : getPreviousSegmentStartFrameUrl(plan, effectiveSegmentIndex);
 
     const prompt = buildStartFramePrompt({
       appName: asText(planRow.app_name) || "Muslimah Pro",
@@ -398,7 +391,7 @@ export async function POST(request: NextRequest) {
       video,
       plan,
       character,
-      segmentIndex,
+      segmentIndex: effectiveSegmentIndex,
       previousSegmentStartFrameUrl,
     });
 
@@ -409,8 +402,12 @@ export async function POST(request: NextRequest) {
     if (video.source_url) {
       try {
         let timecodeSeconds = 0;
-        if (typeof segmentIndex === "number" && plan.motionControlSegments && plan.motionControlSegments[segmentIndex]) {
-          timecodeSeconds = parseStartTimeSeconds(plan.motionControlSegments[segmentIndex].timecode);
+        if (
+          typeof effectiveSegmentIndex === "number" &&
+          plan.motionControlSegments &&
+          plan.motionControlSegments[effectiveSegmentIndex]
+        ) {
+          timecodeSeconds = parseStartTimeSeconds(plan.motionControlSegments[effectiveSegmentIndex].timecode);
         }
 
         const extractorUrl = process.env.SOCIAL_EXTRACTOR_API_URL || process.env.EXTRACTOR_API_URL || "https://social-extractor-render.onrender.com";
@@ -485,10 +482,20 @@ export async function POST(request: NextRequest) {
     };
 
     let nextPlan: PlanShape;
-    if (typeof segmentIndex === "number" && plan.motionControlSegments && plan.motionControlSegments[segmentIndex]) {
+    if (hasShotGroups && plan.motionControlSegments) {
+      const updatedSegments = plan.motionControlSegments.map((segment) => ({
+        ...segment,
+        startFrame: nextStartFrame,
+      }));
+      nextPlan = {
+        ...plan,
+        startFrame: nextStartFrame,
+        motionControlSegments: updatedSegments,
+      };
+    } else if (typeof effectiveSegmentIndex === "number" && plan.motionControlSegments && plan.motionControlSegments[effectiveSegmentIndex]) {
       const updatedSegments = [...plan.motionControlSegments];
-      updatedSegments[segmentIndex] = {
-        ...updatedSegments[segmentIndex],
+      updatedSegments[effectiveSegmentIndex] = {
+        ...updatedSegments[effectiveSegmentIndex],
         startFrame: nextStartFrame,
       };
       nextPlan = {

@@ -835,28 +835,22 @@ function VideoCanvasNode({ data }: NodeProps<Node<VideoNodeData>>) {
 
                   {plan.motionControlSegments?.length ? (
                     <div>
-                      <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">Shot Groups (12s max each)</p>
+                      <div className="flex items-center justify-between gap-2">
+                        <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">Shot Groups (12s max each)</p>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="nodrag h-7"
+                          onClick={() => data.onGenerateStartFrame(data.formatId, data.video.id)}
+                          isLoading={data.isGeneratingStartFrame}
+                        >
+                          <Sparkles className="mr-1 h-3.5 w-3.5" />
+                          {plan.startFrame?.imageUrl ? "Regenerate Shared Frame" : "Generate Shared Frame"}
+                        </Button>
+                      </div>
                       <div className="mt-1.5 space-y-3">
                         {plan.motionControlSegments.map((segment, idx) => (
                           <div key={`mc-seg-${idx}`} className="rounded border border-indigo-200 bg-indigo-50/50 p-2.5">
-                            {(() => {
-                              const uploadInputId = `upload-prev-segment-${data.video.id}-${idx}`;
-                              return (
-                                <input
-                                  id={uploadInputId}
-                                  type="file"
-                                  accept="video/*"
-                                  className="hidden"
-                                  onChange={(event) => {
-                                    const file = event.currentTarget.files?.[0];
-                                    if (file) {
-                                      data.onUploadPreviousSegmentVideo(data.formatId, data.video.id, idx, file);
-                                    }
-                                    event.currentTarget.value = "";
-                                  }}
-                                />
-                              );
-                            })()}
                             <div className="flex items-center justify-between mb-2">
                               <div>
                                 <Badge variant="default" className="mr-1.5 bg-indigo-100 text-indigo-700 border-indigo-200 hover:bg-indigo-100">
@@ -866,49 +860,12 @@ function VideoCanvasNode({ data }: NodeProps<Node<VideoNodeData>>) {
                                   {segment.timecode} ({segment.durationSeconds}s)
                                 </span>
                               </div>
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                className="nodrag h-7"
-                                onClick={() => data.onGenerateStartFrame(data.formatId, data.video.id, idx)}
-                                isLoading={data.isGeneratingStartFrame && data.generatingSegmentIndex === idx}
-                              >
-                                <Sparkles className="mr-1 h-3.5 w-3.5" />
-                                {segment.startFrame?.imageUrl ? "Regenerate" : "Generate Start Frame"}
-                              </Button>
                             </div>
 
-                            {idx > 0 ? (
-                              <div className="mb-2 rounded border border-sky-200 bg-sky-50 px-2 py-1.5">
-                                <div className="flex items-center justify-between gap-2">
-                                  <p className="text-[10px] text-sky-700">
-                                    Upload previous segment generated video to extract its last frame for this segment.
-                                  </p>
-                                  <Button
-                                    variant="ghost"
-                                    size="sm"
-                                    className="nodrag h-7"
-                                    isLoading={
-                                      data.isUploadingPreviousSegmentVideo &&
-                                      data.uploadingPreviousSegmentIndex === idx
-                                    }
-                                    onClick={() => {
-                                      const uploadInput = document.getElementById(
-                                        `upload-prev-segment-${data.video.id}-${idx}`
-                                      ) as HTMLInputElement | null;
-                                      uploadInput?.click();
-                                    }}
-                                  >
-                                    {segment.startFrame?.imageUrl ? "Replace via Upload" : "Upload Prev Video"}
-                                  </Button>
-                                </div>
-                              </div>
-                            ) : null}
-
-                            {segment.startFrame?.imageUrl ? (
+                            {(segment.startFrame?.imageUrl || plan.startFrame?.imageUrl) ? (
                               <div className="mb-2 rounded border border-slate-200 bg-white p-2">
                                 <img
-                                  src={segment.startFrame.imageUrl}
+                                  src={segment.startFrame?.imageUrl || plan.startFrame?.imageUrl}
                                   alt={`Segment ${segment.segmentId} start frame`}
                                   className="w-full rounded border border-slate-200 object-cover"
                                   style={{ aspectRatio: "9 / 16" }}
@@ -918,7 +875,7 @@ function VideoCanvasNode({ data }: NodeProps<Node<VideoNodeData>>) {
                                     variant="ghost"
                                     size="sm"
                                     className="nodrag"
-                                    onClick={() => data.onOpen(segment.startFrame?.imageUrl || "")}
+                                    onClick={() => data.onOpen(segment.startFrame?.imageUrl || plan.startFrame?.imageUrl || "")}
                                   >
                                     <ExternalLink className="mr-1 h-3.5 w-3.5" />
                                     Open image
