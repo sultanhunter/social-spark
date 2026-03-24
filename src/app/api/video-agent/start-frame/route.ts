@@ -119,22 +119,12 @@ type PlanShape = {
   };
 };
 
-function getPriorSegmentStartFrameUrls(plan: PlanShape, segmentIndex?: number): string[] {
-  if (typeof segmentIndex !== "number" || segmentIndex <= 0) return [];
-  if (!Array.isArray(plan.motionControlSegments)) return [];
+function getPreviousSegmentStartFrameUrl(plan: PlanShape, segmentIndex?: number): string | null {
+  if (typeof segmentIndex !== "number" || segmentIndex <= 0) return null;
+  if (!Array.isArray(plan.motionControlSegments)) return null;
 
-  const urls: string[] = [];
-  const seen = new Set<string>();
-
-  for (let i = 0; i < segmentIndex; i += 1) {
-    const url = cleanText(plan.motionControlSegments[i]?.startFrame?.imageUrl);
-    if (!url || seen.has(url)) continue;
-    seen.add(url);
-    urls.push(url);
-  }
-
-  if (urls.length <= 3) return urls;
-  return urls.slice(-3);
+  const url = cleanText(plan.motionControlSegments[segmentIndex - 1]?.startFrame?.imageUrl);
+  return url || null;
 }
 
 function asText(value: unknown): string {
@@ -189,7 +179,6 @@ function buildStartFramePrompt(args: {
   character: CharacterRow | null;
   segmentIndex?: number;
   previousSegmentStartFrameUrl?: string | null;
-  continuityReferenceCount?: number;
 }): string {
   const {
     appName,
@@ -199,7 +188,6 @@ function buildStartFramePrompt(args: {
     character,
     segmentIndex,
     previousSegmentStartFrameUrl,
-    continuityReferenceCount = 0,
   } = args;
 
   if (typeof segmentIndex === "number" && plan.motionControlSegments && plan.motionControlSegments[segmentIndex]) {
@@ -225,10 +213,9 @@ function buildStartFramePrompt(args: {
       previousSegmentStartFrameUrl
         ? "A previous segment continuity reference image is attached. Treat it as the strongest visual continuity anchor."
         : "";
-    const continuityReferenceInstruction =
-      continuityReferenceCount > 0
-        ? `${continuityReferenceCount} continuity reference image(s) from earlier segments are attached. Prioritize identity consistency over stylistic variation.`
-        : "";
+    const continuityReferenceInstruction = previousSegmentStartFrameUrl
+      ? "Exactly one continuity reference image is attached from segment N-1. Match that environment and character identity first, then apply only minimal progression into this segment."
+      : "";
     const characterInstruction = character
       ? `Use the selected recurring character identity (${character.character_name}). Character lock descriptor: ${cleanText(character.prompt_template) || "Keep same face, styling, and wardrobe family in every segment."}`
       : "No fixed character lock required unless script clearly needs a person.";
@@ -378,15 +365,9 @@ export async function POST(request: NextRequest) {
     }
 
     const previousSegmentStartFrameUrl =
-      typeof segmentIndex === "number" &&
-        segmentIndex > 0 &&
-        plan.motionControlSegments &&
-        plan.motionControlSegments[segmentIndex - 1]?.startFrame?.imageUrl
-        ? cleanText(plan.motionControlSegments[segmentIndex - 1]?.startFrame?.imageUrl)
-        : null;
-    const priorSegmentFrameUrls = getPriorSegmentStartFrameUrls(plan, segmentIndex);
+      getPreviousSegmentStartFrameUrl(plan, segmentIndex);
 
-    if (typeof segmentIndex === "number" && segmentIndex > 0 && priorSegmentFrameUrls.length === 0) {
+    if (typeof segmentIndex === "number" && segmentIndex > 0 && !previousSegmentStartFrameUrl) {
       return NextResponse.json(
         {
           error:
@@ -404,7 +385,6 @@ export async function POST(request: NextRequest) {
       character,
       segmentIndex,
       previousSegmentStartFrameUrl,
-      continuityReferenceCount: priorSegmentFrameUrls.length,
     });
 
     let extractedFrameDataUrl: string | null = null;
@@ -450,8 +430,8 @@ export async function POST(request: NextRequest) {
     }
 
     const referenceImageUrls: string[] = [];
-    if (priorSegmentFrameUrls.length > 0) {
-      referenceImageUrls.push(...priorSegmentFrameUrls);
+    if (previousSegmentStartFrameUrl) {
+      referenceImageUrls.push(previousSegmentStartFrameUrl);
     }
 
     if (referenceImageUrls.length === 0 && extractedFrameDataUrl) {
