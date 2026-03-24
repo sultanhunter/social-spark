@@ -169,6 +169,32 @@ export interface UGCCharacterProfile {
   imageModel?: string | null;
 }
 
+export type ScriptAgentVideoType = "ugc" | "ai_animation" | "faceless_broll" | "hybrid";
+export type ScriptAgentTopicCategory = "period_pregnancy" | "islamic_period_pregnancy";
+
+export interface VideoScriptIdeationPlan {
+  title: string;
+  objective: string;
+  topicCategory: ScriptAgentTopicCategory;
+  selectedVideoType: ScriptAgentVideoType;
+  videoTypeReason: string;
+  appHookStrategy: string;
+  targetDurationSeconds: number;
+  maxSingleClipDurationSeconds: number;
+  script: {
+    hook: string;
+    beats: PlanBeat[];
+    cta: string;
+  };
+  motionControlSegments: MotionControlSegment[];
+  socialCaption: {
+    caption: string;
+    hashtags: string[];
+  };
+  productionSteps: string[];
+  qaChecklist: string[];
+}
+
 function requireGeminiKey(): void {
   if (!process.env.GOOGLE_GEMINI_API_KEY) {
     throw new Error("GOOGLE_GEMINI_API_KEY is missing. Add it before running the video pipeline.");
@@ -665,6 +691,26 @@ function normalizeFormatType(value: unknown): NormalizedFormatType {
   if (cleaned === "ai_video" || cleaned === "aivideo" || cleaned === "ai-generated") return "ai_video";
   if (cleaned === "editorial") return "editorial";
   return "hybrid";
+}
+
+function sanitizeScriptAgentVideoType(value: unknown): ScriptAgentVideoType {
+  if (typeof value !== "string") return "hybrid";
+  const cleaned = value.trim().toLowerCase();
+  if (cleaned === "ugc") return "ugc";
+  if (cleaned === "ai_animation" || cleaned === "animation" || cleaned === "ai-animation") return "ai_animation";
+  if (cleaned === "faceless_broll" || cleaned === "faceless" || cleaned === "broll" || cleaned === "b-roll") {
+    return "faceless_broll";
+  }
+  return "hybrid";
+}
+
+function sanitizeScriptAgentTopicCategory(value: unknown): ScriptAgentTopicCategory {
+  if (typeof value !== "string") return "period_pregnancy";
+  const cleaned = value.trim().toLowerCase();
+  if (cleaned === "islamic_period_pregnancy" || cleaned === "islamic+period_pregnancy") {
+    return "islamic_period_pregnancy";
+  }
+  return "period_pregnancy";
 }
 
 function parseJsonFromModel(text: string): unknown {
@@ -1662,6 +1708,318 @@ ${shouldGenerateShotGroups ? `  "motionControlSegments": [
     productionSteps: sanitizeStringArray(row.productionSteps, 12),
     editingTimeline: sanitizeStringArray(row.editingTimeline, 12),
     assetsChecklist: sanitizeStringArray(row.assetsChecklist, 12),
+    qaChecklist: sanitizeStringArray(row.qaChecklist, 12),
+  };
+}
+
+interface BuildVideoScriptIdeationArgs {
+  appName: string;
+  appContext: string;
+  topicBrief: string;
+  targetDurationSeconds?: number;
+  preferredVideoType?: ScriptAgentVideoType | "auto";
+  ugcCharacter?: UGCCharacterProfile | null;
+  reasoningModel?: ReasoningModel;
+}
+
+export async function buildVideoScriptIdeationPlan({
+  appName,
+  appContext,
+  topicBrief,
+  targetDurationSeconds = 75,
+  preferredVideoType = "auto",
+  ugcCharacter,
+  reasoningModel = DEFAULT_REASONING_MODEL,
+}: BuildVideoScriptIdeationArgs): Promise<VideoScriptIdeationPlan> {
+  requireGeminiKey();
+  const model = genAI.getGenerativeModel({ model: reasoningModel });
+
+  const safeDurationSeconds = clamp(Math.round(targetDurationSeconds), 30, 180);
+  const minBeatCount = Math.max(8, Math.ceil(safeDurationSeconds / 4));
+
+  const prompt = `You are a senior short-form video script strategist.
+
+TASK:
+Generate an original informational video script plan WITHOUT using any source video.
+
+APP CONTEXT:
+- App Name: ${appName}
+- App Context: ${appContext || "Period/pregnancy tracking app for Muslim women with worship support."}
+
+USER INPUT:
+- Topic brief: ${topicBrief}
+- Preferred video type: ${preferredVideoType}
+- Target duration seconds: ${safeDurationSeconds}
+
+AVAILABLE VIDEO TYPES:
+- ugc (creator/talking-head style)
+- ai_animation (animated explainers)
+- faceless_broll (voiceover + visual metaphors)
+- hybrid (mix of talking-head and motion graphics)
+
+TOPIC CATEGORY OPTIONS:
+- period_pregnancy
+- islamic_period_pregnancy
+
+RULES:
+- Choose exactly one topic category and one video type.
+- Keep tone educational, compassionate, practical, and non-judgmental.
+- App hook must be natural and useful (not ad-like), ideally as one practical proof/help beat.
+- Mention app name at most once in full script.
+- Duration must closely match target.
+- Use enough beats to fill full duration (minimum ${minBeatCount} beats).
+- Beat timecodes should span almost full duration.
+- Split into shot groups of max ${MAX_SINGLE_VIDEO_CLIP_SECONDS}s each.
+- Each shot group must include startFramePrompt, segment script (hook/beats/cta), and multiShotPrompts.
+
+MULTI-SHOT PROMPT RULES:
+- Each prompt must be <= 77 words.
+- Each prompt must contain either:
+  - Dialogue: "..." (if spoken), OR
+  - No dialogue: ... (if non-speaking).
+- Use generationType from: base_ai_video | ugc_video | ai_broll | product_ui_overlay | transition_fx.
+- If phone/app UI is shown, require pure chroma green phone screen (#00FF00), no baked UI.
+
+${ugcCharacter ? `UGC CHARACTER LOCK:
+- characterName: ${ugcCharacter.characterName}
+- personaSummary: ${ugcCharacter.personaSummary}
+- visualStyle: ${ugcCharacter.visualStyle}
+- wardrobeNotes: ${ugcCharacter.wardrobeNotes}
+- voiceTone: ${ugcCharacter.voiceTone}
+- promptTemplate: ${ugcCharacter.promptTemplate}
+- If selectedVideoType is ugc or hybrid, maintain this identity across all segments.
+` : ""}
+
+Return strict JSON only:
+{
+  "title": "string",
+  "objective": "string",
+  "topicCategory": "period_pregnancy|islamic_period_pregnancy",
+  "selectedVideoType": "ugc|ai_animation|faceless_broll|hybrid",
+  "videoTypeReason": "string",
+  "appHookStrategy": "string",
+  "targetDurationSeconds": ${safeDurationSeconds},
+  "script": {
+    "hook": "string",
+    "beats": [
+      {
+        "timecode": "0:00-0:04",
+        "visual": "string",
+        "narration": "string",
+        "onScreenText": "string",
+        "editNote": "string"
+      }
+    ],
+    "cta": "string"
+  },
+  "motionControlSegments": [
+    {
+      "segmentId": 1,
+      "timecode": "0:00-0:15",
+      "durationSeconds": 15,
+      "startFramePrompt": "string",
+      "script": {
+        "hook": "string",
+        "beats": [
+          {
+            "timecode": "0:00-0:04",
+            "visual": "string",
+            "narration": "string",
+            "onScreenText": "string",
+            "editNote": "string"
+          }
+        ],
+        "cta": "string"
+      },
+      "multiShotPrompts": [
+        {
+          "shotId": "shot1",
+          "generationType": "base_ai_video|ugc_video|ai_broll|product_ui_overlay|transition_fx",
+          "scene": "string",
+          "prompt": "string with Dialogue: \"...\" OR No dialogue: ...",
+          "shotDuration": "string"
+        }
+      ]
+    }
+  ],
+  "socialCaption": {
+    "caption": "string",
+    "hashtags": ["string"]
+  },
+  "productionSteps": ["string"],
+  "qaChecklist": ["string"]
+}`;
+
+  const result = await model.generateContent(prompt);
+  const parsed = parseJsonFromModel(result.response.text());
+  const row = isRecord(parsed) ? parsed : {};
+  const scriptRow = isRecord(row.script) ? row.script : {};
+
+  const mentionState = { count: 0 };
+  const hook = limitAppNameMentions(
+    sanitizeString(scriptRow.hook, `A practical myth-busting hook about ${topicBrief}.`),
+    appName,
+    mentionState
+  );
+  const rawBeats = sanitizePlanBeats(scriptRow.beats, 64);
+  const normalizedBeats = normalizeBeatsToTargetDuration({
+    beats: rawBeats,
+    targetDurationSeconds: safeDurationSeconds,
+    minBeatCount,
+    hook,
+  });
+  const beats = normalizedBeats.map((beat) => ({
+    ...beat,
+    narration: limitAppNameMentions(beat.narration, appName, mentionState),
+    onScreenText: limitAppNameMentions(beat.onScreenText, appName, mentionState),
+  }));
+  const cta = limitAppNameMentions(
+    sanitizeString(scriptRow.cta, "Save this for later and share with someone who needs it."),
+    appName,
+    mentionState
+  );
+
+  const modelSegmentsRaw = Array.isArray(row.motionControlSegments) ? row.motionControlSegments : [];
+  const modelSegments: MotionControlSegment[] = modelSegmentsRaw
+    .map((seg, index): MotionControlSegment | null => {
+      if (!isRecord(seg)) return null;
+      const segmentScriptRow = isRecord(seg.script) ? seg.script : {};
+
+      return {
+        segmentId: typeof seg.segmentId === "number" ? seg.segmentId : index + 1,
+        timecode: sanitizeString(
+          seg.timecode,
+          `${formatClock(index * MAX_SINGLE_VIDEO_CLIP_SECONDS)}-${formatClock((index + 1) * MAX_SINGLE_VIDEO_CLIP_SECONDS)}`
+        ),
+        durationSeconds: clamp(
+          Math.round(sanitizeNumber(seg.durationSeconds, MAX_SINGLE_VIDEO_CLIP_SECONDS)),
+          1,
+          MAX_SINGLE_VIDEO_CLIP_SECONDS
+        ),
+        startFramePrompt: sanitizeString(seg.startFramePrompt, ""),
+        script: {
+          hook: sanitizeString(segmentScriptRow.hook, ""),
+          beats: sanitizePlanBeats(segmentScriptRow.beats, Math.max(1, Math.ceil(minBeatCount / 2))),
+          cta: sanitizeString(segmentScriptRow.cta, ""),
+        },
+        multiShotPrompts: sanitizeMultiShotPrompts(seg.multiShotPrompts, 8),
+      };
+    })
+    .filter((seg): seg is MotionControlSegment => seg !== null);
+
+  const fallbackSegments = splitBeatsIntoShotGroups({
+    beats,
+    totalDurationSeconds: safeDurationSeconds,
+    maxSegmentSeconds: MAX_SINGLE_VIDEO_CLIP_SECONDS,
+    hook,
+    cta,
+  });
+
+  const selectedVideoType = sanitizeScriptAgentVideoType(row.selectedVideoType);
+  const segmentSource = modelSegments.length > 0 ? modelSegments : fallbackSegments;
+  const resolvedVideoType =
+    preferredVideoType && preferredVideoType !== "auto"
+      ? preferredVideoType
+      : selectedVideoType;
+
+  const resolvedSegments = segmentSource.map((segment, index) => {
+    const fallbackSegment = fallbackSegments[index];
+    const nextScript = segment.script || fallbackSegment?.script;
+    const basePrompts = segment.multiShotPrompts && segment.multiShotPrompts.length > 0
+      ? segment.multiShotPrompts
+      : [];
+    const fallbackPrompts = buildFallbackMultiShotPrompts(
+      {
+        ...segment,
+        script: nextScript,
+      },
+      index
+    );
+    const prompts = (basePrompts.length > 0 ? basePrompts : fallbackPrompts)
+      .slice(0, 8)
+      .map((promptItem, promptIndex) => {
+        const normalizedType =
+          resolvedVideoType === "ugc"
+            ? promptItem.generationType === "ugc_video" ? promptItem.generationType : "ugc_video"
+            : resolvedVideoType === "ai_animation"
+              ? promptItem.generationType === "transition_fx" ? "transition_fx" : "base_ai_video"
+              : resolvedVideoType === "faceless_broll"
+                ? promptItem.generationType === "product_ui_overlay" ? "product_ui_overlay" : "ai_broll"
+                : promptItem.generationType;
+
+        const promptWithLock =
+          ugcCharacter && (resolvedVideoType === "ugc" || resolvedVideoType === "hybrid")
+            ? applyUgcCharacterLock(promptItem.prompt, ugcCharacter)
+            : promptItem.prompt;
+
+        return {
+          ...promptItem,
+          shotId: `group${segment.segmentId}_shot${promptIndex + 1}`,
+          generationType: normalizedType,
+          prompt: enforceKlingPromptWordLimit(
+            ensureHiggsfieldPromptHasPerformanceInstruction(promptWithLock),
+            77
+          ),
+        };
+      });
+
+    return {
+      ...segment,
+      timecode: sanitizeString(
+        segment.timecode,
+        `${formatClock(index * MAX_SINGLE_VIDEO_CLIP_SECONDS)}-${formatClock((index + 1) * MAX_SINGLE_VIDEO_CLIP_SECONDS)}`
+      ),
+      durationSeconds: clamp(segment.durationSeconds, 1, MAX_SINGLE_VIDEO_CLIP_SECONDS),
+      startFramePrompt:
+        cleanText(segment.startFramePrompt) ||
+        cleanText(fallbackSegment?.startFramePrompt) ||
+        `Opening frame for segment ${segment.segmentId}.`,
+      script: {
+        hook: sanitizeString(nextScript?.hook, index === 0 ? hook : ""),
+        beats: sanitizePlanBeats(nextScript?.beats, Math.max(1, Math.ceil(minBeatCount / 2))),
+        cta: sanitizeString(nextScript?.cta, index === segmentSource.length - 1 ? cta : ""),
+      },
+      multiShotPrompts: prompts,
+    };
+  });
+
+  return {
+    title: sanitizeString(row.title, `${appName} informational video plan`),
+    objective: sanitizeString(
+      row.objective,
+      "Deliver practical, trustworthy education with a native app-support hook."
+    ),
+    topicCategory: sanitizeScriptAgentTopicCategory(row.topicCategory),
+    selectedVideoType: resolvedVideoType,
+    videoTypeReason: sanitizeString(
+      row.videoTypeReason,
+      "Selected to maximize clarity, retention, and execution speed for this topic."
+    ),
+    appHookStrategy: sanitizeString(
+      row.appHookStrategy,
+      "Introduce app support in one practical moment tied to the audience pain point."
+    ),
+    targetDurationSeconds: safeDurationSeconds,
+    maxSingleClipDurationSeconds: MAX_SINGLE_VIDEO_CLIP_SECONDS,
+    script: {
+      hook,
+      beats,
+      cta,
+    },
+    motionControlSegments: resolvedSegments,
+    socialCaption: {
+      caption: sanitizeString(
+        isRecord(row.socialCaption) ? row.socialCaption.caption : "",
+        "Save this guide and share it with someone who needs gentle, practical support."
+      ),
+      hashtags: sanitizeHashtagArray(
+        isRecord(row.socialCaption) ? row.socialCaption.hashtags : [],
+        8
+      ).length
+        ? sanitizeHashtagArray(isRecord(row.socialCaption) ? row.socialCaption.hashtags : [], 8)
+        : ["#PeriodHealth", "#PregnancyCare", "#MuslimahWellness", "#WorshipSupport"],
+    },
+    productionSteps: sanitizeStringArray(row.productionSteps, 12),
     qaChecklist: sanitizeStringArray(row.qaChecklist, 12),
   };
 }

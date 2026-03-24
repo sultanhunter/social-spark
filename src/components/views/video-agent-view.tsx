@@ -172,6 +172,47 @@ type StartFrameResponse = {
   error?: string;
 };
 
+type ScriptAgentVideoType = "auto" | "ugc" | "ai_animation" | "faceless_broll" | "hybrid";
+
+type ScriptAgentPlan = {
+  title: string;
+  objective: string;
+  topicCategory: "period_pregnancy" | "islamic_period_pregnancy";
+  selectedVideoType: "ugc" | "ai_animation" | "faceless_broll" | "hybrid";
+  videoTypeReason: string;
+  appHookStrategy: string;
+  targetDurationSeconds: number;
+  maxSingleClipDurationSeconds: number;
+  script: {
+    hook: string;
+    beats: PlanBeat[];
+    cta: string;
+  };
+  motionControlSegments: {
+    segmentId: number;
+    timecode: string;
+    durationSeconds: number;
+    startFramePrompt: string;
+    script?: {
+      hook: string;
+      beats: PlanBeat[];
+      cta: string;
+    };
+    multiShotPrompts?: HiggsfieldPrompt[];
+  }[];
+  socialCaption: {
+    caption: string;
+    hashtags: string[];
+  };
+  productionSteps: string[];
+  qaChecklist: string[];
+};
+
+type ScriptAgentResponse = {
+  plan?: ScriptAgentPlan;
+  error?: string;
+};
+
 type SavedPlan = {
   id: string;
   source_video_id: string;
@@ -1091,6 +1132,14 @@ export function VideoAgentView({ collectionId }: { collectionId: string }) {
 
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
+  const [isScriptAgentModalOpen, setIsScriptAgentModalOpen] = useState(false);
+  const [scriptAgentTopicBrief, setScriptAgentTopicBrief] = useState("");
+  const [scriptAgentVideoType, setScriptAgentVideoType] = useState<ScriptAgentVideoType>("auto");
+  const [scriptAgentDurationSeconds, setScriptAgentDurationSeconds] = useState<number>(75);
+  const [isGeneratingScriptAgentPlan, setIsGeneratingScriptAgentPlan] = useState(false);
+  const [scriptAgentPlan, setScriptAgentPlan] = useState<ScriptAgentPlan | null>(null);
+  const [scriptAgentError, setScriptAgentError] = useState("");
+  const [scriptAgentSuccess, setScriptAgentSuccess] = useState("");
   const [nodePositions, setNodePositions] = useState<Record<string, { x: number; y: number }>>({});
 
   const selectedFormat = useMemo(
@@ -1595,6 +1644,56 @@ export function VideoAgentView({ collectionId }: { collectionId: string }) {
     loadPlans,
   ]);
 
+  const handleGenerateScriptAgentPlan = useCallback(async () => {
+    const topicBrief = scriptAgentTopicBrief.trim();
+    if (!topicBrief) {
+      setScriptAgentError("Add a topic brief first.");
+      return;
+    }
+
+    setIsGeneratingScriptAgentPlan(true);
+    setScriptAgentError("");
+    setScriptAgentSuccess("");
+
+    try {
+      const response = await fetch("/api/video-agent/script-agent", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          collectionId,
+          topicBrief,
+          preferredVideoType: scriptAgentVideoType,
+          targetDurationSeconds: scriptAgentDurationSeconds,
+          reasoningModel,
+          characterId: selectedUgcCharacterId,
+        }),
+      });
+
+      const data = (await response.json()) as ScriptAgentResponse;
+      if (!response.ok) {
+        throw new Error(data.error || "Failed to generate script-agent plan.");
+      }
+
+      if (!data.plan) {
+        throw new Error("No script-agent plan returned.");
+      }
+
+      setScriptAgentPlan(data.plan);
+      setScriptAgentSuccess("Script-agent plan generated.");
+    } catch (err) {
+      setScriptAgentError(err instanceof Error ? err.message : "Failed to generate script-agent plan.");
+    } finally {
+      setIsGeneratingScriptAgentPlan(false);
+    }
+  }, [
+    collectionId,
+    scriptAgentTopicBrief,
+    scriptAgentVideoType,
+    scriptAgentDurationSeconds,
+    reasoningModel,
+    selectedUgcCharacterId,
+  ]);
+
   const handleRefreshR2 = useCallback(async (videoId: string) => {
     setRefreshingR2VideoId(videoId);
     setError("");
@@ -1917,7 +2016,7 @@ export function VideoAgentView({ collectionId }: { collectionId: string }) {
           </div>
         ) : null}
 
-        <div className="pointer-events-none absolute left-4 top-4 z-10">
+        <div className="pointer-events-none absolute left-4 top-4 z-10 flex items-center gap-2">
           <Button
             variant="outline"
             size="sm"
@@ -1927,7 +2026,148 @@ export function VideoAgentView({ collectionId }: { collectionId: string }) {
             <ArrowLeft className="mr-1.5 h-4 w-4" />
             Back
           </Button>
+
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setIsScriptAgentModalOpen(true)}
+            className="pointer-events-auto bg-white"
+          >
+            <Sparkles className="mr-1.5 h-4 w-4" />
+            Script Agent
+          </Button>
         </div>
+
+        <Dialog open={isScriptAgentModalOpen} onOpenChange={setIsScriptAgentModalOpen}>
+          <DialogContent className="max-h-[88vh] max-w-3xl overflow-hidden p-0">
+            <DialogHeader className="border-b border-slate-200">
+              <DialogTitle className="text-base">Video Script Agent</DialogTitle>
+              <DialogDescription className="text-xs text-slate-600">
+                Generate original informational video scripts (no source video required).
+              </DialogDescription>
+            </DialogHeader>
+
+            <div className="max-h-[74vh] space-y-3 overflow-y-auto px-6 pb-6 pt-4">
+              <div className="space-y-2 rounded-lg border border-slate-200 bg-slate-50 p-3">
+                <div>
+                  <p className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-slate-500">Topic Brief</p>
+                  <textarea
+                    value={scriptAgentTopicBrief}
+                    onChange={(event) => setScriptAgentTopicBrief(event.target.value)}
+                    placeholder="Example: Practical guide for irregular periods after childbirth, with faith-sensitive worship tips and one subtle app support moment."
+                    rows={4}
+                    className="w-full rounded-lg border border-slate-300 bg-white px-2.5 py-2 text-xs text-slate-800 outline-none transition focus:border-rose-400 focus:ring-2 focus:ring-rose-200"
+                  />
+                </div>
+
+                <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                  <div>
+                    <p className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-slate-500">Video Type</p>
+                    <select
+                      value={scriptAgentVideoType}
+                      onChange={(event) => setScriptAgentVideoType(event.target.value as ScriptAgentVideoType)}
+                      className="w-full rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-xs text-slate-800 outline-none transition focus:border-rose-400 focus:ring-2 focus:ring-rose-200"
+                    >
+                      <option value="auto">Auto select</option>
+                      <option value="ugc">UGC</option>
+                      <option value="ai_animation">AI animation</option>
+                      <option value="faceless_broll">Faceless B-roll</option>
+                      <option value="hybrid">Hybrid</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <p className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-slate-500">Target Duration (seconds)</p>
+                    <input
+                      type="number"
+                      min={30}
+                      max={180}
+                      value={scriptAgentDurationSeconds}
+                      onChange={(event) => {
+                        const value = Number(event.target.value);
+                        if (!Number.isFinite(value)) return;
+                        setScriptAgentDurationSeconds(Math.max(30, Math.min(180, Math.round(value))));
+                      }}
+                      className="w-full rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-xs text-slate-800 outline-none transition focus:border-rose-400 focus:ring-2 focus:ring-rose-200"
+                    />
+                  </div>
+                </div>
+
+                <Button
+                  variant="primary"
+                  size="sm"
+                  className="w-full"
+                  isLoading={isGeneratingScriptAgentPlan}
+                  onClick={() => void handleGenerateScriptAgentPlan()}
+                >
+                  <Sparkles className="mr-1.5 h-3.5 w-3.5" />
+                  {isGeneratingScriptAgentPlan ? "Generating..." : "Generate Script Plan"}
+                </Button>
+
+                {scriptAgentError ? (
+                  <div className="rounded-md border border-rose-200 bg-rose-50 px-2 py-1.5 text-[11px] text-rose-700">{scriptAgentError}</div>
+                ) : null}
+                {scriptAgentSuccess ? (
+                  <div className="rounded-md border border-emerald-200 bg-emerald-50 px-2 py-1.5 text-[11px] text-emerald-700">{scriptAgentSuccess}</div>
+                ) : null}
+              </div>
+
+              {scriptAgentPlan ? (
+                <div className="space-y-3 rounded-lg border border-violet-200 bg-violet-50/40 p-3">
+                  <div>
+                    <p className="text-xs font-semibold text-violet-800">{scriptAgentPlan.title}</p>
+                    <div className="mt-1 flex flex-wrap items-center gap-1.5">
+                      <Badge variant="default">{scriptAgentPlan.topicCategory.replace(/_/g, " ")}</Badge>
+                      <Badge variant="default">{scriptAgentPlan.selectedVideoType.replace(/_/g, " ")}</Badge>
+                      <Badge variant="default">{`${scriptAgentPlan.targetDurationSeconds}s`}</Badge>
+                    </div>
+                    <p className="mt-1 text-xs text-slate-700">{scriptAgentPlan.objective}</p>
+                  </div>
+
+                  <div>
+                    <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">Script</p>
+                    <p className="mt-1 text-xs text-slate-700"><span className="font-semibold text-slate-500">Hook:</span> {scriptAgentPlan.script.hook}</p>
+                    <div className="mt-1.5 space-y-1.5">
+                      {scriptAgentPlan.script.beats.map((beat, i) => (
+                        <div key={`agent-beat-${i}`} className="rounded border border-slate-200 bg-white px-2 py-1.5">
+                          <p className="text-[10px] font-mono text-slate-500">{beat.timecode}</p>
+                          {beat.visual ? <p className="text-xs text-slate-700"><span className="font-semibold text-slate-500">Visual:</span> {beat.visual}</p> : null}
+                          {beat.narration ? <p className="text-xs text-slate-700"><span className="font-semibold text-slate-500">VO:</span> {beat.narration}</p> : null}
+                          {beat.onScreenText ? <p className="text-xs text-slate-700"><span className="font-semibold text-slate-500">Text:</span> {beat.onScreenText}</p> : null}
+                        </div>
+                      ))}
+                    </div>
+                    <p className="mt-1 text-xs text-slate-700"><span className="font-semibold text-slate-500">CTA:</span> {scriptAgentPlan.script.cta}</p>
+                  </div>
+
+                  {scriptAgentPlan.motionControlSegments?.length ? (
+                    <div>
+                      <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">Shot Groups</p>
+                      <div className="mt-1.5 space-y-1.5">
+                        {scriptAgentPlan.motionControlSegments.map((segment) => (
+                          <div key={`agent-segment-${segment.segmentId}`} className="rounded border border-indigo-200 bg-white px-2 py-1.5">
+                            <p className="text-xs font-semibold text-indigo-700">{`Segment ${segment.segmentId} - ${segment.timecode}`}</p>
+                            <p className="text-[11px] text-slate-700"><span className="font-semibold text-slate-500">Start Frame:</span> {segment.startFramePrompt}</p>
+                            {segment.multiShotPrompts?.length ? (
+                              <div className="mt-1 space-y-1">
+                                {segment.multiShotPrompts.map((shot, idx) => (
+                                  <div key={`agent-shot-${segment.segmentId}-${idx}`} className="rounded border border-slate-200 bg-slate-50 px-2 py-1">
+                                    <p className="text-[10px] font-semibold text-slate-600">{shot.shotId || `shot${idx + 1}`}</p>
+                                    <p className="text-[11px] text-slate-600">{shot.prompt}</p>
+                                  </div>
+                                ))}
+                              </div>
+                            ) : null}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  ) : null}
+                </div>
+              ) : null}
+            </div>
+          </DialogContent>
+        </Dialog>
 
       </section>
     </div>

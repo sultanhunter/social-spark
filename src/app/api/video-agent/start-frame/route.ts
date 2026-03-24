@@ -213,6 +213,10 @@ function buildStartFramePrompt(args: {
       typeof segmentIndex === "number" && segmentIndex > 0
         ? "Continuity requirement: this segment must look like an immediate continuation of earlier generated segments. Keep the same main character identity unless script explicitly introduces a new person."
         : "";
+    const environmentContinuityInstruction =
+      typeof segmentIndex === "number" && segmentIndex > 0
+        ? "Keep environment continuity as default: same location family, lighting mood, camera language, color tone, and prop layout unless script clearly calls for a scene change."
+        : "";
     const strictIdentityRule =
       typeof segmentIndex === "number" && segmentIndex > 0
         ? "Do not change face identity, skin tone, age range, hair style, body proportions, or core wardrobe silhouette across segments."
@@ -238,6 +242,7 @@ function buildStartFramePrompt(args: {
       `Segment CTA context: ${segmentCta || "N/A"}.`,
       `Segment first multi-shot prompt cue: ${firstSegmentPrompt || "N/A"}.`,
       continuityInstruction,
+      environmentContinuityInstruction,
       strictIdentityRule,
       previousFrameInstruction,
       continuityReferenceInstruction,
@@ -380,6 +385,16 @@ export async function POST(request: NextRequest) {
         ? cleanText(plan.motionControlSegments[segmentIndex - 1]?.startFrame?.imageUrl)
         : null;
     const priorSegmentFrameUrls = getPriorSegmentStartFrameUrls(plan, segmentIndex);
+
+    if (typeof segmentIndex === "number" && segmentIndex > 0 && priorSegmentFrameUrls.length === 0) {
+      return NextResponse.json(
+        {
+          error:
+            "Generate or upload start frame for previous segment(s) first, so this segment can use prior segment references for continuity.",
+        },
+        { status: 400 }
+      );
+    }
 
     const prompt = buildStartFramePrompt({
       appName: asText(planRow.app_name) || "Muslimah Pro",
