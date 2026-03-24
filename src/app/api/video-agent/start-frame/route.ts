@@ -86,8 +86,8 @@ type PlanShape = {
     startFramePrompt: string;
     script?: {
       hook?: string;
-      beats?: Array<{
-        timecode?: string;
+      shots?: Array<{
+        shotId?: string;
         visual?: string;
         narration?: string;
         onScreenText?: string;
@@ -193,8 +193,13 @@ function buildStartFramePrompt(args: {
   if (typeof segmentIndex === "number" && plan.motionControlSegments && plan.motionControlSegments[segmentIndex]) {
     const segment = plan.motionControlSegments[segmentIndex];
     const segmentHook = cleanText(segment.script?.hook);
-    const firstSegmentBeat = Array.isArray(segment.script?.beats) ? segment.script?.beats?.[0] : null;
-    const segmentVisualCue = cleanText(firstSegmentBeat?.visual || firstSegmentBeat?.onScreenText || firstSegmentBeat?.narration);
+    const legacySegmentBeats = isRecord(segment.script) && Array.isArray((segment.script as Record<string, unknown>).beats)
+      ? ((segment.script as Record<string, unknown>).beats as Array<Record<string, unknown>>)
+      : [];
+    const firstSegmentShot = Array.isArray(segment.script?.shots)
+      ? segment.script?.shots?.[0]
+      : legacySegmentBeats[0] || null;
+    const segmentVisualCue = cleanText(firstSegmentShot?.visual || firstSegmentShot?.onScreenText || firstSegmentShot?.narration);
     const segmentCta = cleanText(segment.script?.cta);
     const firstSegmentPrompt = Array.isArray(segment.multiShotPrompts) ? cleanText(segment.multiShotPrompts?.[0]?.prompt) : "";
     const continuityInstruction =
@@ -204,6 +209,14 @@ function buildStartFramePrompt(args: {
     const environmentContinuityInstruction =
       typeof segmentIndex === "number" && segmentIndex > 0
         ? "Keep environment continuity as default: same location family, lighting mood, camera language, color tone, and prop layout unless script clearly calls for a scene change."
+        : "";
+    const hardEnvironmentLockInstruction =
+      typeof segmentIndex === "number" && segmentIndex > 0
+        ? "Environment lock (hard rule): match the attached previous segment frame background, room/location, camera angle, lens feel, framing height, and light direction as closely as possible."
+        : "";
+    const conflictResolutionInstruction =
+      typeof segmentIndex === "number" && segmentIndex > 0
+        ? "If Segment Start Visual Intent conflicts with the attached previous segment frame, continuity frame wins. Apply only minimal forward progression within the same environment."
         : "";
     const strictIdentityRule =
       typeof segmentIndex === "number" && segmentIndex > 0
@@ -230,9 +243,11 @@ function buildStartFramePrompt(args: {
       `Segment first multi-shot prompt cue: ${firstSegmentPrompt || "N/A"}.`,
       continuityInstruction,
       environmentContinuityInstruction,
+      hardEnvironmentLockInstruction,
       strictIdentityRule,
       previousFrameInstruction,
       continuityReferenceInstruction,
+      conflictResolutionInstruction,
       characterInstruction,
       `Vertical 9:16 composition at 1080x1920 output framing.`,
       `Photorealistic ultra-detailed 4K-quality look (high texture fidelity, clean dynamic range, realistic skin and fabric detail).`,

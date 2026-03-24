@@ -11,7 +11,7 @@ type NormalizedFormatType = "ugc" | "ai_video" | "hybrid" | "editorial";
 type AnalysisMethod = "frame_aware";
 type InlineImagePart = { inlineData: { data: string; mimeType: string } };
 const FRAME_SAMPLE_TARGET = 6;
-const MAX_SINGLE_VIDEO_CLIP_SECONDS = 15;
+const MAX_SINGLE_VIDEO_CLIP_SECONDS = 12;
 
 type VideoContentCategory =
   | "islamic_only"
@@ -88,6 +88,14 @@ type PlanBeat = {
   editNote: string;
 };
 
+type SegmentScriptShot = {
+  shotId: string;
+  visual: string;
+  narration: string;
+  onScreenText: string;
+  editNote: string;
+};
+
 type MultiShotPrompt = {
   shotId: string;
   generationType: "base_ai_video" | "ugc_video" | "ai_broll" | "product_ui_overlay" | "transition_fx";
@@ -111,7 +119,7 @@ export interface MotionControlSegment {
   startFramePrompt: string;
   script?: {
     hook: string;
-    beats: PlanBeat[];
+    shots: SegmentScriptShot[];
     cta: string;
   };
   multiShotPrompts?: MultiShotPrompt[];
@@ -280,6 +288,93 @@ function sanitizePlanBeats(value: unknown, maxBeats: number): PlanBeat[] {
     .slice(0, maxBeats);
 }
 
+function closeOpenEndedLine(text: string): string {
+  const cleaned = cleanText(text);
+  if (!cleaned) return "";
+
+  const danglingEndPattern = /(\b(and|but|so|because|then|or)\s*)$/i;
+  const withoutDangling = cleaned.replace(danglingEndPattern, "").trim();
+  const candidate = withoutDangling || cleaned;
+
+  if (/[.!?]$/.test(candidate)) return candidate;
+  return `${candidate}.`;
+}
+
+function sanitizeSegmentScriptShots(value: unknown, maxShots: number): SegmentScriptShot[] {
+  const shotsRaw = Array.isArray(value) ? value : [];
+  return shotsRaw
+    .map((shot, index) => {
+      if (!isRecord(shot)) return null;
+      const shotIdRaw = sanitizeString(shot.shotId, "");
+      const shotId =
+        shotIdRaw || sanitizeString(shot.timecode, "") || `shot${index + 1}`;
+      return {
+        shotId: /^shot\d+$/i.test(shotId) ? shotId.toLowerCase() : `shot${index + 1}`,
+        visual: sanitizeString(shot.visual, "Match source format visual pacing."),
+        narration: closeOpenEndedLine(sanitizeString(shot.narration, "")),
+        onScreenText: closeOpenEndedLine(sanitizeString(shot.onScreenText, "")),
+        editNote: sanitizeString(shot.editNote, ""),
+      };
+    })
+    .filter((shot): shot is SegmentScriptShot => Boolean(shot))
+    .slice(0, maxShots);
+}
+
+function planBeatsToSegmentShots(beats: PlanBeat[]): SegmentScriptShot[] {
+  return beats.map((beat, index) => ({
+    shotId: `shot${index + 1}`,
+    visual: beat.visual,
+    narration: closeOpenEndedLine(beat.narration),
+    onScreenText: closeOpenEndedLine(beat.onScreenText),
+    editNote: beat.editNote,
+  }));
+}
+
+function shortenForTransition(value: string, maxWords = 12): string {
+  const cleaned = cleanText(value);
+  if (!cleaned) return "";
+  const words = cleaned.split(/\s+/).filter(Boolean);
+  if (words.length <= maxWords) return cleaned;
+  return `${words.slice(0, maxWords).join(" ")}...`;
+}
+
+function enforceSegmentBoundaryTransitions(segments: MotionControlSegment[]): MotionControlSegment[] {
+  return segments.map((segment, index) => {
+    const next = segments[index + 1];
+    if (!segment.script?.shots?.length || !next?.script?.shots?.length) {
+      return segment;
+    }
+
+    const shots = [...segment.script.shots];
+    const lastShot = shots[shots.length - 1];
+    const nextFirstShot = next.script.shots[0];
+    const nextAnchor = shortenForTransition(
+      nextFirstShot.visual || nextFirstShot.onScreenText || next.startFramePrompt
+    );
+
+    const transitionNote = cleanText(
+      `End this shot with a clean handoff into Segment ${next.segmentId}. ` +
+      `${nextAnchor ? `Match cut toward next opening: ${nextAnchor}. ` : ""}` +
+      "Keep camera axis, subject placement, and lighting continuity for seamless merge in final edit."
+    );
+
+    shots[shots.length - 1] = {
+      ...lastShot,
+      narration: closeOpenEndedLine(lastShot.narration),
+      onScreenText: closeOpenEndedLine(lastShot.onScreenText),
+      editNote: cleanText(`${lastShot.editNote || ""} ${transitionNote}`),
+    };
+
+    return {
+      ...segment,
+      script: {
+        ...segment.script,
+        shots,
+      },
+    };
+  });
+}
+
 function parseClockToSeconds(value: string): number | null {
   const cleaned = cleanText(value);
   if (!cleaned) return null;
@@ -357,7 +452,7 @@ function splitBeatsIntoShotGroups(args: {
       ),
       script: {
         hook: index === 0 ? cleanText(hook) : "",
-        beats: segmentBeats,
+        shots: planBeatsToSegmentShots(segmentBeats),
         cta: index === segmentCount - 1 ? cleanText(cta) : "",
       },
     };
@@ -438,10 +533,10 @@ function sanitizeMultiShotPrompts(value: unknown, max = 8): MultiShotPrompt[] {
 }
 
 function buildFallbackMultiShotPrompts(segment: MotionControlSegment, segmentIndex: number): MultiShotPrompt[] {
-  const beats = segment.script?.beats || [];
-  const source = beats.length > 0 ? beats : [
+  const shots = segment.script?.shots || [];
+  const source = shots.length > 0 ? shots : [
     {
-      timecode: segment.timecode,
+      shotId: "shot1",
       visual: segment.startFramePrompt,
       narration: segment.script?.hook || "",
       onScreenText: "",
@@ -449,21 +544,21 @@ function buildFallbackMultiShotPrompts(segment: MotionControlSegment, segmentInd
     },
   ];
 
-  const prompts = source.slice(0, 6).map((beat, beatIndex): MultiShotPrompt => {
-    const range = parseTimecodeRange(beat.timecode);
-    const duration = range ? Math.max(1, range.end - range.start) : Math.max(2, Math.round(segment.durationSeconds / Math.max(1, source.length)));
-    const scene = cleanText(beat.visual) || `Segment ${segment.segmentId} scene ${beatIndex + 1}`;
+  const perShotDuration = Math.max(2, Math.round(segment.durationSeconds / Math.max(1, source.length)));
+  const prompts = source.slice(0, 6).map((shot: SegmentScriptShot, shotIndex): MultiShotPrompt => {
+    const duration = perShotDuration;
+    const scene = cleanText(shot.visual) || `Segment ${segment.segmentId} scene ${shotIndex + 1}`;
     const prompt = cleanText(
       [
         scene,
-        beat.narration ? `Narration intent: ${beat.narration}.` : "",
-        beat.onScreenText ? `On-screen text direction: ${beat.onScreenText}.` : "",
+        shot.narration ? `Narration intent: ${shot.narration}.` : "",
+        shot.onScreenText ? `On-screen text direction: ${shot.onScreenText}.` : "",
         "Vertical 9:16, cinematic but natural realism, smooth temporal continuity, clean transitions, no visual artifacts.",
       ].join(" ")
     );
 
     return {
-      shotId: `group${segmentIndex + 1}_shot${beatIndex + 1}`,
+      shotId: `group${segmentIndex + 1}_shot${shotIndex + 1}`,
       generationType: "ai_broll",
       scene,
       prompt: enforceKlingPromptWordLimit(ensureHiggsfieldPromptHasPerformanceInstruction(prompt), 77),
@@ -1331,7 +1426,12 @@ SHOT GROUP CONSTRAINTS:
 - You must generate motionControlSegments (shot groups) because generation clips have a strict ${MAX_SINGLE_VIDEO_CLIP_SECONDS}-second limit.
 - Split the full script into sequential logical groups with each group <= ${MAX_SINGLE_VIDEO_CLIP_SECONDS} seconds.
 - For each segment, provide a startFramePrompt describing the exact visual of the very first frame (character identity, clothing, setting, framing).
-- For each segment, provide segment-level script (hook/beats/cta) that covers only that segment's time window.
+- For each segment, provide segment-level script (hook/shots/cta) that covers only that segment's time window.
+- Segment script shots must be continuous and self-contained.
+- Do NOT end a segment with unfinished dialogue that requires continuation in next segment.
+- End every segment's spoken lines as complete thoughts with full stop punctuation.
+- In each segment script, shots are ordered by shotId only (shot1, shot2, ...). Do NOT use per-shot timing.
+- The last shot of each segment must be transition-friendly with the next segment opening (matching camera axis/lighting/subject position where possible).
 - For each segment, provide multiShotPrompts tailored to that segment only.
 ` : ""}
 - Return strict JSON only.
@@ -1370,14 +1470,14 @@ JSON SHAPE:
 ${shouldGenerateShotGroups ? `  "motionControlSegments": [
     {
       "segmentId": 1,
-      "timecode": "0:00-0:15",
-      "durationSeconds": 15,
+      "timecode": "0:00-0:12",
+      "durationSeconds": 12,
       "startFramePrompt": "string",
       "script": {
         "hook": "string",
-        "beats": [
+        "shots": [
           {
-            "timecode": "0:00-0:04",
+            "shotId": "shot1",
             "visual": "string",
             "narration": "string",
             "onScreenText": "string",
@@ -1551,20 +1651,20 @@ ${shouldGenerateShotGroups ? `  "motionControlSegments": [
       if (!isRecord(seg)) return null;
 
       const segmentScriptRow = isRecord(seg.script) ? seg.script : {};
-      const segmentBeats = sanitizePlanBeats(segmentScriptRow.beats, Math.max(1, Math.ceil(maxBeats / 2))).map((beat) => ({
-        ...beat,
-        narration: beat.narration,
-        onScreenText: beat.onScreenText,
-        editNote: beat.editNote,
-      }));
+      const segmentShots = sanitizeSegmentScriptShots(
+        isRecord(segmentScriptRow) && Array.isArray(segmentScriptRow.shots)
+          ? segmentScriptRow.shots
+          : segmentScriptRow.beats,
+        Math.max(1, Math.ceil(maxBeats / 2))
+      );
       const segmentScript =
         cleanText(sanitizeString(segmentScriptRow.hook, "")).length > 0 ||
-          segmentBeats.length > 0 ||
+          segmentShots.length > 0 ||
           cleanText(sanitizeString(segmentScriptRow.cta, "")).length > 0
           ? {
             hook: sanitizeString(segmentScriptRow.hook, ""),
-            beats: segmentBeats,
-            cta: sanitizeString(segmentScriptRow.cta, ""),
+            shots: segmentShots,
+            cta: closeOpenEndedLine(sanitizeString(segmentScriptRow.cta, "")),
           }
           : undefined;
       const segmentPrompts = sanitizeMultiShotPrompts(seg.multiShotPrompts, 8);
@@ -1640,19 +1740,15 @@ ${shouldGenerateShotGroups ? `  "motionControlSegments": [
       durationSeconds: clamp(segment.durationSeconds, 1, MAX_SINGLE_VIDEO_CLIP_SECONDS),
       script: nextScript
         ? {
-          hook: sanitizeString(nextScript.hook, ""),
-          beats: sanitizePlanBeats(nextScript.beats, Math.max(1, Math.ceil(maxBeats / 2))).map((beat) => ({
-            ...beat,
-            narration: beat.narration,
-            onScreenText: beat.onScreenText,
-            editNote: beat.editNote,
-          })),
-          cta: sanitizeString(nextScript.cta, ""),
+          hook: closeOpenEndedLine(sanitizeString(nextScript.hook, "")),
+          shots: sanitizeSegmentScriptShots(nextScript.shots, Math.max(1, Math.ceil(maxBeats / 2))),
+          cta: closeOpenEndedLine(sanitizeString(nextScript.cta, "")),
         }
         : undefined,
       multiShotPrompts: mergedPrompts,
     };
   });
+  const transitionReadyShotGroups = enforceSegmentBoundaryTransitions(shotGroups);
 
   return {
     title: sanitizeString(row.title, `${appName} format recreation plan`),
@@ -1660,8 +1756,8 @@ ${shouldGenerateShotGroups ? `  "motionControlSegments": [
     maxSingleClipDurationSeconds: MAX_SINGLE_VIDEO_CLIP_SECONDS,
     useMotionControl: shouldGenerateShotGroups,
     motionControlSegments:
-      shouldGenerateShotGroups && shotGroups.length > 0
-        ? shotGroups
+      shouldGenerateShotGroups && transitionReadyShotGroups.length > 0
+        ? transitionReadyShotGroups
         : undefined,
     strategy: (() => {
       const normalized = sanitizeString(row.strategy, "");
@@ -1700,7 +1796,7 @@ ${shouldGenerateShotGroups ? `  "motionControlSegments": [
           ? socialHashtags
           : ["#MuslimahLifestyle", "#FaithBasedHabits", "#ProductiveRoutine"],
     },
-    higgsfieldPrompts: shotGroups.flatMap((segment) => segment.multiShotPrompts || []).slice(0, 24),
+    higgsfieldPrompts: transitionReadyShotGroups.flatMap((segment) => segment.multiShotPrompts || []).slice(0, 24),
     finalCutProSteps:
       finalCutProSteps.length > 0
         ? finalCutProSteps
@@ -1770,7 +1866,10 @@ RULES:
 - Use enough beats to fill full duration (minimum ${minBeatCount} beats).
 - Beat timecodes should span almost full duration.
 - Split into shot groups of max ${MAX_SINGLE_VIDEO_CLIP_SECONDS}s each.
-- Each shot group must include startFramePrompt, segment script (hook/beats/cta), and multiShotPrompts.
+- Each shot group must include startFramePrompt, segment script (hook/shots/cta), and multiShotPrompts.
+- Segment scripts must be self-contained per group with no unfinished sentence that continues into the next segment.
+- Use shotId ordering inside each segment (shot1, shot2, ...), no per-shot timing.
+- Last shot in each segment should transition smoothly into next segment opening for clean final merge.
 
 MULTI-SHOT PROMPT RULES:
 - Each prompt must be <= 77 words.
@@ -1815,14 +1914,14 @@ Return strict JSON only:
   "motionControlSegments": [
     {
       "segmentId": 1,
-      "timecode": "0:00-0:15",
-      "durationSeconds": 15,
+      "timecode": "0:00-0:12",
+      "durationSeconds": 12,
       "startFramePrompt": "string",
       "script": {
         "hook": "string",
-        "beats": [
+        "shots": [
           {
-            "timecode": "0:00-0:04",
+            "shotId": "shot1",
             "visual": "string",
             "narration": "string",
             "onScreenText": "string",
@@ -1898,9 +1997,12 @@ Return strict JSON only:
         ),
         startFramePrompt: sanitizeString(seg.startFramePrompt, ""),
         script: {
-          hook: sanitizeString(segmentScriptRow.hook, ""),
-          beats: sanitizePlanBeats(segmentScriptRow.beats, Math.max(1, Math.ceil(minBeatCount / 2))),
-          cta: sanitizeString(segmentScriptRow.cta, ""),
+          hook: closeOpenEndedLine(sanitizeString(segmentScriptRow.hook, "")),
+          shots: sanitizeSegmentScriptShots(
+            Array.isArray(segmentScriptRow.shots) ? segmentScriptRow.shots : segmentScriptRow.beats,
+            Math.max(1, Math.ceil(minBeatCount / 2))
+          ),
+          cta: closeOpenEndedLine(sanitizeString(segmentScriptRow.cta, "")),
         },
         multiShotPrompts: sanitizeMultiShotPrompts(seg.multiShotPrompts, 8),
       };
@@ -1975,13 +2077,14 @@ Return strict JSON only:
         cleanText(fallbackSegment?.startFramePrompt) ||
         `Opening frame for segment ${segment.segmentId}.`,
       script: {
-        hook: sanitizeString(nextScript?.hook, index === 0 ? hook : ""),
-        beats: sanitizePlanBeats(nextScript?.beats, Math.max(1, Math.ceil(minBeatCount / 2))),
-        cta: sanitizeString(nextScript?.cta, index === segmentSource.length - 1 ? cta : ""),
+        hook: closeOpenEndedLine(sanitizeString(nextScript?.hook, index === 0 ? hook : "")),
+        shots: sanitizeSegmentScriptShots(nextScript?.shots, Math.max(1, Math.ceil(minBeatCount / 2))),
+        cta: closeOpenEndedLine(sanitizeString(nextScript?.cta, index === segmentSource.length - 1 ? cta : "")),
       },
       multiShotPrompts: prompts,
     };
   });
+  const transitionReadySegments = enforceSegmentBoundaryTransitions(resolvedSegments);
 
   return {
     title: sanitizeString(row.title, `${appName} informational video plan`),
@@ -2006,7 +2109,7 @@ Return strict JSON only:
       beats,
       cta,
     },
-    motionControlSegments: resolvedSegments,
+    motionControlSegments: transitionReadySegments,
     socialCaption: {
       caption: sanitizeString(
         isRecord(row.socialCaption) ? row.socialCaption.caption : "",

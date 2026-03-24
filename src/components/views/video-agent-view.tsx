@@ -93,6 +93,14 @@ type PlanBeat = {
   editNote: string;
 };
 
+type SegmentScriptShot = {
+  shotId?: string;
+  visual: string;
+  narration: string;
+  onScreenText: string;
+  editNote: string;
+};
+
 type HiggsfieldPrompt = {
   shotId?: string;
   generationType?: string;
@@ -147,7 +155,7 @@ type VideoPlan = {
     startFramePrompt: string;
     script?: {
       hook?: string;
-      beats?: PlanBeat[];
+      shots?: SegmentScriptShot[];
       cta?: string;
     };
     multiShotPrompts?: HiggsfieldPrompt[];
@@ -195,7 +203,7 @@ type ScriptAgentPlan = {
     startFramePrompt: string;
     script?: {
       hook: string;
-      beats: PlanBeat[];
+      shots: SegmentScriptShot[];
       cta: string;
     };
     multiShotPrompts?: HiggsfieldPrompt[];
@@ -678,7 +686,7 @@ function VideoCanvasNode({ data }: NodeProps<Node<VideoNodeData>>) {
               htmlFor={`motion-control-${data.video.id}`}
               className="text-xs font-medium text-slate-700"
             >
-              Enable shot grouping (15s max)
+              Enable shot grouping (12s max)
             </label>
           </div>
 
@@ -827,7 +835,7 @@ function VideoCanvasNode({ data }: NodeProps<Node<VideoNodeData>>) {
 
                   {plan.motionControlSegments?.length ? (
                     <div>
-                      <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">Shot Groups (15s max each)</p>
+                      <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">Shot Groups (12s max each)</p>
                       <div className="mt-1.5 space-y-3">
                         {plan.motionControlSegments.map((segment, idx) => (
                           <div key={`mc-seg-${idx}`} className="rounded border border-indigo-200 bg-indigo-50/50 p-2.5">
@@ -923,7 +931,7 @@ function VideoCanvasNode({ data }: NodeProps<Node<VideoNodeData>>) {
                               <span className="font-semibold text-slate-500">Visual Intent:</span> {segment.startFramePrompt}
                             </p>
 
-                            {segment.script?.hook || segment.script?.beats?.length || segment.script?.cta ? (
+                            {segment.script?.hook || segment.script?.shots?.length || segment.script?.cta ? (
                               <div className="mt-2 rounded border border-indigo-200 bg-white/80 px-2 py-1.5">
                                 <p className="text-[10px] font-semibold uppercase tracking-wide text-indigo-600">Segment Script</p>
                                 {segment.script?.hook ? (
@@ -931,16 +939,15 @@ function VideoCanvasNode({ data }: NodeProps<Node<VideoNodeData>>) {
                                     <span className="font-semibold text-slate-500">Hook:</span> {segment.script.hook}
                                   </p>
                                 ) : null}
-                                {segment.script?.beats?.length ? (
+                                {segment.script?.shots?.length ? (
                                   <div className="mt-1 space-y-1">
-                                    {segment.script.beats.map((beat, beatIndex) => (
-                                      <div key={`segment-beat-${segment.segmentId}-${beatIndex}`} className="rounded border border-slate-200 bg-white px-2 py-1">
+                                    {segment.script.shots.map((shot, shotIndex) => (
+                                      <div key={`segment-shot-${segment.segmentId}-${shotIndex}`} className="rounded border border-slate-200 bg-white px-2 py-1">
                                         <div className="flex items-center gap-1 text-[10px] font-mono text-slate-500">
-                                          <Clock className="h-3 w-3" />
-                                          <span>{beat.timecode}</span>
+                                          <span>{shot.shotId || `shot${shotIndex + 1}`}</span>
                                         </div>
-                                        {beat.narration ? <p className="text-[11px] text-slate-600"><span className="font-semibold text-slate-500">VO:</span> {beat.narration}</p> : null}
-                                        {beat.onScreenText ? <p className="text-[11px] text-slate-600"><span className="font-semibold text-slate-500">Text:</span> {beat.onScreenText}</p> : null}
+                                        {shot.narration ? <p className="text-[11px] text-slate-600"><span className="font-semibold text-slate-500">VO:</span> {shot.narration}</p> : null}
+                                        {shot.onScreenText ? <p className="text-[11px] text-slate-600"><span className="font-semibold text-slate-500">Text:</span> {shot.onScreenText}</p> : null}
                                       </div>
                                     ))}
                                   </div>
