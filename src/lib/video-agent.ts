@@ -10,7 +10,6 @@ const genAI = new GoogleGenerativeAI(process.env.GOOGLE_GEMINI_API_KEY || "");
 type NormalizedFormatType = "ugc" | "ai_video" | "hybrid" | "editorial";
 type AnalysisMethod = "frame_aware";
 type InlineImagePart = { inlineData: { data: string; mimeType: string } };
-const FRAME_SAMPLE_TARGET = 6;
 const MAX_SINGLE_VIDEO_CLIP_SECONDS = 8;
 
 type VideoContentCategory =
@@ -131,6 +130,7 @@ export interface VideoRecreationPlan {
   title: string;
   strategy: string;
   objective: string;
+  klingMotionControlOnly?: boolean;
   contentClassification?: VideoContentClassification;
   maxSingleClipDurationSeconds?: number;
   useMotionControl?: boolean;
@@ -966,7 +966,6 @@ async function buildVisualEvidence(source: VideoSourceMetadata, collectionId?: s
   const sessionId = randomUUID().slice(0, 8);
   const frameExtraction = await extractVideoFrames(source.url, source.platform, {
     sessionId,
-    frameCount: FRAME_SAMPLE_TARGET,
     frameWidth: 960,
     includeTranscript: true,
     collectionId,
@@ -1348,6 +1347,7 @@ interface BuildRecreationPlanArgs {
   ugcCharacter?: UGCCharacterProfile | null;
   reasoningModel?: ReasoningModel;
   useMotionControl?: boolean;
+  useKlingMotionControl?: boolean;
 }
 
 export async function buildVideoRecreationPlan({
@@ -1358,16 +1358,63 @@ export async function buildVideoRecreationPlan({
   ugcCharacter,
   reasoningModel = DEFAULT_REASONING_MODEL,
   useMotionControl = false,
+  useKlingMotionControl = false,
 }: BuildRecreationPlanArgs): Promise<VideoRecreationPlan> {
-  requireGeminiKey();
-  const model = genAI.getGenerativeModel({ model: reasoningModel });
-
   const sourceDurationSeconds =
     typeof sourceVideo.sourceDurationSeconds === "number" && Number.isFinite(sourceVideo.sourceDurationSeconds)
       ? sourceVideo.sourceDurationSeconds
       : typeof format.sourceDurationSeconds === "number" && Number.isFinite(format.sourceDurationSeconds)
         ? format.sourceDurationSeconds
         : null;
+
+  if (useKlingMotionControl) {
+    return {
+      title: sanitizeString(sourceVideo.title, `${appName} Kling motion control start-frame plan`),
+      strategy:
+        "Kling motion control variant: generate one high-fidelity start frame that matches the source frame-zero composition and selected character lock.",
+      objective:
+        "Provide a single continuity-safe start frame optimized for motion control workflows, without full script generation.",
+      klingMotionControlOnly: true,
+      maxSingleClipDurationSeconds: MAX_SINGLE_VIDEO_CLIP_SECONDS,
+      useMotionControl: false,
+      integrationMode: "standard_adaptation",
+      publicFigureNotes: "No rewrite plan generated. Start-frame-only motion control mode.",
+      overlayOpportunities: [],
+      deliverableSpec: {
+        duration: "start-frame-only",
+        aspectRatio: "9:16",
+        platforms: ["tiktok", "instagram_reels", "youtube_shorts"],
+        voiceStyle: "N/A",
+      },
+      script: {
+        hook: "",
+        beats: [],
+        cta: "",
+      },
+      socialCaption: {
+        caption: "",
+        hashtags: [],
+      },
+      higgsfieldPrompts: [],
+      finalCutProSteps: [
+        "Generate shared start frame in motion control mode.",
+        "Use this frame as frame-zero input for Kling motion control generation.",
+      ],
+      productionSteps: [
+        "Match source opening frame composition and character lock.",
+        "Generate motion directly from shared start frame in Kling.",
+      ],
+      editingTimeline: [],
+      assetsChecklist: ["Shared start frame", "Character reference image (optional)"],
+      qaChecklist: [
+        "Character identity matches selected profile.",
+        "Environment matches source opening frame.",
+      ],
+    };
+  }
+
+  requireGeminiKey();
+  const model = genAI.getGenerativeModel({ model: reasoningModel });
 
   const targetDurationSeconds =
     typeof sourceDurationSeconds === "number" && Number.isFinite(sourceDurationSeconds)

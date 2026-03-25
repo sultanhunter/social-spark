@@ -15,6 +15,7 @@ import {
   Play,
   RefreshCw,
   Sparkles,
+  Trash2,
   Users,
   VideoIcon,
 } from "lucide-react";
@@ -122,6 +123,7 @@ type VideoPlan = {
   title: string;
   strategy: string;
   objective: string;
+  klingMotionControlOnly?: boolean;
   contentClassification?: {
     category?: string;
     confidence?: number;
@@ -272,6 +274,8 @@ type VideoNodeData = {
   onReasoningModelChange: (value: string) => void;
   useMotionControl: boolean;
   onUseMotionControlChange: (value: boolean) => void;
+  useKlingMotionControl: boolean;
+  onUseKlingMotionControlChange: (value: boolean) => void;
   startFrameImageModel: ImageGenerationModel;
   onStartFrameImageModelChange: (value: string) => void;
   isLoadingCharacters: boolean;
@@ -280,7 +284,9 @@ type VideoNodeData = {
   onCharacterChange: (characterId: string | null) => void;
   onOpenCharacterStudio: () => void;
   onGeneratePlan: (formatId: string, videoId: string) => void;
+  onDeleteVideo: (formatId: string, videoId: string) => void;
   isGeneratingPlan: boolean;
+  isDeletingVideo: boolean;
   onGenerateStartFrame: (formatId: string, videoId: string, segmentIndex?: number) => void;
   isGeneratingStartFrame: boolean;
   generatingSegmentIndex?: number;
@@ -498,9 +504,11 @@ function VideoCanvasNode({ data }: NodeProps<Node<VideoNodeData>>) {
   const isSelected = data.selectedVideoId === data.video.id;
   const isPlaying = data.directMediaUrl && data.playingVideoId === data.video.id;
   const plan = data.plan;
+  const r2PreviewUrl = getVideoR2Url(data.video);
   const sourceDurationSeconds = getVideoSourceDurationSeconds(data.video);
   const sourceDurationLabel = formatDurationLabel(sourceDurationSeconds);
   const [isPlanModalOpen, setIsPlanModalOpen] = useState(false);
+  const [previewFrameFailed, setPreviewFrameFailed] = useState(false);
   const [copiedVeoSegmentId, setCopiedVeoSegmentId] = useState<number | null>(null);
 
   const handleCopyVeoPrompt = useCallback(async (segmentId: number, prompt: string) => {
@@ -545,7 +553,6 @@ function VideoCanvasNode({ data }: NodeProps<Node<VideoNodeData>>) {
               autoPlay
               playsInline
               preload="metadata"
-              poster={data.video.thumbnail_url || undefined}
               className="h-full w-full object-cover"
               onLoadedMetadata={(event) => {
                 const target = event.currentTarget;
@@ -554,21 +561,39 @@ function VideoCanvasNode({ data }: NodeProps<Node<VideoNodeData>>) {
                 }
               }}
             />
-          ) : data.video.thumbnail_url ? (
-            <img
-              src={data.video.thumbnail_url}
-              alt={data.video.title || "Video thumbnail"}
+          ) : r2PreviewUrl && !previewFrameFailed ? (
+            <video
+              key={`${data.video.id}-preview`}
+              src={r2PreviewUrl}
+              muted
+              playsInline
+              preload="auto"
               className="h-full w-full object-cover"
-              onLoad={(event) => {
-                const { naturalWidth, naturalHeight } = event.currentTarget;
-                if (naturalWidth > 0 && naturalHeight > 0) {
-                  data.onAspect(data.video.id, naturalWidth / naturalHeight);
+              onLoadedMetadata={(event) => {
+                const target = event.currentTarget;
+                if (target.videoWidth > 0 && target.videoHeight > 0) {
+                  data.onAspect(data.video.id, target.videoWidth / target.videoHeight);
                 }
               }}
+              onLoadedData={(event) => {
+                const target = event.currentTarget;
+                try {
+                  target.currentTime = 0.01;
+                  target.pause();
+                } catch {
+                  // no-op
+                }
+              }}
+              onError={() => setPreviewFrameFailed(true)}
             />
           ) : (
-            <div className="flex h-full w-full items-center justify-center text-slate-500">
+            <div className="flex h-full w-full flex-col items-center justify-center gap-1 text-slate-500">
               <Clapperboard className="h-6 w-6" />
+              <span className="px-2 text-center text-[10px] font-medium text-slate-500">
+                {getVideoR2Url(data.video)
+                  ? "R2 first-frame preview unavailable"
+                  : "R2 video not ready yet"}
+              </span>
             </div>
           )}
 
@@ -697,6 +722,7 @@ function VideoCanvasNode({ data }: NodeProps<Node<VideoNodeData>>) {
               type="checkbox"
               id={`motion-control-${data.video.id}`}
               checked={data.useMotionControl}
+              disabled={data.useKlingMotionControl}
               onChange={(e) => data.onUseMotionControlChange(e.target.checked)}
               className="nodrag h-3.5 w-3.5 rounded border-slate-300 text-rose-500 focus:ring-rose-400"
             />
@@ -708,16 +734,45 @@ function VideoCanvasNode({ data }: NodeProps<Node<VideoNodeData>>) {
             </label>
           </div>
 
-          <Button
-            variant="primary"
-            size="sm"
-            className="nodrag w-full"
-            onClick={() => data.onGeneratePlan(data.formatId, data.video.id)}
-            isLoading={data.isGeneratingPlan}
-          >
-            <Sparkles className="mr-1.5 h-3.5 w-3.5" />
-            {data.isGeneratingPlan ? "Generating..." : plan ? "Regenerate Plan" : "Generate Plan"}
-          </Button>
+          <div className="flex items-center gap-2 px-1">
+            <input
+              type="checkbox"
+              id={`kling-motion-control-${data.video.id}`}
+              checked={data.useKlingMotionControl}
+              onChange={(e) => data.onUseKlingMotionControlChange(e.target.checked)}
+              className="nodrag h-3.5 w-3.5 rounded border-slate-300 text-rose-500 focus:ring-rose-400"
+            />
+            <label
+              htmlFor={`kling-motion-control-${data.video.id}`}
+              className="text-xs font-medium text-slate-700"
+            >
+              Kling motion control (start-frame only)
+            </label>
+          </div>
+
+          <div className="grid grid-cols-2 gap-2">
+            <Button
+              variant="primary"
+              size="sm"
+              className="nodrag w-full"
+              onClick={() => data.onGeneratePlan(data.formatId, data.video.id)}
+              isLoading={data.isGeneratingPlan}
+            >
+              <Sparkles className="mr-1.5 h-3.5 w-3.5" />
+              {data.isGeneratingPlan ? "Generating..." : plan ? "Regenerate Plan" : "Generate Plan"}
+            </Button>
+
+            <Button
+              variant="outline"
+              size="sm"
+              className="nodrag w-full"
+              onClick={() => data.onDeleteVideo(data.formatId, data.video.id)}
+              isLoading={data.isDeletingVideo}
+            >
+              <Trash2 className="mr-1.5 h-3.5 w-3.5" />
+              Delete
+            </Button>
+          </div>
 
           {plan ? (
             <Button
@@ -773,6 +828,11 @@ function VideoCanvasNode({ data }: NodeProps<Node<VideoNodeData>>) {
                   <div>
                     <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">Objective</p>
                     <p className="mt-0.5 text-xs leading-relaxed text-slate-700">{plan.objective}</p>
+                    {plan.klingMotionControlOnly ? (
+                      <div className="mt-1">
+                        <Badge variant="default">Kling motion control start-frame plan</Badge>
+                      </div>
+                    ) : null}
                   </div>
 
                   {plan.contentClassification?.category ? (
@@ -977,7 +1037,7 @@ function VideoCanvasNode({ data }: NodeProps<Node<VideoNodeData>>) {
                     </div>
                   ) : null}
 
-                  {plan.script ? (
+                  {!plan.klingMotionControlOnly && plan.script ? (
                     <div>
                       <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">Script</p>
                       {plan.script.hook ? (
@@ -1109,6 +1169,7 @@ export function VideoAgentView({ collectionId }: { collectionId: string }) {
   const [startFrameImageModel, setStartFrameImageModel] =
     useState<ImageGenerationModel>(DEFAULT_IMAGE_GENERATION_MODEL);
   const [useMotionControl, setUseMotionControl] = useState<boolean>(false);
+  const [useKlingMotionControl, setUseKlingMotionControl] = useState<boolean>(false);
 
   const [library, setLibrary] = useState<LibraryFormat[]>([]);
   const [expandedType, setExpandedType] = useState<string | null>(null);
@@ -1124,6 +1185,7 @@ export function VideoAgentView({ collectionId }: { collectionId: string }) {
   const [isLoadingLibrary, setIsLoadingLibrary] = useState(true);
   const [isLoadingCharacters, setIsLoadingCharacters] = useState(false);
   const [isGeneratingPlan, setIsGeneratingPlan] = useState(false);
+  const [deletingVideoId, setDeletingVideoId] = useState<string | null>(null);
   const [generatingStartFrameVideoId, setGeneratingStartFrameVideoId] = useState<string | null>(null);
   const [generatingSegmentIndex, setGeneratingSegmentIndex] = useState<number | undefined>(undefined);
   const [uploadingPreviousSegmentVideoId, setUploadingPreviousSegmentVideoId] = useState<string | null>(null);
@@ -1460,6 +1522,7 @@ export function VideoAgentView({ collectionId }: { collectionId: string }) {
           characterId: targetFormat.format_type === "ugc" ? selectedUgcCharacter?.id : null,
           reasoningModel,
           useMotionControl,
+          useKlingMotionControl,
         }),
       });
 
@@ -1483,7 +1546,81 @@ export function VideoAgentView({ collectionId }: { collectionId: string }) {
     } finally {
       setIsGeneratingPlan(false);
     }
-  }, [collectionId, library, selectedFormat, selectedVideo, selectedUgcCharacter, reasoningModel, useMotionControl, loadPlans]);
+  }, [
+    collectionId,
+    library,
+    selectedFormat,
+    selectedVideo,
+    selectedUgcCharacter,
+    reasoningModel,
+    useMotionControl,
+    useKlingMotionControl,
+    loadPlans,
+  ]);
+
+  const handleDeleteVideo = useCallback(async (formatIdArg?: string, videoIdArg?: string) => {
+    const targetFormat =
+      (formatIdArg ? library.find((item) => item.id === formatIdArg) : null) || selectedFormat;
+    const targetVideo =
+      (targetFormat && videoIdArg ? targetFormat.videos.find((item) => item.id === videoIdArg) : null) || selectedVideo;
+
+    if (!targetFormat || !targetVideo) {
+      setError("Select a format and video first.");
+      return;
+    }
+
+    const confirmed = window.confirm(
+      `Delete this video source?\n\n${targetVideo.title || targetVideo.source_url}\n\nThis removes saved plans for this source as well.`
+    );
+    if (!confirmed) return;
+
+    setDeletingVideoId(targetVideo.id);
+    setError("");
+    setSuccess("");
+
+    try {
+      const response = await fetch("/api/video-agent/videos", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          collectionId,
+          videoId: targetVideo.id,
+        }),
+      });
+
+      const data = (await response.json()) as { error?: string };
+      if (!response.ok) {
+        throw new Error(data.error || "Failed to delete video source.");
+      }
+
+      setVideoPlans((prev) => {
+        const next = { ...prev };
+        delete next[targetVideo.id];
+        return next;
+      });
+
+      if (selectedVideoId === targetVideo.id) {
+        setSelectedVideoId(null);
+        setPlayingVideoId(null);
+      }
+
+      setSuccess("Video source deleted.");
+      await loadLibrary();
+      await loadPlans();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to delete video source.");
+    } finally {
+      setDeletingVideoId(null);
+    }
+  }, [
+    collectionId,
+    library,
+    selectedFormat,
+    selectedVideo,
+    selectedVideoId,
+    loadLibrary,
+    loadPlans,
+  ]);
 
   const handleGenerateStartFrame = useCallback(async (formatIdArg?: string, videoIdArg?: string, segmentIndex?: number) => {
     const targetFormat =
@@ -1847,6 +1984,11 @@ export function VideoAgentView({ collectionId }: { collectionId: string }) {
               },
               useMotionControl,
               onUseMotionControlChange: setUseMotionControl,
+              useKlingMotionControl,
+              onUseKlingMotionControlChange: (value: boolean) => {
+                setUseKlingMotionControl(value);
+                if (value) setUseMotionControl(false);
+              },
               startFrameImageModel,
               onStartFrameImageModelChange: (value: string) => {
                 if (isImageGenerationModel(value)) setStartFrameImageModel(value);
@@ -1859,7 +2001,11 @@ export function VideoAgentView({ collectionId }: { collectionId: string }) {
               onGeneratePlan: (formatId: string, videoId: string) => {
                 void handleGeneratePlan(formatId, videoId);
               },
+              onDeleteVideo: (formatId: string, videoId: string) => {
+                void handleDeleteVideo(formatId, videoId);
+              },
               isGeneratingPlan: isGeneratingPlan && selectedVideoId === video.id,
+              isDeletingVideo: deletingVideoId === video.id,
               onGenerateStartFrame: (formatId: string, videoId: string, segmentIndex?: number) => {
                 void handleGenerateStartFrame(formatId, videoId, segmentIndex);
               },
@@ -1927,11 +2073,13 @@ export function VideoAgentView({ collectionId }: { collectionId: string }) {
     playingVideoId,
     reasoningModel,
     useMotionControl,
+    useKlingMotionControl,
     startFrameImageModel,
     isLoadingCharacters,
     ugcCharacters,
     selectedUgcCharacterId,
     isGeneratingPlan,
+    deletingVideoId,
     generatingStartFrameVideoId,
     generatingSegmentIndex,
     uploadingPreviousSegmentVideoId,
@@ -1949,6 +2097,7 @@ export function VideoAgentView({ collectionId }: { collectionId: string }) {
     handleDownloadVideo,
     handleAspect,
     handleGeneratePlan,
+    handleDeleteVideo,
     handleGenerateStartFrame,
     handleUploadPreviousSegmentVideo,
     nodePositions,

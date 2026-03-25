@@ -64,6 +64,7 @@ type PlanShape = {
   title?: string;
   strategy?: string;
   objective?: string;
+  klingMotionControlOnly?: boolean;
   script?: {
     hook?: string;
     beats?: Array<{
@@ -190,6 +191,26 @@ function buildStartFramePrompt(args: {
     segmentIndex,
     previousSegmentStartFrameUrl,
   } = args;
+
+  if (plan.klingMotionControlOnly) {
+    const characterInstruction = character
+      ? `Use the selected recurring character identity (${character.character_name}) while preserving source frame-zero composition and environment.`
+      : "No fixed character lock required unless script clearly needs a person.";
+
+    return [
+      "Generate ONE photorealistic frame-zero image optimized for Kling motion control.",
+      "Primary objective: match the source video's opening frame composition and environment as closely as possible.",
+      "Hard lock: preserve camera angle, framing, lens feel, subject distance, background geometry, and light direction from the reference frame.",
+      "If a character appears, keep identity consistent with selected character lock while retaining source pose and composition.",
+      `App context: ${appName}.`,
+      `Format type: ${formatType}.`,
+      `Source video title/context: ${video.title || video.description || "N/A"}.`,
+      characterInstruction,
+      "Vertical 9:16 composition at 1080x1920 output framing.",
+      "Photorealistic ultra-detailed 4K-quality look (true skin texture, realistic fabric, plausible natural lighting, no uncanny artifacts).",
+      "No text overlays, no subtitles, no logos, no watermark.",
+    ].join(" ");
+  }
 
   if (typeof segmentIndex === "number" && plan.motionControlSegments && plan.motionControlSegments[segmentIndex]) {
     const segment = plan.motionControlSegments[segmentIndex];
