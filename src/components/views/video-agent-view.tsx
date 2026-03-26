@@ -223,6 +223,11 @@ type ScriptAgentPlan = {
 
 type ScriptAgentResponse = {
   plan?: ScriptAgentPlan;
+  saved?: {
+    formatId?: string;
+    sourceVideoId?: string;
+    planId?: string;
+  };
   error?: string;
 };
 
@@ -246,6 +251,7 @@ type UgcCharacter = {
   characterName: string;
   personaSummary: string;
   imageModel: string | null;
+  characterType?: "ugc" | "animated";
   isDefault?: boolean;
 };
 
@@ -695,6 +701,11 @@ function VideoCanvasNode({ data }: NodeProps<Node<VideoNodeData>>) {
 
           {data.formatType === "ugc" ? (
             <>
+              {(() => {
+                const ugcOnlyCharacters = data.ugcCharacters.filter(
+                  (character) => (character.characterType || "ugc") === "ugc"
+                );
+                return (
               <select
                 value={data.selectedUgcCharacterId || ""}
                 onChange={(event) => data.onCharacterChange(event.target.value || null)}
@@ -702,13 +713,15 @@ function VideoCanvasNode({ data }: NodeProps<Node<VideoNodeData>>) {
                 className="nodrag w-full rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-xs text-slate-800 outline-none transition focus:border-rose-400 focus:ring-2 focus:ring-rose-200"
               >
                 <option value="">{data.isLoadingCharacters ? "Loading characters..." : "Select UGC character"}</option>
-                {data.ugcCharacters.map((character) => (
+                {ugcOnlyCharacters.map((character) => (
                   <option key={character.id} value={character.id}>
                     {character.characterName}
                     {character.isDefault ? " (Default)" : ""}
                   </option>
                 ))}
               </select>
+                );
+              })()}
 
               <Button variant="outline" size="sm" onClick={data.onOpenCharacterStudio} className="nodrag w-full">
                 <Users className="mr-1 h-3.5 w-3.5" />
@@ -1826,6 +1839,13 @@ export function VideoAgentView({ collectionId }: { collectionId: string }) {
 
       setScriptAgentPlan(data.plan);
       setScriptAgentSuccess("Script-agent plan generated.");
+
+      if (data.saved?.formatId && data.saved?.sourceVideoId) {
+        await loadLibrary();
+        await loadPlans();
+        setSelectedFormatId(data.saved.formatId);
+        setSelectedVideoId(data.saved.sourceVideoId);
+      }
     } catch (err) {
       setScriptAgentError(err instanceof Error ? err.message : "Failed to generate script-agent plan.");
     } finally {
@@ -1838,6 +1858,8 @@ export function VideoAgentView({ collectionId }: { collectionId: string }) {
     scriptAgentCharacterId,
     scriptAgentDurationSeconds,
     reasoningModel,
+    loadLibrary,
+    loadPlans,
   ]);
 
   const handleCopyScriptAgentVeoPrompt = useCallback(async (segmentId: number, prompt: string) => {
@@ -2275,6 +2297,7 @@ export function VideoAgentView({ collectionId }: { collectionId: string }) {
                       {ugcCharacters.map((character) => (
                         <option key={character.id} value={character.id}>
                           {character.characterName}
+                          {character.characterType ? ` (${character.characterType})` : ""}
                           {character.isDefault ? " (Default)" : ""}
                         </option>
                       ))}

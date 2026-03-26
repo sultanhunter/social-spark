@@ -384,6 +384,7 @@ function buildVeo31SegmentPrompt(args: {
   ugcCharacter?: UGCCharacterProfile | null;
 }): string {
   const { segment, nextSegment, styleHint, appName, ugcCharacter } = args;
+  const isAnimatedStyle = /animated|animation|cgi/i.test(styleHint);
   const shots = segment.script?.shots || [];
 
   const shotLines = (shots.length > 0 ? shots : [
@@ -399,7 +400,9 @@ function buildVeo31SegmentPrompt(args: {
       const narration = closeOpenEndedLine(shot.narration);
       const dialogue = narration
         ? `Dialogue: "${narration.replace(/"/g, "'")}".`
-        : "No dialogue: performance carries emotion through subtle facial expression and natural body language.";
+        : isAnimatedStyle
+          ? "No dialogue: performance carries emotion through expressive but natural animation acting and readable pose changes."
+          : "No dialogue: performance carries emotion through subtle facial expression and natural body language.";
       const textCue = cleanText(shot.onScreenText)
         ? ` On-screen text: ${closeOpenEndedLine(shot.onScreenText)}`
         : "";
@@ -410,7 +413,9 @@ function buildVeo31SegmentPrompt(args: {
 
   const characterLock = ugcCharacter
     ? `Character lock: ${ugcCharacter.characterName}. ${cleanText(ugcCharacter.promptTemplate)}.`
-    : "Character consistency: keep same person identity, face geometry, and wardrobe continuity throughout this segment.";
+    : isAnimatedStyle
+      ? "Character consistency: keep same animated character silhouette, face shape language, color palette, and costume continuity throughout this segment."
+      : "Character consistency: keep same person identity, face geometry, and wardrobe continuity throughout this segment.";
 
   const transitionHint = nextSegment
     ? `End frame transition: finish with a clean match-cut handoff toward the next segment opening (${shortenForTransition(nextSegment.startFramePrompt, 14)}).`
@@ -419,7 +424,9 @@ function buildVeo31SegmentPrompt(args: {
   return cleanText(
     [
       `Veo 3.1 prompt. Generate an ${MAX_SINGLE_VIDEO_CLIP_SECONDS}-second vertical 9:16 ${styleHint} segment (segment ${segment.segmentId}).`,
-      `Quality target: photorealistic, true-to-life UGC realism, natural skin texture and pores, realistic fabric physics, authentic handheld smartphone camera behavior, physically plausible lighting, no waxy skin, no plastic look, no AI artifacts or uncanny facial motion.`,
+      isAnimatedStyle
+        ? "Quality target: high-end CGI animation look, stylized but premium 3D rendering, clean topology, stable shading, smooth deformation, expressive eyes and lips, coherent lighting, no uncanny artifacts, no texture flicker, no muddy frames."
+        : "Quality target: photorealistic, true-to-life UGC realism, natural skin texture and pores, realistic fabric physics, authentic handheld smartphone camera behavior, physically plausible lighting, no waxy skin, no plastic look, no AI artifacts or uncanny facial motion.",
       `Environment continuity: keep location, camera axis, lens feel, and light direction stable across all shots in this segment.`,
       characterLock,
       `App integration: if app is referenced, keep it subtle and practical. Mention ${appName} at most once.`,
@@ -429,15 +436,17 @@ function buildVeo31SegmentPrompt(args: {
   );
 }
 
-function ensureVeoPromptQuality(prompt: string, fallback: string): string {
+function ensureVeoPromptQuality(prompt: string, fallback: string, styleHint: string): string {
   const cleaned = cleanText(prompt);
   if (!cleaned) return fallback;
 
   const hasShotStructure = /\bshot\s*1\b/i.test(cleaned);
-  const hasRealismCue =
-    /\b(photoreal|realistic|natural skin|micro-expression|handheld|no ai artifacts|no uncanny)\b/i.test(cleaned);
+  const isAnimatedStyle = /animated|animation|cgi/i.test(styleHint);
+  const hasStyleCue = isAnimatedStyle
+    ? /\b(animated|animation|cgi|stylized|3d|render|shading|deformation)\b/i.test(cleaned)
+    : /\b(photoreal|realistic|natural skin|micro-expression|handheld|no ai artifacts|no uncanny)\b/i.test(cleaned);
 
-  if (!hasShotStructure || !hasRealismCue) {
+  if (!hasShotStructure || !hasStyleCue) {
     return fallback;
   }
 
@@ -1886,7 +1895,8 @@ ${shouldGenerateShotGroups ? `  "motionControlSegments": [
         styleHint,
         appName,
         ugcCharacter,
-      })
+      }),
+      styleHint
     ),
   }));
 
@@ -2012,7 +2022,9 @@ RULES:
 - Use shotId ordering inside each segment (shot1, shot2, ...), no per-shot timing.
 - Last shot in each segment should transition smoothly into next segment opening for clean final merge.
 - Veo prompt must be a single detailed prompt with explicit shot-wise structure (Shot 1: ..., Shot 2: ...).
-- Veo prompt realism directives: natural skin texture and pores, realistic eye blinks/micro-expressions, physically plausible lighting, authentic handheld phone motion, no uncanny facial artifacts, no waxy/plastic skin look.
+- Veo prompt style directives by video type:
+  - ugc/hybrid/faceless_broll: photoreal live-action realism (natural skin detail, plausible lighting, no uncanny artifacts).
+  - ai_animation: stylized CGI animation look (clean shading, stable topology/deformation, smooth motion), explicitly not photoreal live-action skin realism.
 
 MULTI-SHOT PROMPT RULES:
 - Each prompt must be <= 77 words.
@@ -2248,7 +2260,8 @@ Return strict JSON only:
         styleHint: scriptAgentStyleHint,
         appName,
         ugcCharacter,
-      })
+      }),
+      scriptAgentStyleHint
     ),
   }));
 

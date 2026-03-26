@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { NextRequest, NextResponse } from "next/server";
 import { supabase } from "@/lib/supabase";
 import {
@@ -29,6 +30,28 @@ type VideoUgcCharacterRow = {
   is_default?: boolean | null;
 };
 
+type VideoFormatRow = {
+  id: string;
+  collection_id: string;
+  format_name: string;
+  format_type: string;
+  format_signature: string;
+  summary: string;
+  why_it_works: string[] | null;
+  hook_patterns: string[] | null;
+  shot_pattern: string[] | null;
+  editing_style: string[] | null;
+  script_scaffold: string | null;
+  higgsfield_prompt_template: string | null;
+  recreation_checklist: string[] | null;
+  duration_guidance: string | null;
+  confidence: number | null;
+  source_count: number | null;
+  latest_source_url: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
 function asText(value: unknown): string {
   return typeof value === "string" ? value.trim() : "";
 }
@@ -36,6 +59,12 @@ function asText(value: unknown): string {
 function asFiniteNumber(value: unknown): number | null {
   if (typeof value !== "number" || !Number.isFinite(value)) return null;
   return value;
+}
+
+function isMissingTableError(error: unknown): boolean {
+  if (!error || typeof error !== "object") return false;
+  const row = error as Record<string, unknown>;
+  return row.code === "42P01";
 }
 
 function isMissingColumnError(error: unknown, columnName: string): boolean {
@@ -57,6 +86,20 @@ function normalizeVideoType(value: unknown): ScriptAgentVideoType | "auto" {
   }
   if (cleaned === "hybrid") return "hybrid";
   return "auto";
+}
+
+function mapScriptAgentVideoTypeToFormatType(videoType: ScriptAgentVideoType): "ugc" | "ai_video" | "hybrid" | "editorial" {
+  if (videoType === "ugc") return "ugc";
+  if (videoType === "ai_animation") return "ai_video";
+  if (videoType === "faceless_broll") return "editorial";
+  return "hybrid";
+}
+
+function toTitleCase(value: string): string {
+  return value
+    .split("_")
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
 }
 
 async function fetchCollectionRow(collectionId: string): Promise<CollectionRow | null> {
@@ -188,6 +231,185 @@ export async function POST(request: NextRequest) {
       reasoningModel,
     });
 
+    const formatSignature = `script_agent_${plan.topicCategory}_${plan.selectedVideoType}`;
+    const generatedSourceUrl = `script-agent://${collectionId}/${Date.now()}-${randomUUID().slice(0, 8)}`;
+    const mappedFormatType = mapScriptAgentVideoTypeToFormatType(plan.selectedVideoType);
+    const formatName = `Script Agent - ${toTitleCase(plan.topicCategory)} - ${toTitleCase(plan.selectedVideoType)}`;
+
+    let formatRow: VideoFormatRow | null = null;
+
+    const existingFormat = await supabase
+      .from("video_formats")
+      .select("*")
+      .eq("collection_id", collectionId)
+      .eq("format_signature", formatSignature)
+      .maybeSingle();
+
+    if (existingFormat.error && !isMissingTableError(existingFormat.error)) {
+      throw existingFormat.error;
+    }
+
+    if (existingFormat.data) {
+      const row = existingFormat.data as unknown as VideoFormatRow;
+      const nextSourceCount = (typeof row.source_count === "number" ? row.source_count : 0) + 1;
+      const updatedFormat = await supabase
+        .from("video_formats")
+        .update({
+          format_name: formatName,
+          format_type: mappedFormatType,
+          summary: plan.objective,
+          why_it_works: [plan.videoTypeReason, plan.appHookStrategy],
+          hook_patterns: [plan.script.hook],
+          shot_pattern: plan.motionControlSegments.slice(0, 8).map((segment) => segment.startFramePrompt),
+          editing_style: [plan.selectedVideoType.replace(/_/g, " "), "script agent generated"],
+          script_scaffold: plan.script.hook,
+          higgsfield_prompt_template: plan.motionControlSegments[0]?.veoPrompt || "",
+          recreation_checklist: plan.qaChecklist,
+          duration_guidance: `${plan.targetDurationSeconds}s target`,
+          confidence: 0.84,
+          source_count: nextSourceCount,
+          latest_source_url: generatedSourceUrl,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", row.id)
+        .eq("collection_id", collectionId)
+        .select("*")
+        .single();
+
+      if (updatedFormat.error || !updatedFormat.data) {
+        throw updatedFormat.error || new Error("Failed to update script-agent format.");
+      }
+      formatRow = updatedFormat.data as unknown as VideoFormatRow;
+    } else {
+      const insertedFormat = await supabase
+        .from("video_formats")
+        .insert({
+          collection_id: collectionId,
+          format_name: formatName,
+          format_type: mappedFormatType,
+          format_signature: formatSignature,
+          summary: plan.objective,
+          why_it_works: [plan.videoTypeReason, plan.appHookStrategy],
+          hook_patterns: [plan.script.hook],
+          shot_pattern: plan.motionControlSegments.slice(0, 8).map((segment) => segment.startFramePrompt),
+          editing_style: [plan.selectedVideoType.replace(/_/g, " "), "script agent generated"],
+          script_scaffold: plan.script.hook,
+          higgsfield_prompt_template: plan.motionControlSegments[0]?.veoPrompt || "",
+          recreation_checklist: plan.qaChecklist,
+          duration_guidance: `${plan.targetDurationSeconds}s target`,
+          confidence: 0.84,
+          source_count: 1,
+          latest_source_url: generatedSourceUrl,
+        })
+        .select("*")
+        .single();
+
+      if (insertedFormat.error || !insertedFormat.data) {
+        throw insertedFormat.error || new Error("Failed to create script-agent format.");
+      }
+      formatRow = insertedFormat.data as unknown as VideoFormatRow;
+    }
+
+    if (!formatRow) {
+      throw new Error("Failed to resolve script-agent format row.");
+    }
+
+    const analysisPayload = {
+      sourceMetadata: {
+        url: generatedSourceUrl,
+        platform: "generated",
+        title: plan.title,
+        description: plan.objective,
+        thumbnailUrl: null,
+        userNotes: topicBrief,
+        transcriptSummary: null,
+        transcriptText: null,
+        sourceDurationSeconds: plan.targetDurationSeconds,
+      },
+      formatAnalysis: {
+        formatName,
+        formatType: mappedFormatType,
+        formatSignature,
+        analysisMethod: "frame_aware",
+        sourceDurationSeconds: plan.targetDurationSeconds,
+        sampledFrameCount: 0,
+        sampledFrameSources: [],
+        directMediaUrl: null,
+        r2VideoUrl: null,
+        transcriptAvailable: false,
+        transcriptSummary: "",
+        transcriptText: "",
+        transcriptHighlights: [],
+        visualSignals: plan.motionControlSegments.slice(0, 8).map((segment) => segment.startFramePrompt),
+        onScreenTextPatterns: [],
+        summary: plan.objective,
+        whyItWorks: [plan.videoTypeReason, plan.appHookStrategy],
+        hookPatterns: [plan.script.hook],
+        shotPattern: plan.motionControlSegments.slice(0, 8).map((segment) => segment.timecode),
+        editingStyle: [plan.selectedVideoType.replace(/_/g, " "), "script agent generated"],
+        scriptScaffold: plan.script.hook,
+        higgsfieldPromptTemplate: plan.motionControlSegments[0]?.veoPrompt || "",
+        recreationChecklist: plan.qaChecklist,
+        durationGuidance: `${plan.targetDurationSeconds}s target`,
+        confidence: 0.84,
+      },
+      matchDecision: {
+        reason: "Script-agent generated source",
+      },
+      reasoningModel,
+      analyzedAt: new Date().toISOString(),
+      scriptAgent: {
+        topicBrief,
+        topicCategory: plan.topicCategory,
+        selectedVideoType: plan.selectedVideoType,
+      },
+    };
+
+    const insertedVideo = await supabase
+      .from("video_format_videos")
+      .insert({
+        collection_id: collectionId,
+        format_id: formatRow.id,
+        source_url: generatedSourceUrl,
+        platform: "generated",
+        title: plan.title,
+        description: plan.objective,
+        thumbnail_url: null,
+        user_notes: topicBrief,
+        analysis_confidence: 0.84,
+        analysis_payload: analysisPayload,
+      })
+      .select("id")
+      .single();
+
+    if (insertedVideo.error || !insertedVideo.data) {
+      throw insertedVideo.error || new Error("Failed to create script-agent source video.");
+    }
+
+    const sourceVideoId = (insertedVideo.data as { id: string }).id;
+
+    const planRecord = await supabase
+      .from("video_recreation_plans")
+      .insert({
+        collection_id: collectionId,
+        format_id: formatRow.id,
+        source_video_id: sourceVideoId,
+        app_name: appName,
+        plan_payload: {
+          reasoningModel,
+          ugcCharacterId: ugcCharacter?.id || null,
+          generatedAt: new Date().toISOString(),
+          sourceType: "script_agent",
+          plan,
+        },
+      })
+      .select("id")
+      .single();
+
+    if (planRecord.error || !planRecord.data) {
+      throw planRecord.error || new Error("Failed to save script-agent plan.");
+    }
+
     return NextResponse.json({
       plan,
       meta: {
@@ -196,6 +418,11 @@ export async function POST(request: NextRequest) {
         targetDurationSeconds: targetDurationSeconds ?? 75,
         reasoningModel,
         ugcCharacterId: ugcCharacter?.id || null,
+      },
+      saved: {
+        formatId: formatRow.id,
+        sourceVideoId,
+        planId: (planRecord.data as { id: string }).id,
       },
     });
   } catch (err) {

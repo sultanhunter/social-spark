@@ -39,6 +39,7 @@ type VideoUgcCharacterRow = {
   prompt_template: string;
   reference_image_url: string | null;
   image_model: string | null;
+  character_type?: string | null;
   is_default?: boolean | null;
   created_at?: string;
   updated_at?: string;
@@ -71,6 +72,15 @@ function asBoolean(value: unknown, fallback = false): boolean {
   return fallback;
 }
 
+function normalizeCharacterType(value: unknown): "ugc" | "animated" {
+  if (typeof value !== "string") return "ugc";
+  const cleaned = value.trim().toLowerCase();
+  if (cleaned === "animated" || cleaned === "animation" || cleaned === "ai_animation") {
+    return "animated";
+  }
+  return "ugc";
+}
+
 function isMissingTableError(error: unknown): boolean {
   if (!error || typeof error !== "object") return false;
   const row = error as Record<string, unknown>;
@@ -89,6 +99,20 @@ function cleanText(value: unknown, fallback = ""): string {
   if (typeof value !== "string") return fallback;
   const normalized = value.replace(/\s+/g, " ").trim();
   return normalized || fallback;
+}
+
+function stripCharacterTypeMarker(value: string): string {
+  return value.replace(/\s*CharacterType:\s*(ugc|animated)\.?/gi, "").replace(/\s+/g, " ").trim();
+}
+
+function withCharacterTypeMarker(promptTemplate: string, characterType: "ugc" | "animated"): string {
+  const stripped = stripCharacterTypeMarker(promptTemplate);
+  return `${stripped} CharacterType: ${characterType}.`.trim();
+}
+
+function inferCharacterTypeFromTemplate(promptTemplate: string): "ugc" | "animated" {
+  const match = promptTemplate.match(/CharacterType:\s*(ugc|animated)/i);
+  return match && match[1].toLowerCase() === "animated" ? "animated" : "ugc";
 }
 
 function toErrorMessage(error: unknown, fallback: string): string {
@@ -186,6 +210,7 @@ async function generateCharacterProfile(
   appContext: string,
   referenceImageUrl: string | null,
   preferredCharacterName: string | null,
+  characterType: "ugc" | "animated",
   reasoningModel: ReasoningModel
 ): Promise<{
   characterName: string;
@@ -221,7 +246,9 @@ TASK:
 - Keep tone practical, warm, and faith-aware.
 - Keep styling modest and contemporary.
 - Avoid stereotypes.
-- The character must feel like a REAL person, not a polished AI model.
+- The character must align with type: ${characterType}.
+- If type is ugc: must feel like a REAL person, not a polished AI model.
+- If type is animated: must be a stylized CGI animation character suitable for 3D/2.5D animation workflows, not photoreal live-action.
 - Make the persona visually recognizable with stable unique markers.
 - Avoid overly perfect, doll-like, hyper-symmetrical beauty language.
 
@@ -260,7 +287,9 @@ Return strict JSON only:
     voiceTone: cleanText(parsed.voiceTone, "Warm, clear, grounded, reassuring."),
     promptTemplate: cleanText(
       parsed.promptTemplate,
-      "Use the same female Muslimah creator identity in every UGC scene: consistent face, modest styling, natural expression, calm confident delivery, realistic movement, and no beauty-filter look."
+      characterType === "animated"
+        ? "Use the same Muslimah animated character identity in every scene: consistent face silhouette, stylized 3D CGI texture language, modest styling, expressive but natural animation timing, and stable color palette."
+        : "Use the same female Muslimah creator identity in every UGC scene: consistent face, modest styling, natural expression, calm confident delivery, realistic movement, and no beauty-filter look."
     ),
     identityAnchors: Array.isArray(parsed.identityAnchors)
       ? parsed.identityAnchors
@@ -286,6 +315,10 @@ Return strict JSON only:
 }
 
 function toCharacterResponse(row: VideoUgcCharacterRow, angles: VideoUgcCharacterAngleRow[] = []) {
+  const characterType = row.character_type
+    ? normalizeCharacterType(row.character_type)
+    : inferCharacterTypeFromTemplate(row.prompt_template || "");
+
   return {
     id: row.id,
     collectionId: row.collection_id,
@@ -294,7 +327,8 @@ function toCharacterResponse(row: VideoUgcCharacterRow, angles: VideoUgcCharacte
     visualStyle: row.visual_style,
     wardrobeNotes: row.wardrobe_notes,
     voiceTone: row.voice_tone,
-    promptTemplate: row.prompt_template,
+    promptTemplate: stripCharacterTypeMarker(row.prompt_template || ""),
+    characterType,
     referenceImageUrl: row.reference_image_url,
     imageModel: row.image_model,
     isDefault: Boolean(row.is_default),
@@ -324,7 +358,7 @@ export async function GET(request: NextRequest) {
     const primaryQuery = await supabase
       .from("video_ugc_characters")
       .select(
-        "id, collection_id, character_name, persona_summary, visual_style, wardrobe_notes, voice_tone, prompt_template, reference_image_url, image_model, is_default, created_at, updated_at"
+        "id, collection_id, character_name, persona_summary, visual_style, wardrobe_notes, voice_tone, prompt_template, reference_image_url, image_model, character_type, is_default, created_at, updated_at"
       )
       .eq("collection_id", collectionId)
       .order("is_default", { ascending: false })
@@ -338,7 +372,8 @@ export async function GET(request: NextRequest) {
       (
         isMissingColumnError(error, "is_default") ||
         isMissingColumnError(error, "updated_at") ||
-        isMissingColumnError(error, "created_at")
+        isMissingColumnError(error, "created_at") ||
+        isMissingColumnError(error, "character_type")
       )
     ) {
       const fallbackQuery = await supabase
@@ -412,6 +447,7 @@ export async function POST(request: NextRequest) {
     const setAsDefault = asBoolean(body.setAsDefault, true);
     const preferredCharacterName = asText(body.characterName) || null;
     const providedReferenceImageUrl = asText(body.referenceImageUrl) || null;
+    const characterType = normalizeCharacterType(body.characterType);
     const reasoningModel = isReasoningModel(body.reasoningModel)
       ? body.reasoningModel
       : DEFAULT_REASONING_MODEL;
@@ -439,6 +475,7 @@ export async function POST(request: NextRequest) {
       appContext,
       providedReferenceImageUrl,
       preferredCharacterName,
+      characterType,
       reasoningModel
     );
 
@@ -447,15 +484,21 @@ export async function POST(request: NextRequest) {
       : await (async () => {
         const { generateImage } = await import("@/lib/gemini-image");
         const imagePrompt = [
-          `Create a high-quality photorealistic portrait reference image for a recurring UGC creator persona named ${profile.characterName}.`,
+          characterType === "animated"
+            ? `Create a high-quality stylized CGI animated character reference image for a recurring persona named ${profile.characterName}.`
+            : `Create a high-quality photorealistic portrait reference image for a recurring UGC creator persona named ${profile.characterName}.`,
           profile.promptTemplate,
           `Persona: ${profile.personaSummary}.`,
           `Visual style: ${profile.visualStyle}.`,
           `Wardrobe: ${profile.wardrobeNotes}.`,
           `Identity anchors: ${profile.identityAnchors.join("; ")}.`,
           `Realism directives: ${profile.realismDirectives.join("; ")}.`,
-          "Vertical 9:16, upper-body framing, natural lighting, documentary smartphone realism, lived-in authentic background, realistic skin texture with pores and minor imperfections, slight facial asymmetry, flyaway hair strands, no text overlay.",
-          "NEGATIVE: plastic skin, porcelain face, hyper-symmetry, uncanny eyes, glossy CGI skin, beauty filter, fashion-magazine retouch.",
+          characterType === "animated"
+            ? "Vertical 9:16, upper-body framing, stylized CGI animation look, clean shading, expressive but grounded facial design, animation-ready character sheet quality, no text overlay."
+            : "Vertical 9:16, upper-body framing, natural lighting, documentary smartphone realism, lived-in authentic background, realistic skin texture with pores and minor imperfections, slight facial asymmetry, flyaway hair strands, no text overlay.",
+          characterType === "animated"
+            ? "NEGATIVE: photoreal pores, uncanny realism, noisy texture flicker, plastic toy look, overexposed HDR skin."
+            : "NEGATIVE: plastic skin, porcelain face, hyper-symmetry, uncanny eyes, glossy CGI skin, beauty filter, fashion-magazine retouch.",
         ].join(" ");
 
         return generateImage(imagePrompt, {
@@ -486,22 +529,46 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    const { data: inserted, error: insertError } = await supabase
+    const baseInsertPayload = {
+      collection_id: collectionId,
+      character_name: profile.characterName,
+      persona_summary: profile.personaSummary,
+      visual_style: profile.visualStyle,
+      wardrobe_notes: profile.wardrobeNotes,
+      voice_tone: profile.voiceTone,
+      prompt_template: withCharacterTypeMarker(
+        `${profile.promptTemplate} Identity anchors: ${profile.identityAnchors.join("; ")}. Realism directives: ${profile.realismDirectives.join("; ")}.`,
+        characterType
+      ),
+      reference_image_url: referenceImageUrl,
+      image_model: imageModel,
+      is_default: setAsDefault,
+    };
+
+    let inserted: unknown = null;
+    let insertError: unknown = null;
+
+    const insertWithType = await supabase
       .from("video_ugc_characters")
       .insert({
-        collection_id: collectionId,
-        character_name: profile.characterName,
-        persona_summary: profile.personaSummary,
-        visual_style: profile.visualStyle,
-        wardrobe_notes: profile.wardrobeNotes,
-        voice_tone: profile.voiceTone,
-        prompt_template: `${profile.promptTemplate} Identity anchors: ${profile.identityAnchors.join("; ")}. Realism directives: ${profile.realismDirectives.join("; ")}.`,
-        reference_image_url: referenceImageUrl,
-        image_model: imageModel,
-        is_default: setAsDefault,
+        ...baseInsertPayload,
+        character_type: characterType,
       })
       .select("*")
       .single();
+
+    inserted = insertWithType.data;
+    insertError = insertWithType.error;
+
+    if (insertError && isMissingColumnError(insertError, "character_type")) {
+      const fallbackInsert = await supabase
+        .from("video_ugc_characters")
+        .insert(baseInsertPayload)
+        .select("*")
+        .single();
+      inserted = fallbackInsert.data;
+      insertError = fallbackInsert.error;
+    }
 
     if (insertError) {
       if (isMissingColumnError(insertError, "is_default")) {
@@ -527,13 +594,93 @@ export async function POST(request: NextRequest) {
     }
 
     return NextResponse.json({
-      character: toCharacterResponse(inserted as unknown as VideoUgcCharacterRow),
+      character: toCharacterResponse(inserted as VideoUgcCharacterRow),
       imageModel,
       reasoningModel,
     });
   } catch (err) {
     return NextResponse.json(
       { error: toErrorMessage(err, "Failed to create UGC character.") },
+      { status: 500 }
+    );
+  }
+}
+
+export async function DELETE(request: NextRequest) {
+  try {
+    const body = (await request.json()) as Record<string, unknown>;
+    const collectionId = asText(body.collectionId);
+    const characterId = asText(body.characterId);
+
+    if (!collectionId || !characterId) {
+      return NextResponse.json({ error: "collectionId and characterId are required." }, { status: 400 });
+    }
+
+    const existing = await supabase
+      .from("video_ugc_characters")
+      .select("id")
+      .eq("collection_id", collectionId)
+      .eq("id", characterId)
+      .single();
+
+    if (existing.error || !existing.data) {
+      return NextResponse.json({ error: "Character not found." }, { status: 404 });
+    }
+
+    const deleteAngles = await supabase
+      .from("video_ugc_character_angles")
+      .delete()
+      .eq("collection_id", collectionId)
+      .eq("character_id", characterId);
+
+    if (deleteAngles.error && !isMissingTableError(deleteAngles.error)) {
+      throw deleteAngles.error;
+    }
+
+    const deleteCharacter = await supabase
+      .from("video_ugc_characters")
+      .delete()
+      .eq("collection_id", collectionId)
+      .eq("id", characterId);
+
+    if (deleteCharacter.error) {
+      throw deleteCharacter.error;
+    }
+
+    const existingDefault = await supabase
+      .from("video_ugc_characters")
+      .select("id")
+      .eq("collection_id", collectionId)
+      .eq("is_default", true)
+      .limit(1)
+      .maybeSingle();
+
+    if (existingDefault.error && !isMissingColumnError(existingDefault.error, "is_default")) {
+      throw existingDefault.error;
+    }
+
+    if (!existingDefault.data) {
+      const firstRemaining = await supabase
+        .from("video_ugc_characters")
+        .select("id")
+        .eq("collection_id", collectionId)
+        .order("updated_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (!firstRemaining.error && firstRemaining.data) {
+        await supabase
+          .from("video_ugc_characters")
+          .update({ is_default: true, updated_at: new Date().toISOString() })
+          .eq("collection_id", collectionId)
+          .eq("id", (firstRemaining.data as { id: string }).id);
+      }
+    }
+
+    return NextResponse.json({ deletedCharacterId: characterId });
+  } catch (err) {
+    return NextResponse.json(
+      { error: toErrorMessage(err, "Failed to delete character.") },
       { status: 500 }
     );
   }

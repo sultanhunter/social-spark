@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { ArrowLeft, Loader2, Sparkles, Star, Upload } from "lucide-react";
+import { ArrowLeft, Loader2, Sparkles, Star, Trash2, Upload } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -28,6 +28,7 @@ type UgcCharacter = {
   promptTemplate: string;
   referenceImageUrl: string | null;
   imageModel: string | null;
+  characterType?: "ugc" | "animated";
   isDefault?: boolean;
   updatedAt: string;
 };
@@ -140,9 +141,11 @@ export function VideoCharactersView({ collectionId }: { collectionId: string }) 
   const [isCreating, setIsCreating] = useState(false);
   const [isUploadingCreate, setIsUploadingCreate] = useState(false);
   const [defaultingId, setDefaultingId] = useState<string | null>(null);
+  const [deletingCharacterId, setDeletingCharacterId] = useState<string | null>(null);
   const [uploadedCharacterFile, setUploadedCharacterFile] = useState<File | null>(null);
   const [uploadedCharacterPreview, setUploadedCharacterPreview] = useState<string | null>(null);
   const [characterNameInput, setCharacterNameInput] = useState("");
+  const [characterTypeInput, setCharacterTypeInput] = useState<"ugc" | "animated">("ugc");
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
 
@@ -211,6 +214,7 @@ export function VideoCharactersView({ collectionId }: { collectionId: string }) 
           collectionId,
           reasoningModel,
           imageGenerationModel: imageModel,
+          characterType: characterTypeInput,
           setAsDefault: true,
         }),
       });
@@ -286,6 +290,7 @@ export function VideoCharactersView({ collectionId }: { collectionId: string }) 
           collectionId,
           reasoningModel,
           imageGenerationModel: imageModel,
+          characterType: characterTypeInput,
           setAsDefault: true,
           referenceImageUrl: uploadImageUrl,
           characterName: characterNameInput.trim() || undefined,
@@ -336,6 +341,38 @@ export function VideoCharactersView({ collectionId }: { collectionId: string }) 
       setError(err instanceof Error ? err.message : "Failed to set default character.");
     } finally {
       setDefaultingId(null);
+    }
+  };
+
+  const handleDeleteCharacter = async (characterId: string) => {
+    const target = characters.find((item) => item.id === characterId) || null;
+    const confirmed = window.confirm(
+      `Delete character${target?.characterName ? ` \"${target.characterName}\"` : ""}? This removes saved angles too.`
+    );
+    if (!confirmed) return;
+
+    setDeletingCharacterId(characterId);
+    setError("");
+    setSuccess("");
+
+    try {
+      const response = await fetch("/api/video-agent/characters", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ collectionId, characterId }),
+      });
+
+      const data = (await response.json()) as { error?: string };
+      if (!response.ok) {
+        throw new Error(data.error || "Failed to delete character.");
+      }
+
+      setSuccess("Character deleted.");
+      await loadCharacters();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to delete character.");
+    } finally {
+      setDeletingCharacterId(null);
     }
   };
 
@@ -434,6 +471,17 @@ export function VideoCharactersView({ collectionId }: { collectionId: string }) 
                   You can pick files up to 10MB. Large images are auto-compressed for upload.
                 </p>
               </div>
+              <div className="space-y-1">
+                <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Character type</p>
+                <select
+                  value={characterTypeInput}
+                  onChange={(event) => setCharacterTypeInput(event.target.value === "animated" ? "animated" : "ugc")}
+                  className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800 outline-none transition focus:border-rose-400 focus:ring-2 focus:ring-rose-200"
+                >
+                  <option value="ugc">UGC (photoreal live-action)</option>
+                  <option value="animated">Animated (CGI style)</option>
+                </select>
+              </div>
             </div>
 
             {uploadedCharacterPreview ? (
@@ -475,7 +523,10 @@ export function VideoCharactersView({ collectionId }: { collectionId: string }) 
                   <div key={character.id} className="rounded-lg border border-slate-200 bg-white p-3">
                     <div className="flex items-center justify-between gap-2">
                       <p className="text-sm font-semibold text-slate-800">{character.characterName}</p>
-                      {character.isDefault ? <Badge variant="success">Default</Badge> : <Badge variant="default">Saved</Badge>}
+                      <div className="flex items-center gap-1.5">
+                        <Badge variant="default">{character.characterType || "ugc"}</Badge>
+                        {character.isDefault ? <Badge variant="success">Default</Badge> : <Badge variant="default">Saved</Badge>}
+                      </div>
                     </div>
                     {character.referenceImageUrl ? (
                       <img
@@ -508,6 +559,26 @@ export function VideoCharactersView({ collectionId }: { collectionId: string }) 
                         )}
                       </Button>
                     ) : null}
+
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="mt-3"
+                      onClick={() => void handleDeleteCharacter(character.id)}
+                      disabled={deletingCharacterId === character.id}
+                    >
+                      {deletingCharacterId === character.id ? (
+                        <>
+                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                          Deleting...
+                        </>
+                      ) : (
+                        <>
+                          <Trash2 className="mr-2 h-4 w-4" />
+                          Delete Character
+                        </>
+                      )}
+                    </Button>
 
                   </div>
                 ))}
