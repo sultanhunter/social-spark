@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { ArrowLeft, Camera, Loader2, Sparkles, Star, Upload } from "lucide-react";
+import { ArrowLeft, Loader2, Sparkles, Star, Upload } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -29,17 +29,7 @@ type UgcCharacter = {
   referenceImageUrl: string | null;
   imageModel: string | null;
   isDefault?: boolean;
-  angles?: CharacterAngle[];
   updatedAt: string;
-};
-
-type CharacterAngle = {
-  id: string;
-  angleKey: string;
-  angleLabel: string;
-  anglePrompt: string;
-  imageUrl: string;
-  imageModel: string | null;
 };
 
 type CharactersResponse = {
@@ -150,7 +140,6 @@ export function VideoCharactersView({ collectionId }: { collectionId: string }) 
   const [isCreating, setIsCreating] = useState(false);
   const [isUploadingCreate, setIsUploadingCreate] = useState(false);
   const [defaultingId, setDefaultingId] = useState<string | null>(null);
-  const [generatingAnglesId, setGeneratingAnglesId] = useState<string | null>(null);
   const [uploadedCharacterFile, setUploadedCharacterFile] = useState<File | null>(null);
   const [uploadedCharacterPreview, setUploadedCharacterPreview] = useState<string | null>(null);
   const [characterNameInput, setCharacterNameInput] = useState("");
@@ -174,7 +163,7 @@ export function VideoCharactersView({ collectionId }: { collectionId: string }) 
     setIsLoading(true);
     try {
       const response = await fetch(
-        `/api/video-agent/characters?collectionId=${encodeURIComponent(collectionId)}&includeAngles=true`,
+        `/api/video-agent/characters?collectionId=${encodeURIComponent(collectionId)}&includeAngles=false`,
         { method: "GET", cache: "no-store" }
       );
 
@@ -350,58 +339,6 @@ export function VideoCharactersView({ collectionId }: { collectionId: string }) 
     }
   };
 
-  const handleGenerateAngles = async (characterId: string) => {
-    setGeneratingAnglesId(characterId);
-    setError("");
-    setSuccess("");
-
-    try {
-      const response = await fetch("/api/video-agent/characters/angles", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          collectionId,
-          characterId,
-          imageGenerationModel: imageModel,
-          replaceExisting: true,
-          angleCount: 3,
-        }),
-      });
-
-      const data = (await response.json()) as {
-        error?: string;
-        warnings?: string[];
-        generatedCount?: number;
-        requestedCount?: number;
-      };
-      if (!response.ok) {
-        const details = Array.isArray(data.warnings) && data.warnings.length > 0
-          ? ` ${data.warnings.join(" | ")}`
-          : "";
-        throw new Error((data.error || "Failed to generate character angles.") + details);
-      }
-
-      const generatedCount = typeof data.generatedCount === "number" ? data.generatedCount : null;
-      const requestedCount = typeof data.requestedCount === "number" ? data.requestedCount : null;
-      const baseMessage =
-        generatedCount && requestedCount
-          ? `Generated ${generatedCount}/${requestedCount} character angles.`
-          : "Generated angle pack for selected character.";
-
-      const warningMessage =
-        Array.isArray(data.warnings) && data.warnings.length > 0
-          ? ` Some angles failed: ${data.warnings.join(" | ")}`
-          : "";
-
-      setSuccess(baseMessage + warningMessage);
-      await loadCharacters();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to generate character angles.");
-    } finally {
-      setGeneratingAnglesId(null);
-    }
-  };
-
   return (
     <div className="flex-1 overflow-y-auto px-6 py-6 md:px-8">
       <div className="mx-auto w-full max-w-6xl space-y-4">
@@ -550,26 +487,6 @@ export function VideoCharactersView({ collectionId }: { collectionId: string }) 
                     <p className="mt-2 text-xs text-slate-600">{character.personaSummary}</p>
                     <p className="mt-1 text-[11px] text-slate-500">Image model: {character.imageModel || "N/A"}</p>
                     <p className="mt-1 text-[11px] text-slate-500">Voice: {character.voiceTone || "N/A"}</p>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="mt-3"
-                      onClick={() => handleGenerateAngles(character.id)}
-                      disabled={generatingAnglesId === character.id}
-                    >
-                      {generatingAnglesId === character.id ? (
-                        <>
-                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                          Generating angles...
-                        </>
-                      ) : (
-                        <>
-                          <Camera className="mr-2 h-4 w-4" />
-                          {character.angles && character.angles.length > 0 ? "Regenerate Angles (3)" : "Generate Angles (3)"}
-                        </>
-                      )}
-                    </Button>
-
                     {!character.isDefault ? (
                       <Button
                         variant="outline"
@@ -592,23 +509,6 @@ export function VideoCharactersView({ collectionId }: { collectionId: string }) 
                       </Button>
                     ) : null}
 
-                    {character.angles && character.angles.length > 0 ? (
-                      <div className="mt-3 space-y-2">
-                        <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Angle Pack</p>
-                        <div className="grid grid-cols-2 gap-2">
-                          {character.angles.map((angle) => (
-                            <div key={angle.id} className="rounded-md border border-slate-200 p-1.5">
-                              <img
-                                src={angle.imageUrl}
-                                alt={angle.angleLabel}
-                                className="h-24 w-full rounded object-cover"
-                              />
-                              <p className="mt-1 text-[11px] font-medium text-slate-700">{angle.angleLabel}</p>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    ) : null}
                   </div>
                 ))}
               </div>
