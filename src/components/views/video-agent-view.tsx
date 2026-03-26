@@ -1197,6 +1197,7 @@ export function VideoAgentView({ collectionId }: { collectionId: string }) {
   const [isScriptAgentModalOpen, setIsScriptAgentModalOpen] = useState(false);
   const [scriptAgentTopicBrief, setScriptAgentTopicBrief] = useState("");
   const [scriptAgentVideoType, setScriptAgentVideoType] = useState<ScriptAgentVideoType>("auto");
+  const [scriptAgentCharacterId, setScriptAgentCharacterId] = useState<string>("auto");
   const [scriptAgentDurationSeconds, setScriptAgentDurationSeconds] = useState<number>(75);
   const [isGeneratingScriptAgentPlan, setIsGeneratingScriptAgentPlan] = useState(false);
   const [scriptAgentPlan, setScriptAgentPlan] = useState<ScriptAgentPlan | null>(null);
@@ -1423,6 +1424,13 @@ export function VideoAgentView({ collectionId }: { collectionId: string }) {
         }
         const defaultCharacter = characters.find((item) => item.isDefault) || null;
         return defaultCharacter?.id || characters[0]?.id || null;
+      });
+      setScriptAgentCharacterId((current) => {
+        if (current !== "auto" && characters.some((item) => item.id === current)) {
+          return current;
+        }
+        const defaultCharacter = characters.find((item) => item.isDefault) || null;
+        return defaultCharacter?.id || "auto";
       });
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load UGC characters.");
@@ -1803,7 +1811,7 @@ export function VideoAgentView({ collectionId }: { collectionId: string }) {
           preferredVideoType: scriptAgentVideoType,
           targetDurationSeconds: scriptAgentDurationSeconds,
           reasoningModel,
-          characterId: selectedUgcCharacterId,
+          characterId: scriptAgentCharacterId === "auto" ? null : scriptAgentCharacterId,
         }),
       });
 
@@ -1827,9 +1835,9 @@ export function VideoAgentView({ collectionId }: { collectionId: string }) {
     collectionId,
     scriptAgentTopicBrief,
     scriptAgentVideoType,
+    scriptAgentCharacterId,
     scriptAgentDurationSeconds,
     reasoningModel,
-    selectedUgcCharacterId,
   ]);
 
   const handleCopyScriptAgentVeoPrompt = useCallback(async (segmentId: number, prompt: string) => {
@@ -2224,7 +2232,7 @@ export function VideoAgentView({ collectionId }: { collectionId: string }) {
                   />
                 </div>
 
-                <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
                   <div>
                     <p className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-slate-500">Video Type</p>
                     <select
@@ -2254,6 +2262,23 @@ export function VideoAgentView({ collectionId }: { collectionId: string }) {
                       }}
                       className="w-full rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-xs text-slate-800 outline-none transition focus:border-rose-400 focus:ring-2 focus:ring-rose-200"
                     />
+                  </div>
+
+                  <div>
+                    <p className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-slate-500">Character</p>
+                    <select
+                      value={scriptAgentCharacterId}
+                      onChange={(event) => setScriptAgentCharacterId(event.target.value)}
+                      className="w-full rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-xs text-slate-800 outline-none transition focus:border-rose-400 focus:ring-2 focus:ring-rose-200"
+                    >
+                      <option value="auto">Auto/default character</option>
+                      {ugcCharacters.map((character) => (
+                        <option key={character.id} value={character.id}>
+                          {character.characterName}
+                          {character.isDefault ? " (Default)" : ""}
+                        </option>
+                      ))}
+                    </select>
                   </div>
                 </div>
 

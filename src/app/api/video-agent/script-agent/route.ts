@@ -125,7 +125,10 @@ export async function POST(request: NextRequest) {
     }
 
     let ugcCharacter: UGCCharacterProfile | null = null;
-    if (preferredVideoType === "ugc" || preferredVideoType === "hybrid") {
+    const shouldResolveCharacter =
+      Boolean(selectedCharacterId) || preferredVideoType === "ugc" || preferredVideoType === "hybrid";
+
+    if (shouldResolveCharacter) {
       const fullSelect =
         "id, character_name, persona_summary, visual_style, wardrobe_notes, voice_tone, prompt_template, reference_image_url, image_model, is_default";
 
@@ -158,6 +161,13 @@ export async function POST(request: NextRequest) {
             .order("created_at", { ascending: true })
             .limit(1)
             .maybeSingle();
+      }
+
+      if (selectedCharacterId && !characterResult.data) {
+        return NextResponse.json(
+          { error: "Selected character not found for this collection." },
+          { status: 404 }
+        );
       }
 
       if (characterResult.data) {
