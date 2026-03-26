@@ -1,9 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabase } from "@/lib/supabase";
 import {
-  analyzeVideoFormatFromSource,
   buildVideoRecreationPlan,
-  fetchVideoSourceMetadata,
   type UGCCharacterProfile,
   type VideoFormatAnalysis,
 } from "@/lib/video-agent";
@@ -253,35 +251,6 @@ function toFormatAnalysis(row: VideoFormatRow, sourceSignals: SourceFormatSignal
   };
 }
 
-function sourceSignalsFromFormatAnalysis(formatAnalysis: VideoFormatAnalysis): SourceFormatSignals {
-  return {
-    formatName: formatAnalysis.formatName,
-    formatType: formatAnalysis.formatType,
-    formatSignature: formatAnalysis.formatSignature,
-    sourceDurationSeconds: formatAnalysis.sourceDurationSeconds,
-    sampledFrameCount: formatAnalysis.sampledFrameCount,
-    sampledFrameSources: formatAnalysis.sampledFrameSources,
-    directMediaUrl: formatAnalysis.directMediaUrl,
-    r2VideoUrl: formatAnalysis.r2VideoUrl,
-    transcriptAvailable: formatAnalysis.transcriptAvailable,
-    transcriptSummary: formatAnalysis.transcriptSummary,
-    transcriptText: formatAnalysis.transcriptText,
-    transcriptHighlights: formatAnalysis.transcriptHighlights,
-    visualSignals: formatAnalysis.visualSignals,
-    onScreenTextPatterns: formatAnalysis.onScreenTextPatterns,
-    summary: formatAnalysis.summary,
-    whyItWorks: formatAnalysis.whyItWorks,
-    hookPatterns: formatAnalysis.hookPatterns,
-    shotPattern: formatAnalysis.shotPattern,
-    editingStyle: formatAnalysis.editingStyle,
-    scriptScaffold: formatAnalysis.scriptScaffold,
-    higgsfieldPromptTemplate: formatAnalysis.higgsfieldPromptTemplate,
-    recreationChecklist: formatAnalysis.recreationChecklist,
-    durationGuidance: formatAnalysis.durationGuidance,
-    confidence: formatAnalysis.confidence,
-  };
-}
-
 function getSourceTranscriptFromAnalysisPayload(payload: unknown): {
   summary: string | null;
   text: string | null;
@@ -495,26 +464,10 @@ export async function POST(request: NextRequest) {
 
     const appName = (collection.app_name || "Muslimah Pro").trim() || "Muslimah Pro";
     const appContext = (collection.app_description || collection.app_context || "").trim();
-
-    const freshSourceMetadata = await fetchVideoSourceMetadata(sourceVideo.source_url);
-    freshSourceMetadata.userNotes = sourceVideo.user_notes;
-    const freshFormatAnalysis = await analyzeVideoFormatFromSource(
-      freshSourceMetadata,
-      reasoningModel,
-      collectionId
-    );
-    freshSourceMetadata.transcriptSummary = freshFormatAnalysis.transcriptSummary || null;
-    freshSourceMetadata.transcriptText = freshFormatAnalysis.transcriptText || null;
-    freshSourceMetadata.sourceDurationSeconds =
-      typeof freshFormatAnalysis.sourceDurationSeconds === "number"
-        ? freshFormatAnalysis.sourceDurationSeconds
-        : null;
-
     const transcriptContext = getSourceTranscriptFromAnalysisPayload(sourceVideo.analysis_payload);
     const sourceSignals = getSourceFormatSignalsFromAnalysisPayload(sourceVideo.analysis_payload);
     const mergedSignals: SourceFormatSignals = {
       ...sourceSignals,
-      ...sourceSignalsFromFormatAnalysis(freshFormatAnalysis),
       transcriptSummary: transcriptContext.summary || sourceSignals.transcriptSummary || "",
       transcriptText: transcriptContext.text || sourceSignals.transcriptText || "",
       sourceDurationSeconds:
@@ -526,64 +479,18 @@ export async function POST(request: NextRequest) {
         Boolean(transcriptContext.text),
     };
 
-    mergedSignals.transcriptSummary =
-      freshFormatAnalysis.transcriptSummary ||
-      mergedSignals.transcriptSummary ||
-      "";
-    mergedSignals.transcriptText =
-      freshFormatAnalysis.transcriptText ||
-      mergedSignals.transcriptText ||
-      "";
-    mergedSignals.sourceDurationSeconds =
-      typeof freshFormatAnalysis.sourceDurationSeconds === "number"
-        ? freshFormatAnalysis.sourceDurationSeconds
-        : mergedSignals.sourceDurationSeconds;
-    mergedSignals.transcriptAvailable =
-      Boolean(freshFormatAnalysis.transcriptAvailable) ||
-      Boolean(mergedSignals.transcriptSummary) ||
-      Boolean(mergedSignals.transcriptText);
-
-    const refreshedAnalysisPayload = {
-      sourceMetadata: freshSourceMetadata,
-      formatAnalysis: freshFormatAnalysis,
-      matchDecision: null,
-      reasoningModel,
-      analyzedAt: new Date().toISOString(),
-      analyzeOnRecreate: true,
-    };
-
-    const { error: sourceUpdateError } = await supabase
-      .from("video_format_videos")
-      .update({
-        platform: freshSourceMetadata.platform,
-        title: freshSourceMetadata.title,
-        description: freshSourceMetadata.description,
-        thumbnail_url: freshSourceMetadata.thumbnailUrl,
-        analysis_confidence: freshFormatAnalysis.confidence,
-        analysis_payload: refreshedAnalysisPayload,
-      })
-      .eq("id", sourceVideo.id)
-      .eq("collection_id", collectionId);
-
-    if (sourceUpdateError) {
-      throw sourceUpdateError;
-    }
-
     const plan = await buildVideoRecreationPlan({
       appName,
       appContext,
       sourceVideo: {
         sourceUrl: sourceVideo.source_url,
-        title: freshSourceMetadata.title || sourceVideo.title,
-        description: freshSourceMetadata.description || sourceVideo.description,
-        platform: freshSourceMetadata.platform || sourceVideo.platform,
+        title: sourceVideo.title,
+        description: sourceVideo.description,
+        platform: sourceVideo.platform,
         userNotes: sourceVideo.user_notes,
-        transcriptSummary: freshFormatAnalysis.transcriptSummary || transcriptContext.summary,
-        transcriptText: freshFormatAnalysis.transcriptText || transcriptContext.text,
-        sourceDurationSeconds:
-          typeof freshFormatAnalysis.sourceDurationSeconds === "number"
-            ? freshFormatAnalysis.sourceDurationSeconds
-            : transcriptContext.sourceDurationSeconds,
+        transcriptSummary: transcriptContext.summary,
+        transcriptText: transcriptContext.text,
+        sourceDurationSeconds: transcriptContext.sourceDurationSeconds,
       },
       format: toFormatAnalysis(format, mergedSignals),
       ugcCharacter,

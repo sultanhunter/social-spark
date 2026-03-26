@@ -1,7 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabase } from "@/lib/supabase";
 import {
+  analyzeVideoFormatFromSource,
   fetchVideoSourceMetadata,
+  matchCandidateToExistingFormat,
+  type ExistingFormatCandidate,
 } from "@/lib/video-agent";
 import { DEFAULT_REASONING_MODEL, isReasoningModel } from "@/lib/reasoning-model";
 
@@ -29,8 +32,6 @@ type VideoFormatRow = {
   updated_at: string;
 };
 
-const PENDING_ANALYSIS_SIGNATURE = "pending_analysis_manual";
-
 function asText(value: unknown): string {
   return typeof value === "string" ? value.trim() : "";
 }
@@ -46,81 +47,16 @@ function isMissingTableError(error: unknown): boolean {
   return row.code === "42P01";
 }
 
-async function ensurePendingFormat(collectionId: string, sourceUrl: string): Promise<{ row: VideoFormatRow; created: boolean }> {
-  const existing = await supabase
-    .from("video_formats")
-    .select("*")
-    .eq("collection_id", collectionId)
-    .eq("format_signature", PENDING_ANALYSIS_SIGNATURE)
-    .order("updated_at", { ascending: false })
-    .limit(1)
-    .maybeSingle();
-
-  if (existing.error) {
-    if (isMissingTableError(existing.error)) {
-      throw new Error(
-        "Video pipeline tables are missing. Run the video-agent SQL migration first (see supabase-migration.sql)."
-      );
-    }
-    throw existing.error;
-  }
-
-  if (existing.data) {
-    const row = existing.data as unknown as VideoFormatRow;
-    const nextSourceCount = (typeof row.source_count === "number" ? row.source_count : 0) + 1;
-
-    const update = await supabase
-      .from("video_formats")
-      .update({
-        source_count: nextSourceCount,
-        latest_source_url: sourceUrl,
-        updated_at: new Date().toISOString(),
-      })
-      .eq("id", row.id)
-      .select("*")
-      .single();
-
-    if (update.error || !update.data) {
-      throw update.error || new Error("Failed to update pending analysis format.");
-    }
-
-    return {
-      row: update.data as unknown as VideoFormatRow,
-      created: false,
-    };
-  }
-
-  const inserted = await supabase
-    .from("video_formats")
-    .insert({
-      collection_id: collectionId,
-      format_name: "Pending Analysis",
-      format_type: "hybrid",
-      format_signature: PENDING_ANALYSIS_SIGNATURE,
-      summary: "Source videos waiting for analysis. Analysis runs during plan creation/recreation.",
-      why_it_works: ["Analysis deferred to recreate step."],
-      hook_patterns: [],
-      shot_pattern: [],
-      editing_style: [],
-      script_scaffold: "",
-      higgsfield_prompt_template: "",
-      recreation_checklist: ["Generate plan to trigger full analysis."],
-      duration_guidance: "",
-      confidence: 0,
-      source_count: 1,
-      latest_source_url: sourceUrl,
-    })
-    .select("*")
-    .single();
-
-  if (inserted.error || !inserted.data) {
-    throw inserted.error || new Error("Failed to create pending analysis format.");
-  }
-
-  return {
-    row: inserted.data as unknown as VideoFormatRow,
-    created: true,
-  };
+function toCandidateRows(rows: VideoFormatRow[]): ExistingFormatCandidate[] {
+  return rows.map((row) => ({
+    id: row.id,
+    formatName: row.format_name,
+    formatType: row.format_type,
+    formatSignature: row.format_signature,
+    summary: row.summary,
+    hookPatterns: Array.isArray(row.hook_patterns) ? row.hook_patterns : [],
+    editingStyle: Array.isArray(row.editing_style) ? row.editing_style : [],
+  }));
 }
 
 export async function POST(request: NextRequest) {
@@ -165,17 +101,146 @@ export async function POST(request: NextRequest) {
     const sourceMetadata = await fetchVideoSourceMetadata(sourceUrl);
     sourceMetadata.userNotes = userNotes;
 
-    const pendingFormat = await ensurePendingFormat(collectionId, sourceUrl);
-    const formatRow = pendingFormat.row;
-    const createdNewFormat = pendingFormat.created;
+    const formatAnalysis = await analyzeVideoFormatFromSource(sourceMetadata, reasoningModel, collectionId);
+    sourceMetadata.transcriptSummary = formatAnalysis.transcriptSummary || null;
+    sourceMetadata.transcriptText = formatAnalysis.transcriptText || null;
+    sourceMetadata.sourceDurationSeconds =
+      typeof formatAnalysis.sourceDurationSeconds === "number"
+        ? formatAnalysis.sourceDurationSeconds
+        : null;
+
+    const { data: existingFormats, error: existingFormatsError } = await supabase
+      .from("video_formats")
+      .select("*")
+      .eq("collection_id", collectionId)
+      .order("updated_at", { ascending: false })
+      .limit(100);
+
+    if (existingFormatsError) {
+      if (isMissingTableError(existingFormatsError)) {
+        return NextResponse.json(
+          {
+            error:
+              "Video pipeline tables are missing. Run the video-agent SQL migration first (see supabase-migration.sql).",
+          },
+          { status: 500 }
+        );
+      }
+      throw existingFormatsError;
+    }
+
+    const existingRows = Array.isArray(existingFormats)
+      ? (existingFormats as unknown as VideoFormatRow[])
+      : [];
+
+    const matchDecision = await matchCandidateToExistingFormat(
+      formatAnalysis,
+      toCandidateRows(existingRows),
+      reasoningModel
+    );
+
+    const matchedRow = existingRows.find((row) => row.id === matchDecision.matchedFormatId) || null;
+
+    let formatRow: VideoFormatRow;
+    let createdNewFormat = false;
+
+    if (matchedRow) {
+      const nextSourceCount = (typeof matchedRow.source_count === "number" ? matchedRow.source_count : 0) + 1;
+
+      const { data: updatedFormat, error: updateError } = await supabase
+        .from("video_formats")
+        .update({
+          source_count: nextSourceCount,
+          latest_source_url: sourceUrl,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", matchedRow.id)
+        .select("*")
+        .single();
+
+      if (updateError || !updatedFormat) throw updateError || new Error("Failed to update format group.");
+
+      formatRow = updatedFormat as unknown as VideoFormatRow;
+    } else {
+      createdNewFormat = true;
+      const insertPayload = {
+        collection_id: collectionId,
+        format_name: formatAnalysis.formatName,
+        format_type: formatAnalysis.formatType,
+        format_signature: formatAnalysis.formatSignature,
+        summary: formatAnalysis.summary,
+        why_it_works: formatAnalysis.whyItWorks,
+        hook_patterns: formatAnalysis.hookPatterns,
+        shot_pattern: formatAnalysis.shotPattern,
+        editing_style: formatAnalysis.editingStyle,
+        script_scaffold: formatAnalysis.scriptScaffold,
+        higgsfield_prompt_template: formatAnalysis.higgsfieldPromptTemplate,
+        recreation_checklist: formatAnalysis.recreationChecklist,
+        duration_guidance: formatAnalysis.durationGuidance,
+        confidence: formatAnalysis.confidence,
+        source_count: 1,
+        latest_source_url: sourceUrl,
+      };
+
+      const { data: insertedFormat, error: insertFormatError } = await supabase
+        .from("video_formats")
+        .insert(insertPayload)
+        .select("*")
+        .single();
+
+      if (insertFormatError) {
+        const isDuplicate = insertFormatError.code === "23505";
+
+        if (!isDuplicate) {
+          throw insertFormatError;
+        }
+
+        const { data: duplicateMatch, error: duplicateFetchError } = await supabase
+          .from("video_formats")
+          .select("*")
+          .eq("collection_id", collectionId)
+          .eq("format_signature", formatAnalysis.formatSignature)
+          .single();
+
+        if (duplicateFetchError || !duplicateMatch) {
+          throw duplicateFetchError || insertFormatError;
+        }
+
+        const duplicateRow = duplicateMatch as unknown as VideoFormatRow;
+        const nextSourceCount = (typeof duplicateRow.source_count === "number" ? duplicateRow.source_count : 0) + 1;
+
+        const { data: updatedDuplicate, error: duplicateUpdateError } = await supabase
+          .from("video_formats")
+          .update({
+            source_count: nextSourceCount,
+            latest_source_url: sourceUrl,
+            updated_at: new Date().toISOString(),
+          })
+          .eq("id", duplicateRow.id)
+          .select("*")
+          .single();
+
+        if (duplicateUpdateError || !updatedDuplicate) {
+          throw duplicateUpdateError || new Error("Failed to recover duplicated format insert.");
+        }
+
+        createdNewFormat = false;
+        formatRow = updatedDuplicate as unknown as VideoFormatRow;
+      } else {
+        if (!insertedFormat) {
+          throw new Error("Failed to create format group.");
+        }
+
+        formatRow = insertedFormat as unknown as VideoFormatRow;
+      }
+    }
 
     const analysisPayload = {
       sourceMetadata,
-      formatAnalysis: null,
-      matchDecision: null,
+      formatAnalysis,
+      matchDecision,
       reasoningModel,
-      analyzedAt: null,
-      analyzeOnRecreate: true,
+      analyzedAt: new Date().toISOString(),
     };
 
     const { data: insertedVideo, error: insertVideoError } = await supabase
@@ -189,7 +254,7 @@ export async function POST(request: NextRequest) {
         description: sourceMetadata.description,
         thumbnail_url: sourceMetadata.thumbnailUrl,
         user_notes: userNotes,
-        analysis_confidence: null,
+        analysis_confidence: formatAnalysis.confidence,
         analysis_payload: analysisPayload,
       })
       .select("*")
@@ -209,11 +274,11 @@ export async function POST(request: NextRequest) {
       groupedVideoCount: typeof count === "number" ? count : null,
       format: formatRow,
       video: insertedVideo,
-      matchDecision: null,
+      matchDecision,
     });
   } catch (err) {
     return NextResponse.json(
-      { error: err instanceof Error ? err.message : "Failed to store source video for deferred analysis." },
+      { error: err instanceof Error ? err.message : "Failed to analyze and store video format." },
       { status: 500 }
     );
   }
