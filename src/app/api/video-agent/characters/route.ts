@@ -39,9 +39,9 @@ type VideoUgcCharacterRow = {
   prompt_template: string;
   reference_image_url: string | null;
   image_model: string | null;
-  is_default: boolean | null;
-  created_at: string;
-  updated_at: string;
+  is_default?: boolean | null;
+  created_at?: string;
+  updated_at?: string;
 };
 
 type VideoUgcCharacterAngleRow = {
@@ -89,6 +89,18 @@ function cleanText(value: unknown, fallback = ""): string {
   if (typeof value !== "string") return fallback;
   const normalized = value.replace(/\s+/g, " ").trim();
   return normalized || fallback;
+}
+
+function toErrorMessage(error: unknown, fallback: string): string {
+  if (error instanceof Error && error.message) return error.message;
+  if (error && typeof error === "object") {
+    const row = error as Record<string, unknown>;
+    const message = typeof row.message === "string" ? row.message : "";
+    const details = typeof row.details === "string" ? row.details : "";
+    const combined = `${message}${details ? ` ${details}` : ""}`.trim();
+    if (combined) return combined;
+  }
+  return fallback;
 }
 
 function isHttpUrl(value: string): boolean {
@@ -296,8 +308,8 @@ function toCharacterResponse(row: VideoUgcCharacterRow, angles: VideoUgcCharacte
       createdAt: angle.created_at,
       updatedAt: angle.updated_at,
     })),
-    createdAt: row.created_at,
-    updatedAt: row.updated_at,
+    createdAt: row.created_at || new Date(0).toISOString(),
+    updatedAt: row.updated_at || row.created_at || new Date(0).toISOString(),
   };
 }
 
@@ -321,14 +333,20 @@ export async function GET(request: NextRequest) {
     let data: unknown = primaryQuery.data;
     let error = primaryQuery.error;
 
-    if (error && isMissingColumnError(error, "is_default")) {
+    if (
+      error &&
+      (
+        isMissingColumnError(error, "is_default") ||
+        isMissingColumnError(error, "updated_at") ||
+        isMissingColumnError(error, "created_at")
+      )
+    ) {
       const fallbackQuery = await supabase
         .from("video_ugc_characters")
         .select(
-          "id, collection_id, character_name, persona_summary, visual_style, wardrobe_notes, voice_tone, prompt_template, reference_image_url, image_model, created_at, updated_at"
+          "id, collection_id, character_name, persona_summary, visual_style, wardrobe_notes, voice_tone, prompt_template, reference_image_url, image_model"
         )
-        .eq("collection_id", collectionId)
-        .order("updated_at", { ascending: false });
+        .eq("collection_id", collectionId);
 
       data = fallbackQuery.data;
       error = fallbackQuery.error;
@@ -381,7 +399,7 @@ export async function GET(request: NextRequest) {
     });
   } catch (err) {
     return NextResponse.json(
-      { error: err instanceof Error ? err.message : "Failed to load UGC characters." },
+      { error: toErrorMessage(err, "Failed to load UGC characters.") },
       { status: 500 }
     );
   }
@@ -515,7 +533,7 @@ export async function POST(request: NextRequest) {
     });
   } catch (err) {
     return NextResponse.json(
-      { error: err instanceof Error ? err.message : "Failed to create UGC character." },
+      { error: toErrorMessage(err, "Failed to create UGC character.") },
       { status: 500 }
     );
   }
