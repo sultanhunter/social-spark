@@ -185,10 +185,12 @@ type StartFrameResponse = {
 };
 
 type ScriptAgentVideoType = "auto" | "ugc" | "ai_animation" | "faceless_broll" | "hybrid";
+type ScriptAgentCampaignMode = "standard" | "widget_reaction_ugc";
 
 type ScriptAgentPlan = {
   title: string;
   objective: string;
+  campaignMode?: ScriptAgentCampaignMode;
   topicCategory: "period_pregnancy" | "islamic_period_pregnancy";
   selectedVideoType: "ugc" | "ai_animation" | "faceless_broll" | "hybrid";
   videoTypeReason: string;
@@ -1209,6 +1211,7 @@ export function VideoAgentView({ collectionId }: { collectionId: string }) {
   const [success, setSuccess] = useState("");
   const [isScriptAgentModalOpen, setIsScriptAgentModalOpen] = useState(false);
   const [scriptAgentTopicBrief, setScriptAgentTopicBrief] = useState("");
+  const [scriptAgentCampaignMode, setScriptAgentCampaignMode] = useState<ScriptAgentCampaignMode>("standard");
   const [scriptAgentVideoType, setScriptAgentVideoType] = useState<ScriptAgentVideoType>("auto");
   const [scriptAgentCharacterId, setScriptAgentCharacterId] = useState<string>("auto");
   const [scriptAgentDurationSeconds, setScriptAgentDurationSeconds] = useState<number>(75);
@@ -1480,6 +1483,12 @@ export function VideoAgentView({ collectionId }: { collectionId: string }) {
     void loadCharacters();
     void loadPlans();
   }, [loadLibrary, loadCharacters, loadPlans]);
+
+  useEffect(() => {
+    if (scriptAgentCampaignMode === "widget_reaction_ugc" && scriptAgentVideoType !== "ugc") {
+      setScriptAgentVideoType("ugc");
+    }
+  }, [scriptAgentCampaignMode, scriptAgentVideoType]);
 
   useEffect(() => {
     if (!selectedFormat) {
@@ -1821,6 +1830,7 @@ export function VideoAgentView({ collectionId }: { collectionId: string }) {
         body: JSON.stringify({
           collectionId,
           topicBrief,
+          campaignMode: scriptAgentCampaignMode,
           preferredVideoType: scriptAgentVideoType,
           targetDurationSeconds: scriptAgentDurationSeconds,
           reasoningModel,
@@ -1854,6 +1864,7 @@ export function VideoAgentView({ collectionId }: { collectionId: string }) {
   }, [
     collectionId,
     scriptAgentTopicBrief,
+    scriptAgentCampaignMode,
     scriptAgentVideoType,
     scriptAgentCharacterId,
     scriptAgentDurationSeconds,
@@ -2254,12 +2265,25 @@ export function VideoAgentView({ collectionId }: { collectionId: string }) {
                   />
                 </div>
 
-                <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+                <div className="grid grid-cols-1 gap-2 sm:grid-cols-4">
+                  <div>
+                    <p className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-slate-500">Campaign Pattern</p>
+                    <select
+                      value={scriptAgentCampaignMode}
+                      onChange={(event) => setScriptAgentCampaignMode(event.target.value as ScriptAgentCampaignMode)}
+                      className="w-full rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-xs text-slate-800 outline-none transition focus:border-rose-400 focus:ring-2 focus:ring-rose-200"
+                    >
+                      <option value="standard">Standard educational</option>
+                      <option value="widget_reaction_ugc">Widget reaction UGC</option>
+                    </select>
+                  </div>
+
                   <div>
                     <p className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-slate-500">Video Type</p>
                     <select
                       value={scriptAgentVideoType}
                       onChange={(event) => setScriptAgentVideoType(event.target.value as ScriptAgentVideoType)}
+                      disabled={scriptAgentCampaignMode === "widget_reaction_ugc"}
                       className="w-full rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-xs text-slate-800 outline-none transition focus:border-rose-400 focus:ring-2 focus:ring-rose-200"
                     >
                       <option value="auto">Auto select</option>
@@ -2294,13 +2318,22 @@ export function VideoAgentView({ collectionId }: { collectionId: string }) {
                       className="w-full rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-xs text-slate-800 outline-none transition focus:border-rose-400 focus:ring-2 focus:ring-rose-200"
                     >
                       <option value="auto">Auto/default character</option>
-                      {ugcCharacters.map((character) => (
+                      {ugcCharacters
+                        .filter((character) => {
+                          const type = character.characterType || "ugc";
+                          if (scriptAgentCampaignMode === "widget_reaction_ugc") return type === "ugc";
+                          if (scriptAgentVideoType === "ai_animation") return type === "animated";
+                          if (scriptAgentVideoType === "ugc") return type === "ugc";
+                          if (scriptAgentVideoType === "hybrid") return type === "ugc";
+                          return true;
+                        })
+                        .map((character) => (
                         <option key={character.id} value={character.id}>
                           {character.characterName}
                           {character.characterType ? ` (${character.characterType})` : ""}
                           {character.isDefault ? " (Default)" : ""}
                         </option>
-                      ))}
+                        ))}
                     </select>
                   </div>
                 </div>
@@ -2329,6 +2362,9 @@ export function VideoAgentView({ collectionId }: { collectionId: string }) {
                   <div>
                     <p className="text-xs font-semibold text-violet-800">{scriptAgentPlan.title}</p>
                     <div className="mt-1 flex flex-wrap items-center gap-1.5">
+                      {scriptAgentPlan.campaignMode ? (
+                        <Badge variant="default">{scriptAgentPlan.campaignMode.replace(/_/g, " ")}</Badge>
+                      ) : null}
                       <Badge variant="default">{scriptAgentPlan.topicCategory.replace(/_/g, " ")}</Badge>
                       <Badge variant="default">{scriptAgentPlan.selectedVideoType.replace(/_/g, " ")}</Badge>
                       <Badge variant="default">{`${scriptAgentPlan.targetDurationSeconds}s`}</Badge>

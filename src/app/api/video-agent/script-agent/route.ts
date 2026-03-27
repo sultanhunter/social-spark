@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { supabase } from "@/lib/supabase";
 import {
   buildVideoScriptIdeationPlan,
+  type ScriptAgentCampaignMode,
   type ScriptAgentVideoType,
   type UGCCharacterProfile,
 } from "@/lib/video-agent";
@@ -88,6 +89,15 @@ function normalizeVideoType(value: unknown): ScriptAgentVideoType | "auto" {
   return "auto";
 }
 
+function normalizeCampaignMode(value: unknown): ScriptAgentCampaignMode {
+  if (typeof value !== "string") return "standard";
+  const cleaned = value.trim().toLowerCase();
+  if (cleaned === "widget_reaction_ugc" || cleaned === "widget-reaction-ugc") {
+    return "widget_reaction_ugc";
+  }
+  return "standard";
+}
+
 function mapScriptAgentVideoTypeToFormatType(videoType: ScriptAgentVideoType): "ugc" | "ai_video" | "hybrid" | "editorial" {
   if (videoType === "ugc") return "ugc";
   if (videoType === "ai_animation") return "ai_video";
@@ -148,6 +158,7 @@ export async function POST(request: NextRequest) {
     const collectionId = asText(body.collectionId);
     const topicBrief = asText(body.topicBrief);
     const preferredVideoType = normalizeVideoType(body.preferredVideoType);
+    const campaignMode = normalizeCampaignMode(body.campaignMode);
     const selectedCharacterId = asText(body.characterId);
     const targetDurationSeconds = asFiniteNumber(body.targetDurationSeconds);
     const reasoningModel = isReasoningModel(body.reasoningModel)
@@ -227,14 +238,15 @@ export async function POST(request: NextRequest) {
       topicBrief,
       targetDurationSeconds: targetDurationSeconds ?? 75,
       preferredVideoType,
+      campaignMode,
       ugcCharacter,
       reasoningModel,
     });
 
-    const formatSignature = `script_agent_${plan.topicCategory}_${plan.selectedVideoType}`;
+    const formatSignature = `script_agent_${plan.campaignMode}_${plan.topicCategory}_${plan.selectedVideoType}`;
     const generatedSourceUrl = `script-agent://${collectionId}/${Date.now()}-${randomUUID().slice(0, 8)}`;
     const mappedFormatType = mapScriptAgentVideoTypeToFormatType(plan.selectedVideoType);
-    const formatName = `Script Agent - ${toTitleCase(plan.topicCategory)} - ${toTitleCase(plan.selectedVideoType)}`;
+    const formatName = `Script Agent - ${toTitleCase(plan.campaignMode)} - ${toTitleCase(plan.topicCategory)} - ${toTitleCase(plan.selectedVideoType)}`;
 
     let formatRow: VideoFormatRow | null = null;
 
@@ -360,6 +372,7 @@ export async function POST(request: NextRequest) {
       analyzedAt: new Date().toISOString(),
       scriptAgent: {
         topicBrief,
+        campaignMode: plan.campaignMode,
         topicCategory: plan.topicCategory,
         selectedVideoType: plan.selectedVideoType,
       },
@@ -415,6 +428,7 @@ export async function POST(request: NextRequest) {
       meta: {
         topicBrief,
         preferredVideoType,
+        campaignMode,
         targetDurationSeconds: targetDurationSeconds ?? 75,
         reasoningModel,
         ugcCharacterId: ugcCharacter?.id || null,

@@ -180,10 +180,12 @@ export interface UGCCharacterProfile {
 
 export type ScriptAgentVideoType = "ugc" | "ai_animation" | "faceless_broll" | "hybrid";
 export type ScriptAgentTopicCategory = "period_pregnancy" | "islamic_period_pregnancy";
+export type ScriptAgentCampaignMode = "standard" | "widget_reaction_ugc";
 
 export interface VideoScriptIdeationPlan {
   title: string;
   objective: string;
+  campaignMode: ScriptAgentCampaignMode;
   topicCategory: ScriptAgentTopicCategory;
   selectedVideoType: ScriptAgentVideoType;
   videoTypeReason: string;
@@ -371,6 +373,72 @@ function enforceSegmentBoundaryTransitions(segments: MotionControlSegment[]): Mo
       script: {
         ...segment.script,
         shots,
+      },
+    };
+  });
+}
+
+function enforceWidgetReactionSeriesPattern(segments: MotionControlSegment[], appName: string): MotionControlSegment[] {
+  const overlayTemplates = [
+    '"I did not know an app like this existed."',
+    '"I just found the perfect widget for tracking cycles."',
+    '"Finally clear worship status for each cycle phase."',
+  ];
+
+  return segments.map((segment, index, all) => {
+    const shots = [...(segment.script?.shots || [])];
+    if (shots.length === 0) {
+      shots.push({
+        shotId: "shot1",
+        visual: "UGC talking-head reaction in a real home setting, natural daylight.",
+        narration: "I wish I had this earlier.",
+        onScreenText: overlayTemplates[index % overlayTemplates.length],
+        editNote: "Strong surprised-to-happy expression.",
+      });
+    }
+
+    const firstShot = shots[0];
+    shots[0] = {
+      ...firstShot,
+      visual: cleanText(`${firstShot.visual} Real UGC reaction beat: initial surprise, then happy relief.`),
+      onScreenText: cleanText(firstShot.onScreenText) || overlayTemplates[index % overlayTemplates.length],
+      editNote: cleanText(
+        `${firstShot.editNote || ""} Keep this as a genuine reaction moment, not salesy delivery.`
+      ),
+    };
+
+    const overlayShotIndex = Math.min(1, shots.length - 1);
+    const overlayShot = shots[overlayShotIndex];
+    shots[overlayShotIndex] = {
+      ...overlayShot,
+      onScreenText:
+        cleanText(overlayShot.onScreenText) ||
+        "Widget shows current cycle phase and worship status (prayer, fasting, Quran: permissible or paused).",
+      editNote: cleanText(
+        `${overlayShot.editNote || ""} Emphasize lock-screen/home-screen widget utility in text overlay.`
+      ),
+    };
+
+    const isLastSegment = index === all.length - 1;
+    const lastShotIndex = shots.length - 1;
+    const lastShot = shots[lastShotIndex];
+    shots[lastShotIndex] = {
+      ...lastShot,
+      narration: closeOpenEndedLine(lastShot.narration),
+      onScreenText: closeOpenEndedLine(lastShot.onScreenText),
+      editNote: cleanText(
+        `${lastShot.editNote || ""} End with 0.5s visual hold. In final edit, append full-screen ${appName} screen recording showing home and lock-screen widgets.`
+      ),
+    };
+
+    return {
+      ...segment,
+      script: {
+        hook: segment.script?.hook || "",
+        shots,
+        cta: isLastSegment
+          ? closeOpenEndedLine(segment.script?.cta || "Save this and try the widget setup today.")
+          : closeOpenEndedLine(segment.script?.cta || ""),
       },
     };
   });
@@ -884,6 +952,15 @@ function sanitizeScriptAgentTopicCategory(value: unknown): ScriptAgentTopicCateg
     return "islamic_period_pregnancy";
   }
   return "period_pregnancy";
+}
+
+function sanitizeScriptAgentCampaignMode(value: unknown): ScriptAgentCampaignMode {
+  if (typeof value !== "string") return "standard";
+  const cleaned = value.trim().toLowerCase();
+  if (cleaned === "widget_reaction_ugc" || cleaned === "widget-reaction-ugc") {
+    return "widget_reaction_ugc";
+  }
+  return "standard";
 }
 
 function parseJsonFromModel(text: string): unknown {
@@ -1964,6 +2041,7 @@ interface BuildVideoScriptIdeationArgs {
   topicBrief: string;
   targetDurationSeconds?: number;
   preferredVideoType?: ScriptAgentVideoType | "auto";
+  campaignMode?: ScriptAgentCampaignMode;
   ugcCharacter?: UGCCharacterProfile | null;
   reasoningModel?: ReasoningModel;
 }
@@ -1974,6 +2052,7 @@ export async function buildVideoScriptIdeationPlan({
   topicBrief,
   targetDurationSeconds = 75,
   preferredVideoType = "auto",
+  campaignMode = "standard",
   ugcCharacter,
   reasoningModel = DEFAULT_REASONING_MODEL,
 }: BuildVideoScriptIdeationArgs): Promise<VideoScriptIdeationPlan> {
@@ -1982,6 +2061,26 @@ export async function buildVideoScriptIdeationPlan({
 
   const safeDurationSeconds = clamp(Math.round(targetDurationSeconds), 30, 180);
   const minBeatCount = Math.max(8, Math.ceil(safeDurationSeconds / 4));
+  const resolvedCampaignMode = sanitizeScriptAgentCampaignMode(campaignMode);
+  const forcedVideoType: ScriptAgentVideoType | null =
+    resolvedCampaignMode === "widget_reaction_ugc" ? "ugc" : null;
+  const preferredVideoTypeForPrompt = forcedVideoType || preferredVideoType;
+
+  const campaignRulesBlock = resolvedCampaignMode === "widget_reaction_ugc"
+    ? `
+CAMPAIGN MODE: widget_reaction_ugc
+- Build reaction-driven UGC videos for Muslim women app widgets.
+- Character should show genuine surprise-to-happy reaction.
+- Focus on text overlays about app features, lock-screen widgets, and home-screen widgets.
+- Include overlay themes like:
+  * "I did not know an app like this existed."
+  * "I just found the perfect widget for tracking cycles."
+  * "Always confused about whether prayer is permissible in each phase?"
+- Ensure script clearly communicates: widget shows current cycle phase plus worship status (prayer, fasting, Quran: permissible or paused).
+- Reserve final handoff for external full-screen app screen recording after generated segment (recording added in edit).
+- Keep this mode strictly UGC (not animation).
+`
+    : "";
 
   const prompt = `You are a senior short-form video script strategist.
 
@@ -1994,8 +2093,9 @@ APP CONTEXT:
 
 USER INPUT:
 - Topic brief: ${topicBrief}
-- Preferred video type: ${preferredVideoType}
+- Preferred video type: ${preferredVideoTypeForPrompt}
 - Target duration seconds: ${safeDurationSeconds}
+${campaignRulesBlock}
 
 AVAILABLE VIDEO TYPES:
 - ugc (creator/talking-head style)
@@ -2177,9 +2277,10 @@ Return strict JSON only:
   const selectedVideoType = sanitizeScriptAgentVideoType(row.selectedVideoType);
   const segmentSource = modelSegments.length > 0 ? modelSegments : fallbackSegments;
   const resolvedVideoType =
-    preferredVideoType && preferredVideoType !== "auto"
+    forcedVideoType ||
+    (preferredVideoType && preferredVideoType !== "auto"
       ? preferredVideoType
-      : selectedVideoType;
+      : selectedVideoType);
 
   const resolvedSegments = segmentSource.map((segment, index) => {
     const fallbackSegment = fallbackSegments[index];
@@ -2242,6 +2343,10 @@ Return strict JSON only:
     };
   });
   const transitionReadySegments = enforceSegmentBoundaryTransitions(resolvedSegments);
+  const campaignAdjustedSegments =
+    resolvedCampaignMode === "widget_reaction_ugc"
+      ? enforceWidgetReactionSeriesPattern(transitionReadySegments, appName)
+      : transitionReadySegments;
   const scriptAgentStyleHint =
     resolvedVideoType === "ugc"
       ? "ugc creator-style live-action"
@@ -2250,7 +2355,7 @@ Return strict JSON only:
         : resolvedVideoType === "faceless_broll"
           ? "faceless b-roll educational live-action"
           : "hybrid social explainer";
-  const veoReadySegments = transitionReadySegments.map((segment, index, all) => ({
+  const veoReadySegments = campaignAdjustedSegments.map((segment, index, all) => ({
     ...segment,
     veoPrompt: ensureVeoPromptQuality(
       segment.veoPrompt || "",
@@ -2271,6 +2376,7 @@ Return strict JSON only:
       row.objective,
       "Deliver practical, trustworthy education with a native app-support hook."
     ),
+    campaignMode: resolvedCampaignMode,
     topicCategory: sanitizeScriptAgentTopicCategory(row.topicCategory),
     selectedVideoType: resolvedVideoType,
     videoTypeReason: sanitizeString(
