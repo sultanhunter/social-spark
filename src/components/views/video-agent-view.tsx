@@ -1814,10 +1814,6 @@ export function VideoAgentView({ collectionId }: { collectionId: string }) {
 
   const handleGenerateScriptAgentPlan = useCallback(async () => {
     const topicBrief = scriptAgentTopicBrief.trim();
-    if (!topicBrief) {
-      setScriptAgentError("Add a topic brief first.");
-      return;
-    }
 
     setIsGeneratingScriptAgentPlan(true);
     setScriptAgentError("");
@@ -2255,11 +2251,11 @@ export function VideoAgentView({ collectionId }: { collectionId: string }) {
             <div className="max-h-[74vh] space-y-3 overflow-y-auto px-6 pb-6 pt-4">
               <div className="space-y-2 rounded-lg border border-slate-200 bg-slate-50 p-3">
                 <div>
-                  <p className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-slate-500">Topic Brief</p>
+                  <p className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-slate-500">Topic Brief (optional)</p>
                   <textarea
                     value={scriptAgentTopicBrief}
                     onChange={(event) => setScriptAgentTopicBrief(event.target.value)}
-                    placeholder="Example: Practical guide for irregular periods after childbirth, with faith-sensitive worship tips and one subtle app support moment."
+                    placeholder="Optional. Example: Practical guide for irregular periods after childbirth, with faith-sensitive worship tips and one subtle app support moment. If left empty, AI will choose a topic."
                     rows={4}
                     className="w-full rounded-lg border border-slate-300 bg-white px-2.5 py-2 text-xs text-slate-800 outline-none transition focus:border-rose-400 focus:ring-2 focus:ring-rose-200"
                   />

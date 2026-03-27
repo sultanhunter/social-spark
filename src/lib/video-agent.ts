@@ -2038,7 +2038,7 @@ ${shouldGenerateShotGroups ? `  "motionControlSegments": [
 interface BuildVideoScriptIdeationArgs {
   appName: string;
   appContext: string;
-  topicBrief: string;
+  topicBrief?: string;
   targetDurationSeconds?: number;
   preferredVideoType?: ScriptAgentVideoType | "auto";
   campaignMode?: ScriptAgentCampaignMode;
@@ -2049,7 +2049,7 @@ interface BuildVideoScriptIdeationArgs {
 export async function buildVideoScriptIdeationPlan({
   appName,
   appContext,
-  topicBrief,
+  topicBrief = "",
   targetDurationSeconds = 75,
   preferredVideoType = "auto",
   campaignMode = "standard",
@@ -2061,6 +2061,8 @@ export async function buildVideoScriptIdeationPlan({
 
   const safeDurationSeconds = clamp(Math.round(targetDurationSeconds), 30, 180);
   const minBeatCount = Math.max(8, Math.ceil(safeDurationSeconds / 4));
+  const normalizedTopicBrief = cleanText(topicBrief);
+  const hasTopicBrief = normalizedTopicBrief.length > 0;
   const resolvedCampaignMode = sanitizeScriptAgentCampaignMode(campaignMode);
   const forcedVideoType: ScriptAgentVideoType | null =
     resolvedCampaignMode === "widget_reaction_ugc" ? "ugc" : null;
@@ -2082,6 +2084,16 @@ CAMPAIGN MODE: widget_reaction_ugc
 `
     : "";
 
+  const autoTopicBlock = hasTopicBrief
+    ? ""
+    : `
+TOPIC SELECTION MODE:
+- No topic brief is provided.
+- You MUST choose one concrete high-potential informational topic yourself.
+- Topic should be relevant for Muslim women and centered on period/pregnancy or islamic period/pregnancy.
+- Keep the selected topic explicit in title, hook, and objective.
+`;
+
   const prompt = `You are a senior short-form video script strategist.
 
 TASK:
@@ -2092,10 +2104,11 @@ APP CONTEXT:
 - App Context: ${appContext || "Period/pregnancy tracking app for Muslim women with worship support."}
 
 USER INPUT:
-- Topic brief: ${topicBrief}
+- Topic brief: ${hasTopicBrief ? normalizedTopicBrief : "(not provided - choose topic automatically)"}
 - Preferred video type: ${preferredVideoTypeForPrompt}
 - Target duration seconds: ${safeDurationSeconds}
 ${campaignRulesBlock}
+${autoTopicBlock}
 
 AVAILABLE VIDEO TYPES:
 - ugc (creator/talking-head style)
@@ -2212,7 +2225,12 @@ Return strict JSON only:
 
   const mentionState = { count: 0 };
   const hook = limitAppNameMentions(
-    sanitizeString(scriptRow.hook, `A practical myth-busting hook about ${topicBrief}.`),
+    sanitizeString(
+      scriptRow.hook,
+      hasTopicBrief
+        ? `A practical myth-busting hook about ${normalizedTopicBrief}.`
+        : "A practical high-retention hook about a key cycle or pregnancy challenge Muslim women face."
+    ),
     appName,
     mentionState
   );

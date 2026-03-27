@@ -169,10 +169,6 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "collectionId is required." }, { status: 400 });
     }
 
-    if (!topicBrief) {
-      return NextResponse.json({ error: "topicBrief is required." }, { status: 400 });
-    }
-
     const collection = await fetchCollectionRow(collectionId);
     if (!collection) {
       return NextResponse.json({ error: "Collection not found." }, { status: 404 });
@@ -333,7 +329,7 @@ export async function POST(request: NextRequest) {
         title: plan.title,
         description: plan.objective,
         thumbnailUrl: null,
-        userNotes: topicBrief,
+        userNotes: topicBrief || null,
         transcriptSummary: null,
         transcriptText: null,
         sourceDurationSeconds: plan.targetDurationSeconds,
@@ -388,7 +384,7 @@ export async function POST(request: NextRequest) {
         title: plan.title,
         description: plan.objective,
         thumbnail_url: null,
-        user_notes: topicBrief,
+        user_notes: topicBrief || null,
         analysis_confidence: 0.84,
         analysis_payload: analysisPayload,
       })
