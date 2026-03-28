@@ -2,8 +2,8 @@ import { randomUUID } from "node:crypto";
 import { NextRequest, NextResponse } from "next/server";
 import { supabase } from "@/lib/supabase";
 import {
-  buildVideoScriptIdeationPlan,
-  type ScriptAgentCampaignMode,
+  buildCycleDayVideoScriptPlan,
+  type CycleDayCalendarDay,
   type ScriptAgentVideoType,
   type UGCCharacterProfile,
 } from "@/lib/video-agent";
@@ -16,6 +16,15 @@ type CollectionRow = {
   app_name: string | null;
   app_description: string | null;
   app_context?: string | null;
+};
+
+type CycleDayPlanRow = {
+  id: string;
+  collection_id: string;
+  plan_number: number;
+  cycle_start_date: string;
+  cycle_length_days: number;
+  plan_payload: Record<string, unknown> | null;
 };
 
 type VideoUgcCharacterRow = {
@@ -33,24 +42,7 @@ type VideoUgcCharacterRow = {
 
 type VideoFormatRow = {
   id: string;
-  collection_id: string;
-  format_name: string;
-  format_type: string;
-  format_signature: string;
-  summary: string;
-  why_it_works: string[] | null;
-  hook_patterns: string[] | null;
-  shot_pattern: string[] | null;
-  editing_style: string[] | null;
-  script_scaffold: string | null;
-  higgsfield_prompt_template: string | null;
-  recreation_checklist: string[] | null;
-  duration_guidance: string | null;
-  confidence: number | null;
   source_count: number | null;
-  latest_source_url: string | null;
-  created_at: string;
-  updated_at: string;
 };
 
 function asText(value: unknown): string {
@@ -60,6 +52,10 @@ function asText(value: unknown): string {
 function asFiniteNumber(value: unknown): number | null {
   if (typeof value !== "number" || !Number.isFinite(value)) return null;
   return value;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
 }
 
 function isMissingTableError(error: unknown): boolean {
@@ -77,33 +73,23 @@ function isMissingColumnError(error: unknown, columnName: string): boolean {
   return combined.includes(columnName.toLowerCase()) && combined.includes("column");
 }
 
-function normalizeVideoType(value: unknown): ScriptAgentVideoType | "auto" {
-  if (typeof value !== "string") return "auto";
-  const cleaned = value.trim().toLowerCase();
-  if (cleaned === "ugc") return "ugc";
-  if (cleaned === "ai_animation" || cleaned === "animation" || cleaned === "ai-animation") return "ai_animation";
-  if (cleaned === "faceless_broll" || cleaned === "faceless" || cleaned === "broll" || cleaned === "b-roll") {
-    return "faceless_broll";
+function sanitizeBoolean(value: unknown, fallback = false): boolean {
+  if (typeof value === "boolean") return value;
+  if (typeof value === "string") {
+    const cleaned = value.trim().toLowerCase();
+    if (["true", "1", "yes", "y"].includes(cleaned)) return true;
+    if (["false", "0", "no", "n"].includes(cleaned)) return false;
   }
-  if (cleaned === "hybrid") return "hybrid";
-  return "auto";
+  return fallback;
 }
 
-function normalizeCampaignMode(value: unknown): ScriptAgentCampaignMode {
-  if (typeof value !== "string") return "standard";
-  const cleaned = value.trim().toLowerCase();
-  if (cleaned === "widget_reaction_ugc" || cleaned === "widget-reaction-ugc") {
-    return "widget_reaction_ugc";
+function sanitizeInteger(value: unknown, fallback: number): number {
+  if (typeof value === "number" && Number.isFinite(value)) return Math.round(value);
+  if (typeof value === "string") {
+    const parsed = Number(value.trim());
+    if (Number.isFinite(parsed)) return Math.round(parsed);
   }
-  if (
-    cleaned === "daily_ugc_quran_journey" ||
-    cleaned === "daily-ugc-quran-journey" ||
-    cleaned === "daily_ugc_quran" ||
-    cleaned === "daily-ugc-quran"
-  ) {
-    return "daily_ugc_quran_journey";
-  }
-  return "standard";
+  return fallback;
 }
 
 function mapScriptAgentVideoTypeToFormatType(videoType: ScriptAgentVideoType): "ugc" | "ai_video" | "hybrid" | "editorial" {
@@ -118,6 +104,66 @@ function toTitleCase(value: string): string {
     .split("_")
     .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
     .join(" ");
+}
+
+function toIsoDate(value: unknown, fallback: string): string {
+  if (typeof value === "string") {
+    const cleaned = value.trim();
+    if (/^\d{4}-\d{2}-\d{2}$/.test(cleaned)) return cleaned;
+    const parsed = new Date(cleaned);
+    if (!Number.isNaN(parsed.getTime())) {
+      const year = parsed.getUTCFullYear();
+      const month = `${parsed.getUTCMonth() + 1}`.padStart(2, "0");
+      const day = `${parsed.getUTCDate()}`.padStart(2, "0");
+      return `${year}-${month}-${day}`;
+    }
+  }
+  return fallback;
+}
+
+function toCycleDayCalendarDay(dayRow: unknown, dayNumber: number, fallbackDate: string): CycleDayCalendarDay {
+  const row = isRecord(dayRow) ? dayRow : {};
+  const quran = isRecord(row.quran) ? row.quran : {};
+  const dailyStory = isRecord(row.dailyStory) ? row.dailyStory : {};
+  const plannedActions = Array.isArray(row.plannedActions)
+    ? row.plannedActions.filter((item): item is string => typeof item === "string")
+    : [];
+  const appHooks = Array.isArray(row.appHooks)
+    ? row.appHooks.filter((item): item is string => typeof item === "string")
+    : [];
+
+  return {
+    dayNumber: Math.max(1, sanitizeInteger(row.dayNumber, dayNumber)),
+    calendarDate: toIsoDate(row.calendarDate, fallbackDate),
+    cycleDay: Math.max(1, sanitizeInteger(row.cycleDay, dayNumber)),
+    isPeriodDay: sanitizeBoolean(row.isPeriodDay, dayNumber <= 6),
+    isPurityAchieved: sanitizeBoolean(row.isPurityAchieved, dayNumber >= 7),
+    isIstihada: sanitizeBoolean(row.isIstihada, false),
+    worshipStatus: asText(row.worshipStatus) || "Prayer and Quran status available in app.",
+    quran: {
+      surahName: asText(quran.surahName) || "Al-Baqarah",
+      verseStart: Math.max(1, sanitizeInteger(quran.verseStart, 1)),
+      verseEnd: Math.max(1, sanitizeInteger(quran.verseEnd, 5)),
+      reference: asText(quran.reference) || "Surah Al-Baqarah 1-5",
+      revelationContext: asText(quran.revelationContext) || "Mention revelation context and setting.",
+      relatedHadith: asText(quran.relatedHadith) || "Include one authentic hadith connection.",
+      scholarlyInterpretation: asText(quran.scholarlyInterpretation) || "Include one concise trusted tafsir interpretation.",
+      keyTakeaway: asText(quran.keyTakeaway) || "One practical takeaway for daily practice.",
+    },
+    dailyStory: {
+      morning: asText(dailyStory.morning) || "Morning routine with app check-in.",
+      quranJourney: asText(dailyStory.quranJourney) || "Quran reading progress update.",
+      chores: asText(dailyStory.chores) || "Routine chores and responsibilities.",
+      lunch: asText(dailyStory.lunch) || "Lunch and hydration update.",
+      salah: asText(dailyStory.salah) || "Salah check-ins according to app status.",
+      evening: asText(dailyStory.evening) || "Evening reflection and prep for tomorrow.",
+    },
+    plannedActions: plannedActions.length > 0 ? plannedActions : ["Morning app check", "Quran reading", "Daily chores", "Evening reflection"],
+    appHooks: appHooks.length > 0 ? appHooks : [
+      "Show app status before prayer decision moments.",
+      "Show app Quran tracker before reading segment.",
+    ],
+  };
 }
 
 async function fetchCollectionRow(collectionId: string): Promise<CollectionRow | null> {
@@ -164,10 +210,9 @@ export async function POST(request: NextRequest) {
   try {
     const body = (await request.json()) as Record<string, unknown>;
     const collectionId = asText(body.collectionId);
-    const topicBrief = asText(body.topicBrief);
-    const preferredVideoType = normalizeVideoType(body.preferredVideoType);
-    const campaignMode = normalizeCampaignMode(body.campaignMode);
+    const selectedCyclePlanId = asText(body.cyclePlanId);
     const selectedCharacterId = asText(body.characterId);
+    const cycleDayNumberRaw = asFiniteNumber(body.cycleDayNumber);
     const targetDurationSeconds = asFiniteNumber(body.targetDurationSeconds);
     const reasoningModel = isReasoningModel(body.reasoningModel)
       ? body.reasoningModel
@@ -177,91 +222,135 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "collectionId is required." }, { status: 400 });
     }
 
+    const cycleDayNumber = cycleDayNumberRaw ? Math.max(1, Math.round(cycleDayNumberRaw)) : null;
+    if (!cycleDayNumber) {
+      return NextResponse.json({ error: "cycleDayNumber is required." }, { status: 400 });
+    }
+
     const collection = await fetchCollectionRow(collectionId);
     if (!collection) {
       return NextResponse.json({ error: "Collection not found." }, { status: 404 });
     }
 
+    const cyclePlanQuery = selectedCyclePlanId
+      ? supabase
+        .from("video_cycle_day_plans")
+        .select("id, collection_id, plan_number, cycle_start_date, cycle_length_days, plan_payload")
+        .eq("collection_id", collectionId)
+        .eq("id", selectedCyclePlanId)
+        .maybeSingle()
+      : supabase
+        .from("video_cycle_day_plans")
+        .select("id, collection_id, plan_number, cycle_start_date, cycle_length_days, plan_payload")
+        .eq("collection_id", collectionId)
+        .order("plan_number", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+    const cyclePlanResult = await cyclePlanQuery;
+    if (cyclePlanResult.error) {
+      if (isMissingTableError(cyclePlanResult.error)) {
+        return NextResponse.json(
+          { error: "Table video_cycle_day_plans is missing. Generate and migrate cycle plans first." },
+          { status: 500 }
+        );
+      }
+      throw cyclePlanResult.error;
+    }
+
+    if (!cyclePlanResult.data) {
+      return NextResponse.json({ error: "Cycle-day plan not found for this collection." }, { status: 404 });
+    }
+
+    const cyclePlan = cyclePlanResult.data as unknown as CycleDayPlanRow;
+    const payload = isRecord(cyclePlan.plan_payload) ? cyclePlan.plan_payload : {};
+    const nestedPlan = isRecord(payload.plan) ? payload.plan : payload;
+    const days = Array.isArray(nestedPlan.days) ? nestedPlan.days : [];
+    const dayRow = days.find((item) => {
+      if (!isRecord(item)) return false;
+      const day = sanitizeInteger(item.dayNumber, 0);
+      return day === cycleDayNumber;
+    });
+
+    if (!dayRow) {
+      return NextResponse.json(
+        { error: `Cycle day ${cycleDayNumber} was not found in plan ${cyclePlan.plan_number}.` },
+        { status: 404 }
+      );
+    }
+
+    const fallbackDate = cyclePlan.cycle_start_date || new Date().toISOString().slice(0, 10);
+    const cycleDayData = toCycleDayCalendarDay(dayRow, cycleDayNumber, fallbackDate);
+
     let ugcCharacter: UGCCharacterProfile | null = null;
-    const campaignNeedsUgcCharacter =
-      campaignMode === "widget_reaction_ugc" || campaignMode === "daily_ugc_quran_journey";
-    const shouldResolveCharacter =
-      Boolean(selectedCharacterId) ||
-      preferredVideoType === "ugc" ||
-      preferredVideoType === "hybrid" ||
-      campaignNeedsUgcCharacter;
+    const fullSelect =
+      "id, character_name, persona_summary, visual_style, wardrobe_notes, voice_tone, prompt_template, reference_image_url, image_model, is_default";
 
-    if (shouldResolveCharacter) {
-      const fullSelect =
-        "id, character_name, persona_summary, visual_style, wardrobe_notes, voice_tone, prompt_template, reference_image_url, image_model, is_default";
+    let characterResult = selectedCharacterId
+      ? await supabase
+        .from("video_ugc_characters")
+        .select(fullSelect)
+        .eq("collection_id", collectionId)
+        .eq("id", selectedCharacterId)
+        .maybeSingle()
+      : await supabase
+        .from("video_ugc_characters")
+        .select(fullSelect)
+        .eq("collection_id", collectionId)
+        .eq("is_default", true)
+        .maybeSingle();
 
-      let characterResult = selectedCharacterId
+    if (characterResult.error && isMissingColumnError(characterResult.error, "is_default")) {
+      characterResult = selectedCharacterId
         ? await supabase
           .from("video_ugc_characters")
-          .select(fullSelect)
+          .select("id, character_name, persona_summary, visual_style, wardrobe_notes, voice_tone, prompt_template, reference_image_url, image_model")
           .eq("collection_id", collectionId)
           .eq("id", selectedCharacterId)
           .maybeSingle()
         : await supabase
           .from("video_ugc_characters")
-          .select(fullSelect)
+          .select("id, character_name, persona_summary, visual_style, wardrobe_notes, voice_tone, prompt_template, reference_image_url, image_model")
           .eq("collection_id", collectionId)
-          .eq("is_default", true)
+          .order("created_at", { ascending: true })
+          .limit(1)
           .maybeSingle();
+    }
 
-      if (characterResult.error && isMissingColumnError(characterResult.error, "is_default")) {
-        characterResult = selectedCharacterId
-          ? await supabase
-            .from("video_ugc_characters")
-            .select("id, character_name, persona_summary, visual_style, wardrobe_notes, voice_tone, prompt_template, reference_image_url, image_model")
-            .eq("collection_id", collectionId)
-            .eq("id", selectedCharacterId)
-            .maybeSingle()
-          : await supabase
-            .from("video_ugc_characters")
-            .select("id, character_name, persona_summary, visual_style, wardrobe_notes, voice_tone, prompt_template, reference_image_url, image_model")
-            .eq("collection_id", collectionId)
-            .order("created_at", { ascending: true })
-            .limit(1)
-            .maybeSingle();
-      }
+    if (selectedCharacterId && !characterResult.data) {
+      return NextResponse.json(
+        { error: "Selected character not found for this collection." },
+        { status: 404 }
+      );
+    }
 
-      if (selectedCharacterId && !characterResult.data) {
-        return NextResponse.json(
-          { error: "Selected character not found for this collection." },
-          { status: 404 }
-        );
-      }
-
-      if (characterResult.data) {
-        ugcCharacter = toUgcCharacterProfile(characterResult.data as unknown as VideoUgcCharacterRow);
-      }
+    if (characterResult.data) {
+      ugcCharacter = toUgcCharacterProfile(characterResult.data as unknown as VideoUgcCharacterRow);
     }
 
     const appName = (collection.app_name || "Muslimah Pro").trim() || "Muslimah Pro";
     const appContext = (collection.app_description || collection.app_context || "").trim();
 
-    const plan = await buildVideoScriptIdeationPlan({
+    const plan = await buildCycleDayVideoScriptPlan({
       appName,
       appContext,
-      topicBrief,
-      targetDurationSeconds: targetDurationSeconds ?? 75,
-      preferredVideoType,
-      campaignMode,
+      cyclePlanNumber: cyclePlan.plan_number,
+      cycleDayData,
+      targetDurationSeconds,
       ugcCharacter,
       reasoningModel,
     });
 
-    const formatSignature = `script_agent_${plan.campaignMode}_${plan.topicCategory}_${plan.selectedVideoType}`;
-    const generatedSourceUrl = `script-agent://${collectionId}/${Date.now()}-${randomUUID().slice(0, 8)}`;
+    const formatSignature = `cycle_day_agent_plan_${cyclePlan.plan_number}_day_${cycleDayData.dayNumber}_${plan.selectedVideoType}`;
+    const generatedSourceUrl = `cycle-day-agent://${collectionId}/${Date.now()}-${randomUUID().slice(0, 8)}`;
     const mappedFormatType = mapScriptAgentVideoTypeToFormatType(plan.selectedVideoType);
-    const formatName = `Script Agent - ${toTitleCase(plan.campaignMode)} - ${toTitleCase(plan.topicCategory)} - ${toTitleCase(plan.selectedVideoType)}`;
+    const formatName = `Cycle Day Agent - Plan ${cyclePlan.plan_number} Day ${cycleDayData.dayNumber} - ${toTitleCase(plan.selectedVideoType)}`;
 
     let formatRow: VideoFormatRow | null = null;
 
     const existingFormat = await supabase
       .from("video_formats")
-      .select("*")
+      .select("id, source_count")
       .eq("collection_id", collectionId)
       .eq("format_signature", formatSignature)
       .maybeSingle();
@@ -273,6 +362,7 @@ export async function POST(request: NextRequest) {
     if (existingFormat.data) {
       const row = existingFormat.data as unknown as VideoFormatRow;
       const nextSourceCount = (typeof row.source_count === "number" ? row.source_count : 0) + 1;
+
       const updatedFormat = await supabase
         .from("video_formats")
         .update({
@@ -282,24 +372,25 @@ export async function POST(request: NextRequest) {
           why_it_works: [plan.videoTypeReason, plan.appHookStrategy],
           hook_patterns: [plan.script.hook],
           shot_pattern: plan.motionControlSegments.slice(0, 8).map((segment) => segment.startFramePrompt),
-          editing_style: [plan.selectedVideoType.replace(/_/g, " "), "script agent generated"],
+          editing_style: [plan.selectedVideoType.replace(/_/g, " "), "cycle day agent generated"],
           script_scaffold: plan.script.hook,
           higgsfield_prompt_template: plan.motionControlSegments[0]?.veoPrompt || "",
           recreation_checklist: plan.qaChecklist,
           duration_guidance: `${plan.targetDurationSeconds}s target`,
-          confidence: 0.84,
+          confidence: 0.86,
           source_count: nextSourceCount,
           latest_source_url: generatedSourceUrl,
           updated_at: new Date().toISOString(),
         })
         .eq("id", row.id)
         .eq("collection_id", collectionId)
-        .select("*")
+        .select("id, source_count")
         .single();
 
       if (updatedFormat.error || !updatedFormat.data) {
-        throw updatedFormat.error || new Error("Failed to update script-agent format.");
+        throw updatedFormat.error || new Error("Failed to update cycle-day format.");
       }
+
       formatRow = updatedFormat.data as unknown as VideoFormatRow;
     } else {
       const insertedFormat = await supabase
@@ -313,26 +404,27 @@ export async function POST(request: NextRequest) {
           why_it_works: [plan.videoTypeReason, plan.appHookStrategy],
           hook_patterns: [plan.script.hook],
           shot_pattern: plan.motionControlSegments.slice(0, 8).map((segment) => segment.startFramePrompt),
-          editing_style: [plan.selectedVideoType.replace(/_/g, " "), "script agent generated"],
+          editing_style: [plan.selectedVideoType.replace(/_/g, " "), "cycle day agent generated"],
           script_scaffold: plan.script.hook,
           higgsfield_prompt_template: plan.motionControlSegments[0]?.veoPrompt || "",
           recreation_checklist: plan.qaChecklist,
           duration_guidance: `${plan.targetDurationSeconds}s target`,
-          confidence: 0.84,
+          confidence: 0.86,
           source_count: 1,
           latest_source_url: generatedSourceUrl,
         })
-        .select("*")
+        .select("id, source_count")
         .single();
 
       if (insertedFormat.error || !insertedFormat.data) {
-        throw insertedFormat.error || new Error("Failed to create script-agent format.");
+        throw insertedFormat.error || new Error("Failed to create cycle-day format.");
       }
+
       formatRow = insertedFormat.data as unknown as VideoFormatRow;
     }
 
     if (!formatRow) {
-      throw new Error("Failed to resolve script-agent format row.");
+      throw new Error("Failed to resolve cycle-day format row.");
     }
 
     const analysisPayload = {
@@ -342,7 +434,7 @@ export async function POST(request: NextRequest) {
         title: plan.title,
         description: plan.objective,
         thumbnailUrl: null,
-        userNotes: topicBrief || null,
+        userNotes: `Cycle plan ${cyclePlan.plan_number}, day ${cycleDayData.dayNumber}`,
         transcriptSummary: null,
         transcriptText: null,
         sourceDurationSeconds: plan.targetDurationSeconds,
@@ -367,23 +459,23 @@ export async function POST(request: NextRequest) {
         whyItWorks: [plan.videoTypeReason, plan.appHookStrategy],
         hookPatterns: [plan.script.hook],
         shotPattern: plan.motionControlSegments.slice(0, 8).map((segment) => segment.timecode),
-        editingStyle: [plan.selectedVideoType.replace(/_/g, " "), "script agent generated"],
+        editingStyle: [plan.selectedVideoType.replace(/_/g, " "), "cycle day agent generated"],
         scriptScaffold: plan.script.hook,
         higgsfieldPromptTemplate: plan.motionControlSegments[0]?.veoPrompt || "",
         recreationChecklist: plan.qaChecklist,
         durationGuidance: `${plan.targetDurationSeconds}s target`,
-        confidence: 0.84,
+        confidence: 0.86,
       },
       matchDecision: {
-        reason: "Script-agent generated source",
+        reason: "Cycle-day agent generated source",
       },
       reasoningModel,
       analyzedAt: new Date().toISOString(),
-      scriptAgent: {
-        topicBrief,
-        campaignMode: plan.campaignMode,
-        topicCategory: plan.topicCategory,
-        selectedVideoType: plan.selectedVideoType,
+      cycleDayAgent: {
+        cyclePlanId: cyclePlan.id,
+        cyclePlanNumber: cyclePlan.plan_number,
+        cycleDayNumber: cycleDayData.dayNumber,
+        cycleDay: cycleDayData,
       },
     };
 
@@ -397,15 +489,15 @@ export async function POST(request: NextRequest) {
         title: plan.title,
         description: plan.objective,
         thumbnail_url: null,
-        user_notes: topicBrief || null,
-        analysis_confidence: 0.84,
+        user_notes: `Cycle plan ${cyclePlan.plan_number}, day ${cycleDayData.dayNumber}`,
+        analysis_confidence: 0.86,
         analysis_payload: analysisPayload,
       })
       .select("id")
       .single();
 
     if (insertedVideo.error || !insertedVideo.data) {
-      throw insertedVideo.error || new Error("Failed to create script-agent source video.");
+      throw insertedVideo.error || new Error("Failed to create cycle-day source video.");
     }
 
     const sourceVideoId = (insertedVideo.data as { id: string }).id;
@@ -421,7 +513,12 @@ export async function POST(request: NextRequest) {
           reasoningModel,
           ugcCharacterId: ugcCharacter?.id || null,
           generatedAt: new Date().toISOString(),
-          sourceType: "script_agent",
+          sourceType: "cycle_day_agent",
+          cycleDayAgent: {
+            cyclePlanId: cyclePlan.id,
+            cyclePlanNumber: cyclePlan.plan_number,
+            cycleDayNumber: cycleDayData.dayNumber,
+          },
           plan,
         },
       })
@@ -429,18 +526,15 @@ export async function POST(request: NextRequest) {
       .single();
 
     if (planRecord.error || !planRecord.data) {
-      throw planRecord.error || new Error("Failed to save script-agent plan.");
+      throw planRecord.error || new Error("Failed to save cycle-day script plan.");
     }
 
     return NextResponse.json({
       plan,
-      meta: {
-        topicBrief,
-        preferredVideoType,
-        campaignMode,
-        targetDurationSeconds: targetDurationSeconds ?? 75,
-        reasoningModel,
-        ugcCharacterId: ugcCharacter?.id || null,
+      cycleContext: {
+        cyclePlanId: cyclePlan.id,
+        cyclePlanNumber: cyclePlan.plan_number,
+        cycleDayNumber: cycleDayData.dayNumber,
       },
       saved: {
         formatId: formatRow.id,
@@ -450,7 +544,7 @@ export async function POST(request: NextRequest) {
     });
   } catch (err) {
     return NextResponse.json(
-      { error: err instanceof Error ? err.message : "Failed to generate script-agent plan." },
+      { error: err instanceof Error ? err.message : "Failed to generate cycle-day script plan." },
       { status: 500 }
     );
   }

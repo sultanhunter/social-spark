@@ -146,6 +146,20 @@ CREATE TABLE video_ugc_character_angles (
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
+-- Calendar-based cycle plans for Cycle Day Agent
+CREATE TABLE video_cycle_day_plans (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  collection_id UUID NOT NULL REFERENCES collections(id) ON DELETE CASCADE,
+  plan_number INT NOT NULL,
+  app_name TEXT NOT NULL,
+  cycle_start_date DATE NOT NULL,
+  cycle_length_days INT NOT NULL,
+  plan_payload JSONB DEFAULT '{}'::jsonb,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW(),
+  UNIQUE(collection_id, plan_number)
+);
+
 -- Create indexes for better query performance
 CREATE INDEX idx_saved_posts_collection_id ON saved_posts(collection_id);
 CREATE INDEX idx_recreated_posts_collection_id ON recreated_posts(collection_id);
@@ -158,6 +172,8 @@ CREATE INDEX idx_video_recreation_plans_collection_id ON video_recreation_plans(
 CREATE INDEX idx_video_ugc_characters_collection_id ON video_ugc_characters(collection_id);
 CREATE INDEX idx_video_ugc_character_angles_collection_id ON video_ugc_character_angles(collection_id);
 CREATE INDEX idx_video_ugc_character_angles_character_id ON video_ugc_character_angles(character_id);
+CREATE INDEX idx_video_cycle_day_plans_collection_id ON video_cycle_day_plans(collection_id);
+CREATE INDEX idx_video_cycle_day_plans_plan_number ON video_cycle_day_plans(collection_id, plan_number DESC);
 
 -- Enable Row Level Security (RLS)
 ALTER TABLE collections ENABLE ROW LEVEL SECURITY;
@@ -169,6 +185,7 @@ ALTER TABLE video_format_videos ENABLE ROW LEVEL SECURITY;
 ALTER TABLE video_recreation_plans ENABLE ROW LEVEL SECURITY;
 ALTER TABLE video_ugc_characters ENABLE ROW LEVEL SECURITY;
 ALTER TABLE video_ugc_character_angles ENABLE ROW LEVEL SECURITY;
+ALTER TABLE video_cycle_day_plans ENABLE ROW LEVEL SECURITY;
 
 -- Create policies (allow all for now - customize based on your auth setup)
 CREATE POLICY "Enable all operations for all users" ON collections
@@ -196,4 +213,7 @@ CREATE POLICY "Enable all operations for all users" ON video_ugc_characters
   FOR ALL USING (true) WITH CHECK (true);
 
 CREATE POLICY "Enable all operations for all users" ON video_ugc_character_angles
+  FOR ALL USING (true) WITH CHECK (true);
+
+CREATE POLICY "Enable all operations for all users" ON video_cycle_day_plans
   FOR ALL USING (true) WITH CHECK (true);

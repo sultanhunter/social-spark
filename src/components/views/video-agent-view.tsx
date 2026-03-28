@@ -185,7 +185,8 @@ type StartFrameResponse = {
 };
 
 type ScriptAgentVideoType = "auto" | "ugc" | "ai_animation" | "faceless_broll" | "hybrid";
-type ScriptAgentCampaignMode = "standard" | "widget_reaction_ugc";
+type ScriptAgentCampaignMode = "standard" | "widget_reaction_ugc" | "daily_ugc_quran_journey";
+type ScriptAgentSelectableCampaignMode = "standard" | "widget_reaction_ugc";
 
 type ScriptAgentPlan = {
   title: string;
@@ -225,6 +226,64 @@ type ScriptAgentPlan = {
 
 type ScriptAgentResponse = {
   plan?: ScriptAgentPlan;
+  saved?: {
+    formatId?: string;
+    sourceVideoId?: string;
+    planId?: string;
+  };
+  error?: string;
+};
+
+type CycleDayPlanSummary = {
+  id: string;
+  planNumber: number;
+  appName: string;
+  cycleStartDate: string;
+  cycleLengthDays: number;
+  title: string;
+  overview: string;
+  openingTemplate: string;
+  quranOutroTemplate: string;
+  days: {
+    dayNumber: number;
+    calendarDate: string;
+    cycleDay: number;
+    isPeriodDay: boolean;
+    isPurityAchieved: boolean;
+    isIstihada: boolean;
+    worshipStatus: string;
+    quranReference: string;
+  }[];
+  createdAt: string;
+  updatedAt: string;
+};
+
+type CycleDayPlansResponse = {
+  plans?: CycleDayPlanSummary[];
+  warning?: string;
+  error?: string;
+};
+
+type CycleDayPlanCreateResponse = {
+  plan?: {
+    planNumber: number;
+    cycleStartDate: string;
+    cycleLengthDays: number;
+  };
+  saved?: {
+    id?: string;
+    createdAt?: string;
+  };
+  error?: string;
+};
+
+type CycleDayAgentResponse = {
+  plan?: ScriptAgentPlan;
+  cycleContext?: {
+    cyclePlanId?: string;
+    cyclePlanNumber?: number;
+    cycleDayNumber?: number;
+  };
   saved?: {
     formatId?: string;
     sourceVideoId?: string;
@@ -1211,7 +1270,7 @@ export function VideoAgentView({ collectionId }: { collectionId: string }) {
   const [success, setSuccess] = useState("");
   const [isScriptAgentModalOpen, setIsScriptAgentModalOpen] = useState(false);
   const [scriptAgentTopicBrief, setScriptAgentTopicBrief] = useState("");
-  const [scriptAgentCampaignMode, setScriptAgentCampaignMode] = useState<ScriptAgentCampaignMode>("standard");
+  const [scriptAgentCampaignMode, setScriptAgentCampaignMode] = useState<ScriptAgentSelectableCampaignMode>("standard");
   const [scriptAgentVideoType, setScriptAgentVideoType] = useState<ScriptAgentVideoType>("auto");
   const [scriptAgentCharacterId, setScriptAgentCharacterId] = useState<string>("auto");
   const [scriptAgentDurationSeconds, setScriptAgentDurationSeconds] = useState<number>(75);
@@ -1219,6 +1278,20 @@ export function VideoAgentView({ collectionId }: { collectionId: string }) {
   const [scriptAgentPlan, setScriptAgentPlan] = useState<ScriptAgentPlan | null>(null);
   const [scriptAgentError, setScriptAgentError] = useState("");
   const [scriptAgentSuccess, setScriptAgentSuccess] = useState("");
+  const [isCycleDayAgentModalOpen, setIsCycleDayAgentModalOpen] = useState(false);
+  const [cycleDayPlans, setCycleDayPlans] = useState<CycleDayPlanSummary[]>([]);
+  const [isLoadingCycleDayPlans, setIsLoadingCycleDayPlans] = useState(false);
+  const [isGeneratingCycleDayPlan, setIsGeneratingCycleDayPlan] = useState(false);
+  const [isGeneratingCycleDayScript, setIsGeneratingCycleDayScript] = useState(false);
+  const [cycleDayPlanStartDate, setCycleDayPlanStartDate] = useState<string>(() => new Date().toISOString().slice(0, 10));
+  const [cycleDayPlanLength, setCycleDayPlanLength] = useState<number>(30);
+  const [selectedCycleDayPlanId, setSelectedCycleDayPlanId] = useState<string>("latest");
+  const [selectedCycleDayNumber, setSelectedCycleDayNumber] = useState<number>(1);
+  const [cycleDayCharacterId, setCycleDayCharacterId] = useState<string>("auto");
+  const [cycleDayDurationSeconds, setCycleDayDurationSeconds] = useState<string>("");
+  const [cycleDayAgentPlan, setCycleDayAgentPlan] = useState<ScriptAgentPlan | null>(null);
+  const [cycleDayAgentError, setCycleDayAgentError] = useState("");
+  const [cycleDayAgentSuccess, setCycleDayAgentSuccess] = useState("");
   const [copiedScriptAgentSegmentId, setCopiedScriptAgentSegmentId] = useState<number | null>(null);
   const [nodePositions, setNodePositions] = useState<Record<string, { x: number; y: number }>>({});
 
@@ -1251,6 +1324,17 @@ export function VideoAgentView({ collectionId }: { collectionId: string }) {
     () => ugcCharacters.find((character) => character.id === selectedUgcCharacterId) || null,
     [ugcCharacters, selectedUgcCharacterId]
   );
+
+  const selectedCycleDayPlan = useMemo(() => {
+    if (cycleDayPlans.length === 0) return null;
+    if (selectedCycleDayPlanId === "latest") return cycleDayPlans[0] || null;
+    return cycleDayPlans.find((plan) => plan.id === selectedCycleDayPlanId) || null;
+  }, [cycleDayPlans, selectedCycleDayPlanId]);
+
+  const selectedCycleDayOptions = useMemo(() => {
+    const days = selectedCycleDayPlan?.days || [];
+    return [...days].sort((a, b) => a.dayNumber - b.dayNumber);
+  }, [selectedCycleDayPlan]);
 
   const handleSelectVideo = useCallback((formatId: string, videoId: string) => {
     setSelectedFormatId(formatId);
@@ -1448,6 +1532,13 @@ export function VideoAgentView({ collectionId }: { collectionId: string }) {
         const defaultCharacter = characters.find((item) => item.isDefault) || null;
         return defaultCharacter?.id || "auto";
       });
+      setCycleDayCharacterId((current) => {
+        if (current !== "auto" && characters.some((item) => item.id === current)) {
+          return current;
+        }
+        const defaultCharacter = characters.find((item) => item.isDefault) || null;
+        return defaultCharacter?.id || "auto";
+      });
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load UGC characters.");
     } finally {
@@ -1478,17 +1569,53 @@ export function VideoAgentView({ collectionId }: { collectionId: string }) {
     }
   }, [collectionId]);
 
+  const loadCycleDayPlans = useCallback(async () => {
+    setIsLoadingCycleDayPlans(true);
+    try {
+      const response = await fetch(
+        `/api/video-agent/cycle-day-plans?collectionId=${encodeURIComponent(collectionId)}&limit=30`,
+        { method: "GET", cache: "no-store" }
+      );
+      const data = (await response.json()) as CycleDayPlansResponse;
+      if (!response.ok) {
+        throw new Error(data.error || "Failed to load cycle-day plans.");
+      }
+      const plans = Array.isArray(data.plans) ? data.plans : [];
+      setCycleDayPlans(plans);
+      setSelectedCycleDayPlanId((current) => {
+        if (current !== "latest" && plans.some((plan) => plan.id === current)) return current;
+        return "latest";
+      });
+    } catch (err) {
+      setCycleDayAgentError(err instanceof Error ? err.message : "Failed to load cycle-day plans.");
+    } finally {
+      setIsLoadingCycleDayPlans(false);
+    }
+  }, [collectionId]);
+
   useEffect(() => {
     void loadLibrary();
     void loadCharacters();
     void loadPlans();
-  }, [loadLibrary, loadCharacters, loadPlans]);
+    void loadCycleDayPlans();
+  }, [loadLibrary, loadCharacters, loadPlans, loadCycleDayPlans]);
 
   useEffect(() => {
     if (scriptAgentCampaignMode === "widget_reaction_ugc" && scriptAgentVideoType !== "ugc") {
       setScriptAgentVideoType("ugc");
     }
   }, [scriptAgentCampaignMode, scriptAgentVideoType]);
+
+  useEffect(() => {
+    if (selectedCycleDayOptions.length === 0) {
+      setSelectedCycleDayNumber(1);
+      return;
+    }
+
+    if (!selectedCycleDayOptions.some((day) => day.dayNumber === selectedCycleDayNumber)) {
+      setSelectedCycleDayNumber(selectedCycleDayOptions[0].dayNumber);
+    }
+  }, [selectedCycleDayOptions, selectedCycleDayNumber]);
 
   useEffect(() => {
     if (!selectedFormat) {
@@ -1869,6 +1996,117 @@ export function VideoAgentView({ collectionId }: { collectionId: string }) {
     loadPlans,
   ]);
 
+  const handleGenerateCycleDayPlan = useCallback(async () => {
+    setIsGeneratingCycleDayPlan(true);
+    setCycleDayAgentError("");
+    setCycleDayAgentSuccess("");
+
+    try {
+      const response = await fetch("/api/video-agent/cycle-day-plans", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          collectionId,
+          cycleStartDate: cycleDayPlanStartDate,
+          cycleLengthDays: cycleDayPlanLength,
+          reasoningModel,
+        }),
+      });
+
+      const data = (await response.json()) as CycleDayPlanCreateResponse;
+      if (!response.ok) {
+        throw new Error(data.error || "Failed to generate cycle-day plan.");
+      }
+
+      setCycleDayAgentSuccess(
+        `Cycle plan ${data.plan?.planNumber || ""} generated and saved.`.trim()
+      );
+      await loadCycleDayPlans();
+      setSelectedCycleDayPlanId("latest");
+      setSelectedCycleDayNumber(1);
+    } catch (err) {
+      setCycleDayAgentError(err instanceof Error ? err.message : "Failed to generate cycle-day plan.");
+    } finally {
+      setIsGeneratingCycleDayPlan(false);
+    }
+  }, [
+    collectionId,
+    cycleDayPlanStartDate,
+    cycleDayPlanLength,
+    reasoningModel,
+    loadCycleDayPlans,
+  ]);
+
+  const handleGenerateCycleDayScript = useCallback(async () => {
+    const targetPlan = selectedCycleDayPlan;
+    if (!targetPlan) {
+      setCycleDayAgentError("Generate or select a cycle plan first.");
+      return;
+    }
+
+    const dayExists = targetPlan.days.some((day) => day.dayNumber === selectedCycleDayNumber);
+    if (!dayExists) {
+      setCycleDayAgentError("Select a valid cycle day from the selected plan.");
+      return;
+    }
+
+    const parsedDuration = Number(cycleDayDurationSeconds);
+    const targetDurationSeconds = Number.isFinite(parsedDuration) && parsedDuration > 0
+      ? Math.round(parsedDuration)
+      : null;
+
+    setIsGeneratingCycleDayScript(true);
+    setCycleDayAgentError("");
+    setCycleDayAgentSuccess("");
+
+    try {
+      const response = await fetch("/api/video-agent/cycle-day-agent", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          collectionId,
+          cyclePlanId: targetPlan.id,
+          cycleDayNumber: selectedCycleDayNumber,
+          characterId: cycleDayCharacterId === "auto" ? null : cycleDayCharacterId,
+          targetDurationSeconds,
+          reasoningModel,
+        }),
+      });
+
+      const data = (await response.json()) as CycleDayAgentResponse;
+      if (!response.ok) {
+        throw new Error(data.error || "Failed to generate cycle-day script plan.");
+      }
+
+      if (!data.plan) {
+        throw new Error("No cycle-day script plan returned.");
+      }
+
+      setCycleDayAgentPlan(data.plan);
+      setCycleDayAgentSuccess("Cycle-day script plan generated.");
+
+      if (data.saved?.formatId && data.saved?.sourceVideoId) {
+        await loadLibrary();
+        await loadPlans();
+        setSelectedFormatId(data.saved.formatId);
+        setSelectedVideoId(data.saved.sourceVideoId);
+      }
+    } catch (err) {
+      setCycleDayAgentError(err instanceof Error ? err.message : "Failed to generate cycle-day script plan.");
+    } finally {
+      setIsGeneratingCycleDayScript(false);
+    }
+  }, [
+    collectionId,
+    selectedCycleDayPlan,
+    selectedCycleDayNumber,
+    cycleDayCharacterId,
+    cycleDayDurationSeconds,
+    reasoningModel,
+    loadLibrary,
+    loadPlans,
+  ]);
+
   const handleCopyScriptAgentVeoPrompt = useCallback(async (segmentId: number, prompt: string) => {
     const text = prompt.trim();
     if (!text) return;
@@ -2237,6 +2475,16 @@ export function VideoAgentView({ collectionId }: { collectionId: string }) {
             <Sparkles className="mr-1.5 h-4 w-4" />
             Script Agent
           </Button>
+
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setIsCycleDayAgentModalOpen(true)}
+            className="pointer-events-auto bg-white"
+          >
+            <Clock className="mr-1.5 h-4 w-4" />
+            Cycle Day Agent
+          </Button>
         </div>
 
         <Dialog open={isScriptAgentModalOpen} onOpenChange={setIsScriptAgentModalOpen}>
@@ -2266,7 +2514,7 @@ export function VideoAgentView({ collectionId }: { collectionId: string }) {
                     <p className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-slate-500">Campaign Pattern</p>
                     <select
                       value={scriptAgentCampaignMode}
-                      onChange={(event) => setScriptAgentCampaignMode(event.target.value as ScriptAgentCampaignMode)}
+                      onChange={(event) => setScriptAgentCampaignMode(event.target.value as ScriptAgentSelectableCampaignMode)}
                       className="w-full rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-xs text-slate-800 outline-none transition focus:border-rose-400 focus:ring-2 focus:ring-rose-200"
                     >
                       <option value="standard">Standard educational</option>
@@ -2279,7 +2527,7 @@ export function VideoAgentView({ collectionId }: { collectionId: string }) {
                     <select
                       value={scriptAgentVideoType}
                       onChange={(event) => setScriptAgentVideoType(event.target.value as ScriptAgentVideoType)}
-                      disabled={scriptAgentCampaignMode === "widget_reaction_ugc"}
+                      disabled={scriptAgentCampaignMode !== "standard"}
                       className="w-full rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-xs text-slate-800 outline-none transition focus:border-rose-400 focus:ring-2 focus:ring-rose-200"
                     >
                       <option value="auto">Auto select</option>
@@ -2417,6 +2665,235 @@ export function VideoAgentView({ collectionId }: { collectionId: string }) {
                                     <p className="text-[11px] text-slate-600">{shot.prompt}</p>
                                   </div>
                                 ))}
+                              </div>
+                            ) : null}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  ) : null}
+                </div>
+              ) : null}
+            </div>
+          </DialogContent>
+        </Dialog>
+
+        <Dialog open={isCycleDayAgentModalOpen} onOpenChange={setIsCycleDayAgentModalOpen}>
+          <DialogContent className="max-h-[88vh] max-w-4xl overflow-hidden p-0">
+            <DialogHeader className="border-b border-slate-200">
+              <DialogTitle className="text-base">Cycle Day Agent</DialogTitle>
+              <DialogDescription className="text-xs text-slate-600">
+                Generate calendar-based cycle plans, then pick one cycle day to produce a full UGC + faceless Quran diary script.
+              </DialogDescription>
+            </DialogHeader>
+
+            <div className="max-h-[74vh] space-y-3 overflow-y-auto px-6 pb-6 pt-4">
+              <div className="space-y-2 rounded-lg border border-slate-200 bg-slate-50 p-3">
+                <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">Step 1: Generate Full Cycle Plan</p>
+                <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+                  <div>
+                    <p className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-slate-500">Cycle Start Date</p>
+                    <input
+                      type="date"
+                      value={cycleDayPlanStartDate}
+                      onChange={(event) => setCycleDayPlanStartDate(event.target.value)}
+                      className="w-full rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-xs text-slate-800 outline-none transition focus:border-rose-400 focus:ring-2 focus:ring-rose-200"
+                    />
+                  </div>
+                  <div>
+                    <p className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-slate-500">Cycle Length (days)</p>
+                    <input
+                      type="number"
+                      min={24}
+                      max={40}
+                      value={cycleDayPlanLength}
+                      onChange={(event) => {
+                        const value = Number(event.target.value);
+                        if (!Number.isFinite(value)) return;
+                        setCycleDayPlanLength(Math.max(24, Math.min(40, Math.round(value))));
+                      }}
+                      className="w-full rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-xs text-slate-800 outline-none transition focus:border-rose-400 focus:ring-2 focus:ring-rose-200"
+                    />
+                  </div>
+                  <div className="flex items-end">
+                    <Button
+                      variant="primary"
+                      size="sm"
+                      className="w-full"
+                      isLoading={isGeneratingCycleDayPlan}
+                      onClick={() => void handleGenerateCycleDayPlan()}
+                    >
+                      <Sparkles className="mr-1.5 h-3.5 w-3.5" />
+                      {isGeneratingCycleDayPlan ? "Generating Plan..." : "Generate Cycle Plan"}
+                    </Button>
+                  </div>
+                </div>
+              </div>
+
+              <div className="space-y-2 rounded-lg border border-slate-200 bg-slate-50 p-3">
+                <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">Step 2: Pick Day + Generate Script</p>
+                <div className="grid grid-cols-1 gap-2 sm:grid-cols-4">
+                  <div>
+                    <p className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-slate-500">Cycle Plan</p>
+                    <select
+                      value={selectedCycleDayPlanId}
+                      onChange={(event) => setSelectedCycleDayPlanId(event.target.value)}
+                      className="w-full rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-xs text-slate-800 outline-none transition focus:border-rose-400 focus:ring-2 focus:ring-rose-200"
+                    >
+                      <option value="latest">Latest plan</option>
+                      {cycleDayPlans.map((plan) => (
+                        <option key={plan.id} value={plan.id}>
+                          {`Plan ${plan.planNumber} | ${plan.cycleStartDate} | ${plan.cycleLengthDays} days`}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div>
+                    <p className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-slate-500">Cycle Day</p>
+                    <select
+                      value={selectedCycleDayNumber}
+                      onChange={(event) => setSelectedCycleDayNumber(Number(event.target.value))}
+                      disabled={!selectedCycleDayOptions.length}
+                      className="w-full rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-xs text-slate-800 outline-none transition focus:border-rose-400 focus:ring-2 focus:ring-rose-200"
+                    >
+                      {selectedCycleDayOptions.length === 0 ? (
+                        <option value={1}>No days available</option>
+                      ) : (
+                        selectedCycleDayOptions.map((day) => (
+                          <option key={`${day.dayNumber}-${day.calendarDate}`} value={day.dayNumber}>
+                            {`Day ${day.dayNumber} (${day.calendarDate})${day.isIstihada ? " - istihada" : ""}${day.isPeriodDay ? " - period" : ""}`}
+                          </option>
+                        ))
+                      )}
+                    </select>
+                  </div>
+
+                  <div>
+                    <p className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-slate-500">Character</p>
+                    <select
+                      value={cycleDayCharacterId}
+                      onChange={(event) => setCycleDayCharacterId(event.target.value)}
+                      className="w-full rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-xs text-slate-800 outline-none transition focus:border-rose-400 focus:ring-2 focus:ring-rose-200"
+                    >
+                      <option value="auto">Auto/default character</option>
+                      {ugcCharacters
+                        .filter((character) => (character.characterType || "ugc") === "ugc")
+                        .map((character) => (
+                          <option key={character.id} value={character.id}>
+                            {character.characterName}
+                            {character.isDefault ? " (Default)" : ""}
+                          </option>
+                        ))}
+                    </select>
+                  </div>
+
+                  <div>
+                    <p className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-slate-500">Duration (seconds, optional)</p>
+                    <input
+                      type="number"
+                      min={30}
+                      value={cycleDayDurationSeconds}
+                      onChange={(event) => setCycleDayDurationSeconds(event.target.value)}
+                      placeholder="Auto"
+                      className="w-full rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-xs text-slate-800 outline-none transition focus:border-rose-400 focus:ring-2 focus:ring-rose-200"
+                    />
+                  </div>
+                </div>
+
+                <div className="flex flex-wrap items-center gap-2">
+                  <Button
+                    variant="primary"
+                    size="sm"
+                    className="min-w-[220px]"
+                    isLoading={isGeneratingCycleDayScript}
+                    onClick={() => void handleGenerateCycleDayScript()}
+                    disabled={isLoadingCycleDayPlans || cycleDayPlans.length === 0}
+                  >
+                    <Sparkles className="mr-1.5 h-3.5 w-3.5" />
+                    {isGeneratingCycleDayScript ? "Generating Day Script..." : "Generate Cycle Day Script"}
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    isLoading={isLoadingCycleDayPlans}
+                    onClick={() => void loadCycleDayPlans()}
+                  >
+                    Refresh Plans
+                  </Button>
+                </div>
+
+                {selectedCycleDayPlan ? (
+                  <div className="rounded border border-slate-200 bg-white px-2.5 py-2">
+                    <p className="text-xs font-semibold text-slate-700">{selectedCycleDayPlan.title || `Cycle Plan ${selectedCycleDayPlan.planNumber}`}</p>
+                    <p className="mt-0.5 text-[11px] text-slate-600">
+                      {`Plan ${selectedCycleDayPlan.planNumber} | Start ${selectedCycleDayPlan.cycleStartDate} | ${selectedCycleDayPlan.cycleLengthDays} days`}
+                    </p>
+                    {selectedCycleDayPlan.overview ? (
+                      <p className="mt-1 text-[11px] text-slate-600">{selectedCycleDayPlan.overview}</p>
+                    ) : null}
+                  </div>
+                ) : null}
+
+                {cycleDayAgentError ? (
+                  <div className="rounded-md border border-rose-200 bg-rose-50 px-2 py-1.5 text-[11px] text-rose-700">{cycleDayAgentError}</div>
+                ) : null}
+                {cycleDayAgentSuccess ? (
+                  <div className="rounded-md border border-emerald-200 bg-emerald-50 px-2 py-1.5 text-[11px] text-emerald-700">{cycleDayAgentSuccess}</div>
+                ) : null}
+              </div>
+
+              {cycleDayAgentPlan ? (
+                <div className="space-y-3 rounded-lg border border-indigo-200 bg-indigo-50/40 p-3">
+                  <div>
+                    <p className="text-xs font-semibold text-indigo-800">{cycleDayAgentPlan.title}</p>
+                    <div className="mt-1 flex flex-wrap items-center gap-1.5">
+                      <Badge variant="default">{cycleDayAgentPlan.campaignMode?.replace(/_/g, " ") || "cycle day"}</Badge>
+                      <Badge variant="default">{cycleDayAgentPlan.selectedVideoType.replace(/_/g, " ")}</Badge>
+                      <Badge variant="default">{`${cycleDayAgentPlan.targetDurationSeconds}s`}</Badge>
+                    </div>
+                    <p className="mt-1 text-xs text-slate-700">{cycleDayAgentPlan.objective}</p>
+                  </div>
+
+                  <div>
+                    <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">Script</p>
+                    <p className="mt-1 text-xs text-slate-700"><span className="font-semibold text-slate-500">Hook:</span> {cycleDayAgentPlan.script.hook}</p>
+                    <div className="mt-1.5 space-y-1.5">
+                      {cycleDayAgentPlan.script.beats.map((beat, i) => (
+                        <div key={`cycle-agent-beat-${i}`} className="rounded border border-slate-200 bg-white px-2 py-1.5">
+                          <p className="text-[10px] font-mono text-slate-500">{beat.timecode}</p>
+                          {beat.visual ? <p className="text-xs text-slate-700"><span className="font-semibold text-slate-500">Visual:</span> {beat.visual}</p> : null}
+                          {beat.narration ? <p className="text-xs text-slate-700"><span className="font-semibold text-slate-500">VO:</span> {beat.narration}</p> : null}
+                          {beat.onScreenText ? <p className="text-xs text-slate-700"><span className="font-semibold text-slate-500">Text:</span> {beat.onScreenText}</p> : null}
+                        </div>
+                      ))}
+                    </div>
+                    <p className="mt-1 text-xs text-slate-700"><span className="font-semibold text-slate-500">CTA:</span> {cycleDayAgentPlan.script.cta}</p>
+                  </div>
+
+                  {cycleDayAgentPlan.motionControlSegments?.length ? (
+                    <div>
+                      <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">Shot Groups</p>
+                      <div className="mt-1.5 space-y-1.5">
+                        {cycleDayAgentPlan.motionControlSegments.map((segment) => (
+                          <div key={`cycle-agent-segment-${segment.segmentId}`} className="rounded border border-indigo-200 bg-white px-2 py-1.5">
+                            <p className="text-xs font-semibold text-indigo-700">{`Segment ${segment.segmentId} - ${segment.timecode}`}</p>
+                            <p className="text-[11px] text-slate-700"><span className="font-semibold text-slate-500">Start Frame:</span> {segment.startFramePrompt}</p>
+                            {segment.veoPrompt ? (
+                              <div className="mt-1 rounded border border-emerald-200 bg-emerald-50 px-2 py-1.5">
+                                <div className="mb-1 flex items-center justify-between gap-2">
+                                  <p className="text-[10px] font-semibold uppercase tracking-wide text-emerald-700">Veo 3.1 Prompt</p>
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    className="h-7"
+                                    onClick={() => void handleCopyScriptAgentVeoPrompt(segment.segmentId, segment.veoPrompt || "")}
+                                  >
+                                    <Copy className="mr-1 h-3.5 w-3.5" />
+                                    {copiedScriptAgentSegmentId === segment.segmentId ? "Copied" : "Copy"}
+                                  </Button>
+                                </div>
+                                <p className="whitespace-pre-wrap text-[11px] text-slate-700">{segment.veoPrompt}</p>
                               </div>
                             ) : null}
                           </div>

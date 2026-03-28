@@ -165,3 +165,23 @@ CREATE INDEX IF NOT EXISTS idx_video_ugc_character_angles_collection
 
 CREATE INDEX IF NOT EXISTS idx_video_ugc_character_angles_character
   ON video_ugc_character_angles(character_id);
+
+-- Calendar-based cycle plans for Cycle Day Agent
+CREATE TABLE IF NOT EXISTS video_cycle_day_plans (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  collection_id UUID NOT NULL REFERENCES collections(id) ON DELETE CASCADE,
+  plan_number INT NOT NULL,
+  app_name TEXT NOT NULL,
+  cycle_start_date DATE NOT NULL,
+  cycle_length_days INT NOT NULL,
+  plan_payload JSONB DEFAULT '{}'::jsonb,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW(),
+  UNIQUE(collection_id, plan_number)
+);
+
+CREATE INDEX IF NOT EXISTS idx_video_cycle_day_plans_collection
+  ON video_cycle_day_plans(collection_id);
+
+CREATE INDEX IF NOT EXISTS idx_video_cycle_day_plans_plan_number
+  ON video_cycle_day_plans(collection_id, plan_number DESC);
