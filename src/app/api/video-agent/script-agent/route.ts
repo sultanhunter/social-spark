@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { supabase } from "@/lib/supabase";
 import {
   buildVideoScriptIdeationPlan,
+  stripMultiShotPromptsFromIdeationPlan,
   type ScriptAgentCampaignMode,
   type ScriptAgentVideoType,
   type UGCCharacterProfile,
@@ -241,7 +242,7 @@ export async function POST(request: NextRequest) {
     const appName = (collection.app_name || "Muslimah Pro").trim() || "Muslimah Pro";
     const appContext = (collection.app_description || collection.app_context || "").trim();
 
-    const plan = await buildVideoScriptIdeationPlan({
+    const planDraft = await buildVideoScriptIdeationPlan({
       appName,
       appContext,
       topicBrief,
@@ -251,6 +252,7 @@ export async function POST(request: NextRequest) {
       ugcCharacter,
       reasoningModel,
     });
+    const plan = stripMultiShotPromptsFromIdeationPlan(planDraft);
 
     const formatSignature = `script_agent_${plan.campaignMode}_${plan.topicCategory}_${plan.selectedVideoType}`;
     const generatedSourceUrl = `script-agent://${collectionId}/${Date.now()}-${randomUUID().slice(0, 8)}`;

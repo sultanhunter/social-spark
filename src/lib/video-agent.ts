@@ -206,6 +206,17 @@ export interface VideoScriptIdeationPlan {
   qaChecklist: string[];
 }
 
+export function stripMultiShotPromptsFromIdeationPlan(plan: VideoScriptIdeationPlan): VideoScriptIdeationPlan {
+  return {
+    ...plan,
+    motionControlSegments: (plan.motionControlSegments || []).map((segment) => {
+      const { multiShotPrompts, ...rest } = segment;
+      void multiShotPrompts;
+      return rest;
+    }),
+  };
+}
+
 function requireGeminiKey(): void {
   if (!process.env.GOOGLE_GEMINI_API_KEY) {
     throw new Error("GOOGLE_GEMINI_API_KEY is missing. Add it before running the video pipeline.");
@@ -601,29 +612,40 @@ function buildVeo31SegmentPrompt(args: {
 }): string {
   const { segment, nextSegment, styleHint, appName, ugcCharacter } = args;
   const isAnimatedStyle = /animated|animation|cgi/i.test(styleHint);
+  const isUgcLikeStyle = /ugc|hybrid|vlog|social/i.test(styleHint);
+  const durationSeconds = Math.max(2, Math.round(segment.durationSeconds || MAX_SINGLE_VIDEO_CLIP_SECONDS));
   const shots = segment.script?.shots || [];
 
-  const shotLines = (shots.length > 0 ? shots : [
-    {
-      shotId: "shot1",
-      visual: segment.startFramePrompt,
-      narration: segment.script?.hook || "",
-      onScreenText: "",
-      editNote: "",
-    },
-  ])
+  const resolvedShots = shots.length > 0
+    ? shots
+    : [
+      {
+        shotId: "shot1",
+        visual: segment.startFramePrompt,
+        narration: segment.script?.hook || "",
+        onScreenText: "",
+        editNote: "",
+      },
+    ];
+
+  const shotDurationSeconds = Math.max(1, Math.round(durationSeconds / Math.max(1, resolvedShots.length)));
+
+  const voiceStyleInstruction = isAnimatedStyle
+    ? "Speech delivery: clear and expressive, emotionally natural, no robotic cadence, medium pacing."
+    : isUgcLikeStyle
+      ? "Speech delivery: warm first-person day-in-the-life tone, conversational, medium pace, gentle pauses, clear diction."
+      : "Speech delivery: calm, confident, natural, medium pacing with clear emphasis on key words.";
+
+  const shotLines = resolvedShots
     .map((shot, index) => {
       const narration = closeOpenEndedLine(shot.narration);
       const dialogue = narration
-        ? `Dialogue: "${narration.replace(/"/g, "'")}".`
+        ? `Spoken line: "${narration.replace(/"/g, "'")}". ${voiceStyleInstruction}`
         : isAnimatedStyle
-          ? "No dialogue: performance carries emotion through expressive but natural animation acting and readable pose changes."
-          : "No dialogue: performance carries emotion through subtle facial expression and natural body language.";
-      const textCue = cleanText(shot.onScreenText)
-        ? ` On-screen text: ${closeOpenEndedLine(shot.onScreenText)}`
-        : "";
-      const editCue = cleanText(shot.editNote) ? ` Edit intent: ${shot.editNote}.` : "";
-      return `Shot ${index + 1}: ${cleanText(shot.visual)}. ${dialogue}${textCue}${editCue}`;
+          ? "No spoken line. Performance relies on expressive but natural visual acting and subtle emotion transitions."
+          : "No spoken line. Keep natural breathing rhythm and believable body language.";
+      const editCue = cleanText(shot.editNote) ? `Performance note: ${closeOpenEndedLine(shot.editNote)}` : "";
+      return `Shot ${index + 1} (${shotDurationSeconds}s): ${closeOpenEndedLine(shot.visual || segment.startFramePrompt)}. ${dialogue} ${editCue}`;
     })
     .join(" ");
 
@@ -637,16 +659,23 @@ function buildVeo31SegmentPrompt(args: {
     ? `End frame transition: finish with a clean match-cut handoff toward the next segment opening (${shortenForTransition(nextSegment.startFramePrompt, 14)}).`
     : "End frame transition: finish cleanly with no abrupt visual jump so final edit can close naturally.";
 
+  const scriptHook = closeOpenEndedLine(segment.script?.hook || "");
+  const scriptCta = closeOpenEndedLine(segment.script?.cta || "");
+
   return cleanText(
     [
-      `Veo 3.1 prompt. Generate an ${MAX_SINGLE_VIDEO_CLIP_SECONDS}-second vertical 9:16 ${styleHint} segment (segment ${segment.segmentId}).`,
+      `Veo 3.1 single prompt for segment ${segment.segmentId} (${segment.timecode}). Generate one continuous ${durationSeconds}-second vertical 9:16 ${styleHint} video clip.`,
       isAnimatedStyle
         ? "Quality target: high-end CGI animation look, stylized but premium 3D rendering, clean topology, stable shading, smooth deformation, expressive eyes and lips, coherent lighting, no uncanny artifacts, no texture flicker, no muddy frames."
         : "Quality target: photorealistic, true-to-life UGC realism, natural skin texture and pores, realistic fabric physics, authentic handheld smartphone camera behavior, physically plausible lighting, no waxy skin, no plastic look, no AI artifacts or uncanny facial motion.",
       `Environment continuity: keep location, camera axis, lens feel, and light direction stable across all shots in this segment.`,
       characterLock,
-      `App integration: if app is referenced, keep it subtle and practical. Mention ${appName} at most once.`,
+      `App integration: if app is referenced, show practical phone interaction with ${appName}, subtle and natural to the scene.`,
+      `Do not render text overlays, captions, subtitles, logos, or watermarks in the generated video.`,
+      scriptHook ? `Segment hook intent: ${scriptHook}` : "",
       `Shot plan: ${shotLines}`,
+      scriptCta ? `Segment close intent: ${scriptCta}` : "",
+      `Audio mix: prioritize clear spoken voice and natural room tone; keep any background sound subtle and non-distracting.`,
       transitionHint,
     ].join(" ")
   );
@@ -2556,17 +2585,13 @@ Return strict JSON only:
           : "hybrid social explainer";
   const veoReadySegments = campaignAdjustedSegments.map((segment, index, all) => ({
     ...segment,
-    veoPrompt: ensureVeoPromptQuality(
-      segment.veoPrompt || "",
-      buildVeo31SegmentPrompt({
-        segment,
-        nextSegment: all[index + 1],
-        styleHint: scriptAgentStyleHint,
-        appName,
-        ugcCharacter,
-      }),
-      scriptAgentStyleHint
-    ),
+    veoPrompt: buildVeo31SegmentPrompt({
+      segment,
+      nextSegment: all[index + 1],
+      styleHint: scriptAgentStyleHint,
+      appName,
+      ugcCharacter,
+    }),
   }));
 
   const resolvedTopicCategory =
@@ -3287,16 +3312,12 @@ function applyCycleDayNarrativeTemplate(args: {
   const styleHint = "hybrid social explainer";
   const veoReadySegments = campaignAdjustedSegments.map((segment, index, all) => ({
     ...segment,
-    veoPrompt: ensureVeoPromptQuality(
-      segment.veoPrompt || "",
-      buildVeo31SegmentPrompt({
-        segment,
-        nextSegment: all[index + 1],
-        styleHint,
-        appName,
-      }),
-      styleHint
-    ),
+    veoPrompt: buildVeo31SegmentPrompt({
+      segment,
+      nextSegment: all[index + 1],
+      styleHint,
+      appName,
+    }),
   }));
 
   const openingLine = closeOpenEndedLine(

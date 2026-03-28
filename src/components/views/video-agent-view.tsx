@@ -1098,7 +1098,7 @@ function VideoCanvasNode({ data }: NodeProps<Node<VideoNodeData>>) {
                               </div>
                             ) : null}
 
-                            {segment.multiShotPrompts?.length ? (
+                            {!segment.veoPrompt && segment.multiShotPrompts?.length ? (
                               <div className="mt-2 rounded border border-blue-200 bg-blue-50/70 px-2 py-1.5">
                                 <p className="text-[10px] font-semibold uppercase tracking-wide text-blue-700">Segment Multi-Shot Prompts</p>
                                 <div className="mt-1 space-y-1">
@@ -2776,7 +2776,7 @@ export function VideoAgentView({ collectionId }: { collectionId: string }) {
                                 <p className="whitespace-pre-wrap text-[11px] text-slate-700">{segment.veoPrompt}</p>
                               </div>
                             ) : null}
-                            {segment.multiShotPrompts?.length ? (
+                            {!segment.veoPrompt && segment.multiShotPrompts?.length ? (
                               <div className="mt-1 space-y-1">
                                 {segment.multiShotPrompts.map((shot, idx) => (
                                   <div key={`agent-shot-${segment.segmentId}-${idx}`} className="rounded border border-slate-200 bg-slate-50 px-2 py-1">

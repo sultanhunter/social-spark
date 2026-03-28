@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { supabase } from "@/lib/supabase";
 import {
   buildCycleDayVideoScriptPlan,
+  stripMultiShotPromptsFromIdeationPlan,
   type CycleDayCalendarDay,
   type ScriptAgentVideoType,
   type UGCCharacterProfile,
@@ -331,7 +332,7 @@ export async function POST(request: NextRequest) {
     const appName = (collection.app_name || "Muslimah Pro").trim() || "Muslimah Pro";
     const appContext = (collection.app_description || collection.app_context || "").trim();
 
-    const plan = await buildCycleDayVideoScriptPlan({
+    const planDraft = await buildCycleDayVideoScriptPlan({
       appName,
       appContext,
       cyclePlanNumber: cyclePlan.plan_number,
@@ -340,6 +341,7 @@ export async function POST(request: NextRequest) {
       ugcCharacter,
       reasoningModel,
     });
+    const plan = stripMultiShotPromptsFromIdeationPlan(planDraft);
 
     const formatSignature = `cycle_day_agent_plan_${cyclePlan.plan_number}_day_${cycleDayData.dayNumber}_${plan.selectedVideoType}`;
     const generatedSourceUrl = `cycle-day-agent://${collectionId}/${Date.now()}-${randomUUID().slice(0, 8)}`;
