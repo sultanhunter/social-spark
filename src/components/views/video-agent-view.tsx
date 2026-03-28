@@ -355,6 +355,7 @@ type VideoNodeData = {
   isGeneratingPlan: boolean;
   isDeletingVideo: boolean;
   onGenerateStartFrame: (formatId: string, videoId: string, segmentIndex?: number) => void;
+  onGenerateAllSegmentStartFrames: (formatId: string, videoId: string) => void;
   isGeneratingStartFrame: boolean;
   generatingSegmentIndex?: number;
   onUploadPreviousSegmentVideo: (
@@ -853,11 +854,25 @@ function VideoCanvasNode({ data }: NodeProps<Node<VideoNodeData>>) {
               variant="outline"
               size="sm"
               className="nodrag w-full"
-              onClick={() => data.onGenerateStartFrame(data.formatId, data.video.id)}
+              onClick={() => {
+                if (plan.motionControlSegments?.length) {
+                  data.onGenerateAllSegmentStartFrames(data.formatId, data.video.id);
+                  return;
+                }
+                data.onGenerateStartFrame(data.formatId, data.video.id);
+              }}
               isLoading={data.isGeneratingStartFrame}
             >
               <Sparkles className="mr-1.5 h-3.5 w-3.5" />
-              {data.isGeneratingStartFrame ? "Generating start frame..." : "Generate Start Frame"}
+              {data.isGeneratingStartFrame
+                ? plan.motionControlSegments?.length
+                  ? data.generatingSegmentIndex === -1
+                    ? "Generating segment frames..."
+                    : "Generating segment frame..."
+                  : "Generating start frame..."
+                : plan.motionControlSegments?.length
+                  ? "Generate Segment Start Frames"
+                  : "Generate Start Frame"}
             </Button>
           ) : null}
 
@@ -938,6 +953,7 @@ function VideoCanvasNode({ data }: NodeProps<Node<VideoNodeData>>) {
                     </div>
                   ) : null}
 
+                  {!plan.motionControlSegments?.length ? (
                   <div>
                     <div className="flex items-center justify-between gap-2">
                       <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">Video Start Frame</p>
@@ -984,6 +1000,7 @@ function VideoCanvasNode({ data }: NodeProps<Node<VideoNodeData>>) {
                       </p>
                     )}
                   </div>
+                  ) : null}
 
                   {plan.motionControlSegments?.length ? (
                     <div>
@@ -993,11 +1010,12 @@ function VideoCanvasNode({ data }: NodeProps<Node<VideoNodeData>>) {
                           variant="ghost"
                           size="sm"
                           className="nodrag h-7"
-                          onClick={() => data.onGenerateStartFrame(data.formatId, data.video.id)}
-                          isLoading={data.isGeneratingStartFrame}
+                          onClick={() => data.onGenerateAllSegmentStartFrames(data.formatId, data.video.id)}
+                          isLoading={data.isGeneratingStartFrame && data.generatingSegmentIndex === -1}
+                          disabled={data.isGeneratingStartFrame && data.generatingSegmentIndex !== -1}
                         >
                           <Sparkles className="mr-1 h-3.5 w-3.5" />
-                          {plan.startFrame?.imageUrl ? "Regenerate Shared Frame" : "Generate Shared Frame"}
+                          Generate All Segment Frames
                         </Button>
                       </div>
                       <div className="mt-1.5 space-y-3">
@@ -1012,12 +1030,23 @@ function VideoCanvasNode({ data }: NodeProps<Node<VideoNodeData>>) {
                                   {segment.timecode} ({segment.durationSeconds}s)
                                 </span>
                               </div>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="nodrag h-7"
+                                onClick={() => data.onGenerateStartFrame(data.formatId, data.video.id, idx)}
+                                isLoading={data.isGeneratingStartFrame && data.generatingSegmentIndex === idx}
+                                disabled={data.isGeneratingStartFrame && data.generatingSegmentIndex !== idx}
+                              >
+                                <Sparkles className="mr-1 h-3.5 w-3.5" />
+                                {segment.startFrame?.imageUrl ? "Regenerate Frame" : "Generate Frame"}
+                              </Button>
                             </div>
 
-                            {(segment.startFrame?.imageUrl || plan.startFrame?.imageUrl) ? (
+                            {segment.startFrame?.imageUrl ? (
                               <div className="mb-2 rounded border border-slate-200 bg-white p-2">
                                 <img
-                                  src={segment.startFrame?.imageUrl || plan.startFrame?.imageUrl}
+                                  src={segment.startFrame.imageUrl}
                                   alt={`Segment ${segment.segmentId} start frame`}
                                   className="w-full rounded border border-slate-200 object-cover"
                                   style={{ aspectRatio: "9 / 16" }}
@@ -1027,7 +1056,7 @@ function VideoCanvasNode({ data }: NodeProps<Node<VideoNodeData>>) {
                                     variant="ghost"
                                     size="sm"
                                     className="nodrag"
-                                    onClick={() => data.onOpen(segment.startFrame?.imageUrl || plan.startFrame?.imageUrl || "")}
+                                    onClick={() => data.onOpen(segment.startFrame?.imageUrl || "")}
                                   >
                                     <ExternalLink className="mr-1 h-3.5 w-3.5" />
                                     Open image
@@ -1832,7 +1861,8 @@ export function VideoAgentView({ collectionId }: { collectionId: string }) {
         },
       }));
 
-      setSuccess("Start frame generated.");
+      const segmentSuffix = typeof segmentIndex === "number" ? ` for segment ${segmentIndex + 1}` : "";
+      setSuccess(`Start frame generated${segmentSuffix}.`);
       void loadPlans();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to generate start frame.");
@@ -1849,6 +1879,91 @@ export function VideoAgentView({ collectionId }: { collectionId: string }) {
     startFrameImageModel,
     videoPlans,
     loadPlans,
+  ]);
+
+  const handleGenerateAllSegmentStartFrames = useCallback(async (formatIdArg?: string, videoIdArg?: string) => {
+    const targetFormat =
+      (formatIdArg ? library.find((item) => item.id === formatIdArg) : null) || selectedFormat;
+    const targetVideo =
+      (targetFormat && videoIdArg ? targetFormat.videos.find((item) => item.id === videoIdArg) : null) || selectedVideo;
+
+    if (!targetFormat || !targetVideo) {
+      setError("Select a format and video first.");
+      return;
+    }
+
+    const existingPlan = videoPlans[targetVideo.id] || null;
+    if (!existingPlan) {
+      setError("Generate a recreation plan first, then create segment start frames.");
+      return;
+    }
+
+    const segments = Array.isArray(existingPlan.motionControlSegments) ? existingPlan.motionControlSegments : [];
+    if (segments.length === 0) {
+      await handleGenerateStartFrame(targetFormat.id, targetVideo.id);
+      return;
+    }
+
+    setGeneratingStartFrameVideoId(targetVideo.id);
+    setGeneratingSegmentIndex(-1);
+    setError("");
+    setSuccess("");
+
+    try {
+      let latestPlan = existingPlan;
+
+      for (let segmentIndex = 0; segmentIndex < segments.length; segmentIndex += 1) {
+        const response = await fetch("/api/video-agent/start-frame", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            collectionId,
+            formatId: targetFormat.id,
+            videoId: targetVideo.id,
+            characterId: targetFormat.format_type === "ugc" ? selectedUgcCharacter?.id : null,
+            imageGenerationModel: startFrameImageModel,
+            segmentIndex,
+          }),
+        });
+
+        const data = (await response.json()) as StartFrameResponse;
+        if (!response.ok) {
+          throw new Error(data.error || `Failed to generate start frame for segment ${segmentIndex + 1}.`);
+        }
+
+        if (!data.startFrame && !data.plan) {
+          throw new Error(`No start frame returned for segment ${segmentIndex + 1}.`);
+        }
+
+        latestPlan = data.plan || {
+          ...latestPlan,
+          startFrame: data.startFrame,
+        };
+
+        setVideoPlans((prev) => ({
+          ...prev,
+          [targetVideo.id]: latestPlan,
+        }));
+      }
+
+      setSuccess(`Generated start frames for ${segments.length} segments.`);
+      void loadPlans();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to generate segment start frames.");
+    } finally {
+      setGeneratingStartFrameVideoId(null);
+      setGeneratingSegmentIndex(undefined);
+    }
+  }, [
+    collectionId,
+    library,
+    selectedFormat,
+    selectedVideo,
+    selectedUgcCharacter,
+    startFrameImageModel,
+    videoPlans,
+    loadPlans,
+    handleGenerateStartFrame,
   ]);
 
   const handleUploadPreviousSegmentVideo = useCallback(async (
@@ -2284,6 +2399,9 @@ export function VideoAgentView({ collectionId }: { collectionId: string }) {
               onGenerateStartFrame: (formatId: string, videoId: string, segmentIndex?: number) => {
                 void handleGenerateStartFrame(formatId, videoId, segmentIndex);
               },
+              onGenerateAllSegmentStartFrames: (formatId: string, videoId: string) => {
+                void handleGenerateAllSegmentStartFrames(formatId, videoId);
+              },
               isGeneratingStartFrame: generatingStartFrameVideoId === video.id,
               generatingSegmentIndex,
               onUploadPreviousSegmentVideo: (
@@ -2374,6 +2492,7 @@ export function VideoAgentView({ collectionId }: { collectionId: string }) {
     handleGeneratePlan,
     handleDeleteVideo,
     handleGenerateStartFrame,
+    handleGenerateAllSegmentStartFrames,
     handleUploadPreviousSegmentVideo,
     nodePositions,
   ]);

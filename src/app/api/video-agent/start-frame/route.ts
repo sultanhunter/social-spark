@@ -125,8 +125,11 @@ function getPreviousSegmentStartFrameUrl(plan: PlanShape, segmentIndex?: number)
   if (typeof segmentIndex !== "number" || segmentIndex <= 0) return null;
   if (!Array.isArray(plan.motionControlSegments)) return null;
 
-  const url = cleanText(plan.motionControlSegments[segmentIndex - 1]?.startFrame?.imageUrl);
-  return url || null;
+  const previousSegmentFrameUrl = cleanText(plan.motionControlSegments[segmentIndex - 1]?.startFrame?.imageUrl);
+  if (previousSegmentFrameUrl) return previousSegmentFrameUrl;
+
+  const sharedPlanFrameUrl = cleanText(plan.startFrame?.imageUrl);
+  return sharedPlanFrameUrl || null;
 }
 
 function asText(value: unknown): string {
@@ -404,10 +407,25 @@ export async function POST(request: NextRequest) {
     }
 
     const hasShotGroups = Array.isArray(plan.motionControlSegments) && plan.motionControlSegments.length > 0;
-    const effectiveSegmentIndex = hasShotGroups ? 0 : segmentIndex;
 
-    const previousSegmentStartFrameUrl =
-      hasShotGroups ? null : getPreviousSegmentStartFrameUrl(plan, effectiveSegmentIndex);
+    let effectiveSegmentIndex: number | undefined;
+    if (hasShotGroups) {
+      const normalizedSegmentIndex =
+        typeof segmentIndex === "number" && Number.isFinite(segmentIndex)
+          ? Math.floor(segmentIndex)
+          : 0;
+
+      if (!plan.motionControlSegments || !plan.motionControlSegments[normalizedSegmentIndex]) {
+        return NextResponse.json(
+          { error: "Invalid segment index for this plan." },
+          { status: 400 }
+        );
+      }
+
+      effectiveSegmentIndex = normalizedSegmentIndex;
+    }
+
+    const previousSegmentStartFrameUrl = getPreviousSegmentStartFrameUrl(plan, effectiveSegmentIndex);
 
     const prompt = buildStartFramePrompt({
       appName: asText(planRow.app_name) || "Muslimah Pro",
@@ -506,17 +524,7 @@ export async function POST(request: NextRequest) {
     };
 
     let nextPlan: PlanShape;
-    if (hasShotGroups && plan.motionControlSegments) {
-      const updatedSegments = plan.motionControlSegments.map((segment) => ({
-        ...segment,
-        startFrame: nextStartFrame,
-      }));
-      nextPlan = {
-        ...plan,
-        startFrame: nextStartFrame,
-        motionControlSegments: updatedSegments,
-      };
-    } else if (typeof effectiveSegmentIndex === "number" && plan.motionControlSegments && plan.motionControlSegments[effectiveSegmentIndex]) {
+    if (typeof effectiveSegmentIndex === "number" && plan.motionControlSegments && plan.motionControlSegments[effectiveSegmentIndex]) {
       const updatedSegments = [...plan.motionControlSegments];
       updatedSegments[effectiveSegmentIndex] = {
         ...updatedSegments[effectiveSegmentIndex],
@@ -524,6 +532,7 @@ export async function POST(request: NextRequest) {
       };
       nextPlan = {
         ...plan,
+        startFrame: effectiveSegmentIndex === 0 ? nextStartFrame : plan.startFrame,
         motionControlSegments: updatedSegments,
       };
     } else {
