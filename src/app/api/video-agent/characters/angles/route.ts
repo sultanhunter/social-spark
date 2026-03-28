@@ -111,6 +111,7 @@ export async function POST(request: NextRequest) {
         `Persona: ${character.persona_summary}.`,
         `Visual style: ${character.visual_style}.`,
         `Wardrobe: ${character.wardrobe_notes || "Modest contemporary neutral styling"}.`,
+        "Modesty requirement: if arms are visible, both arms must be fully covered to the wrists with long sleeves.",
         "Keep facial identity consistent with reference image while changing only camera angle.",
         "Documentary realism, natural skin texture, minor imperfections, avoid beauty filter.",
         "NEGATIVE: plastic skin, hyper-symmetry, uncanny perfection, CGI sheen.",

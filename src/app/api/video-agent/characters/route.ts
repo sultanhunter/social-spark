@@ -245,6 +245,7 @@ TASK:
 - Create one reusable, brand-safe UGC persona.
 - Keep tone practical, warm, and faith-aware.
 - Keep styling modest and contemporary.
+- Enforce wardrobe modesty: if arms are visible, both arms must be fully covered to the wrists.
 - Avoid stereotypes.
 - The character must align with type: ${characterType}.
 - If type is ugc: must feel like a REAL person, not a polished AI model.
@@ -282,14 +283,14 @@ Return strict JSON only:
     ),
     wardrobeNotes: cleanText(
       parsed.wardrobeNotes,
-      "Modest contemporary outfit, neutral palette, minimal accessories."
+      "Modest contemporary outfit with long sleeves covering both arms to the wrists, neutral palette, minimal accessories."
     ),
     voiceTone: cleanText(parsed.voiceTone, "Warm, clear, grounded, reassuring."),
     promptTemplate: cleanText(
       parsed.promptTemplate,
       characterType === "animated"
-        ? "Use the same Muslimah animated character identity in every scene: consistent face silhouette, stylized 3D CGI texture language, modest styling, expressive but natural animation timing, and stable color palette."
-        : "Use the same female Muslimah creator identity in every UGC scene: consistent face, modest styling, natural expression, calm confident delivery, realistic movement, and no beauty-filter look."
+        ? "Use the same Muslimah animated character identity in every scene: consistent face silhouette, stylized 3D CGI texture language, modest styling with sleeves covering arms to wrists, expressive but natural animation timing, and stable color palette."
+        : "Use the same female Muslimah creator identity in every UGC scene: consistent face, modest styling with sleeves covering arms to wrists, natural expression, calm confident delivery, realistic movement, and no beauty-filter look."
     ),
     identityAnchors: Array.isArray(parsed.identityAnchors)
       ? parsed.identityAnchors
@@ -491,6 +492,7 @@ export async function POST(request: NextRequest) {
           `Persona: ${profile.personaSummary}.`,
           `Visual style: ${profile.visualStyle}.`,
           `Wardrobe: ${profile.wardrobeNotes}.`,
+          "Modesty requirement: if arms are visible, both arms must be fully covered to the wrists with long sleeves.",
           `Identity anchors: ${profile.identityAnchors.join("; ")}.`,
           `Realism directives: ${profile.realismDirectives.join("; ")}.`,
           characterType === "animated"

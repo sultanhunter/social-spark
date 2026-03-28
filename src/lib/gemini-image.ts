@@ -310,6 +310,7 @@ BRAND TONE GUIDELINES:
 CHARACTER CONTINUITY RULES:
 - ${characterLockDescriptor}
 - Preserve face identity, age range, skin tone, expression style, and hijab/wardrobe style consistently.
+- If a woman appears and arms are visible, both arms must be fully covered to the wrists with long sleeves.
 - Do not switch to a different person.
 `
     : "";
