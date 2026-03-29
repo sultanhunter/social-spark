@@ -416,17 +416,17 @@ function enforceWidgetReactionSeriesPattern(segments: MotionControlSegment[], ap
 
 function enforceDailyUgcQuranJourneyPattern(segments: MotionControlSegment[], appName: string): MotionControlSegment[] {
   const totalSegments = segments.length;
-  const quranDeepDiveStartIndex = Math.max(1, totalSegments - 2);
+  const quranDeepDiveStartIndex = Math.max(1, totalSegments - 3);
 
   return segments.map((segment, index, all) => {
     const shots = [...(segment.script?.shots || [])];
     if (shots.length === 0) {
       shots.push({
         shotId: "shot1",
-        visual: "UGC daily vlog shot in a real home setting with natural light.",
+        visual: "Stylized 3D animated day-in-the-life shot in a warm home environment.",
         narration: "Bismillah. Let me share my day with you.",
         onScreenText: "Daily update",
-        editNote: "Natural pacing and warm tone.",
+        editNote: "Warm cinematic animation pacing with expressive but natural acting.",
       });
     }
 
@@ -438,7 +438,7 @@ function enforceDailyUgcQuranJourneyPattern(segments: MotionControlSegment[], ap
       shots[0] = {
         ...firstShot,
         visual: cleanText(
-          `${firstShot.visual} UGC selfie intro while opening ${appName} and showing today's date, cycle day, and worship status card.`
+          `${firstShot.visual} 3D animated cold-open with recurring character checking ${appName} and showing today's date, cycle day, and worship status card.`
         ),
         narration: closeOpenEndedLine(
           firstShot.narration ||
@@ -448,7 +448,7 @@ function enforceDailyUgcQuranJourneyPattern(segments: MotionControlSegment[], ap
           cleanText(firstShot.onScreenText) ||
           "Today: 28 March 2026 | Cycle day X | Worship status from app",
         editNote: cleanText(
-          `${firstShot.editNote || ""} Begin as a diary hook and show app UI close-ups for date, cycle phase, and worship status.`
+          `${firstShot.editNote || ""} Begin as an animated episodic hook and show app UI close-ups for date, cycle phase, and worship status.`
         ),
       };
 
@@ -460,14 +460,14 @@ function enforceDailyUgcQuranJourneyPattern(segments: MotionControlSegment[], ap
           cleanText(appOverlayShot.onScreenText) ||
           "Prayer and Quran status shown inside app before ibadah plans",
         editNote: cleanText(
-          `${appOverlayShot.editNote || ""} Add phone screen recording overlay of app status while she explains her day plan.`
+          `${appOverlayShot.editNote || ""} Show app status while she explains her day plan in animated mentor style.`
         ),
       };
     } else if (isQuranDeepDive) {
       shots[0] = {
         ...firstShot,
         visual: cleanText(
-          `${firstShot.visual} Faceless cinematic B-roll: Quran pages, notebook highlights, calm desk setup, soft daylight.`
+          `${firstShot.visual} 3D animated teacher-to-camera setup: character facing camera, warm classroom-desk vibe, closed Quran on desk as prop.`
         ),
         narration: closeOpenEndedLine(
           firstShot.narration ||
@@ -477,7 +477,7 @@ function enforceDailyUgcQuranJourneyPattern(segments: MotionControlSegment[], ap
           cleanText(firstShot.onScreenText) ||
           "Verse deep dive: revelation context, hadith links, and tafsir notes",
         editNote: cleanText(
-          `${firstShot.editNote || ""} Use faceless visuals with educational voiceover and clean subtitle cards.`
+          `${firstShot.editNote || ""} Keep character looking at camera like a teacher while explaining clearly and warmly.`
         ),
       };
 
@@ -489,17 +489,17 @@ function enforceDailyUgcQuranJourneyPattern(segments: MotionControlSegment[], ap
           cleanText(lastShot.onScreenText) ||
           "Include: when revealed, related hadith, and one trusted scholar interpretation",
         editNote: cleanText(
-          `${lastShot.editNote || ""} Finish with a concise educational recap card and gentle reflection prompt.`
+          `${lastShot.editNote || ""} Finish with direct-to-camera teacher recap and gentle reflection prompt.`
         ),
       };
     } else {
       shots[0] = {
         ...firstShot,
         visual: cleanText(
-          `${firstShot.visual} UGC daily-life continuation: chores, lunch, or salah transition with natural home realism.`
+          `${firstShot.visual} 3D animated daily-life continuation: chores, meals, or worship-check transition with playful but grounded realism.`
         ),
         editNote: cleanText(
-          `${firstShot.editNote || ""} Keep it authentic day-in-the-life storytelling with practical worship check-ins.`
+          `${firstShot.editNote || ""} Keep it episodic, expressive, and coherent with practical worship check-ins.`
         ),
       };
     }
@@ -508,21 +508,21 @@ function enforceDailyUgcQuranJourneyPattern(segments: MotionControlSegment[], ap
       if (isOpening && promptIndex === 0) {
         return {
           ...promptItem,
-          generationType: "ugc_video" as const,
+          generationType: "base_ai_video" as const,
         };
       }
 
       if (isQuranDeepDive && promptItem.generationType !== "product_ui_overlay") {
         return {
           ...promptItem,
-          generationType: "ai_broll" as const,
+          generationType: "base_ai_video" as const,
         };
       }
 
-      if (!isQuranDeepDive && promptItem.generationType === "base_ai_video") {
+      if (promptItem.generationType !== "product_ui_overlay") {
         return {
           ...promptItem,
-          generationType: "ugc_video" as const,
+          generationType: "base_ai_video" as const,
         };
       }
 
@@ -536,16 +536,16 @@ function enforceDailyUgcQuranJourneyPattern(segments: MotionControlSegment[], ap
       startFramePrompt: isOpening
         ? cleanText(
           segment.startFramePrompt ||
-          `UGC selfie opening frame: character checking ${appName} daily dashboard with date, cycle day, and worship status.`
+          `Stylized 3D animated opening frame: character checking ${appName} daily dashboard with date, cycle day, and worship status.`
         )
         : isQuranDeepDive
           ? cleanText(
             segment.startFramePrompt ||
-            "Faceless Quran study frame with open mushaf, annotations, and calm morning light."
+            "3D animated teacher-to-camera Quran reflection frame with a closed Quran prop on desk."
           )
           : cleanText(
             segment.startFramePrompt ||
-            "UGC day-in-the-life frame with practical routine moment and subtle app check-in."
+            "Stylized 3D animated day-in-the-life frame with practical routine moment and subtle app check-in."
           ),
       script: {
         hook: segment.script?.hook || "",
@@ -553,7 +553,7 @@ function enforceDailyUgcQuranJourneyPattern(segments: MotionControlSegment[], ap
         cta: isLastSegment
           ? closeOpenEndedLine(
             segment.script?.cta ||
-            "Save this daily cycle diary and open the app for today's verse context, hadith links, and tafsir notes."
+            "See you tomorrow, inshaAllah. Open the app for today's verse context, hadith links, and tafsir notes."
           )
           : closeOpenEndedLine(segment.script?.cta || ""),
       },
@@ -2229,7 +2229,7 @@ export async function buildVideoScriptIdeationPlan({
     resolvedCampaignMode === "widget_reaction_ugc"
       ? "ugc"
       : resolvedCampaignMode === "daily_ugc_quran_journey"
-        ? "hybrid"
+        ? "ai_animation"
         : null;
   const preferredVideoTypeForPrompt = forcedVideoType || preferredVideoType;
 
@@ -2250,8 +2250,8 @@ CAMPAIGN MODE: widget_reaction_ugc
     : resolvedCampaignMode === "daily_ugc_quran_journey"
       ? `
 CAMPAIGN MODE: daily_ugc_quran_journey
-- Build a daily diary format that mixes UGC character storytelling and faceless educational voiceover.
-- Keep this mode as hybrid video type: blend on-camera character clips with faceless B-roll/info-card segments.
+- Build a daily diary episodic format using stylized 3D animation with one recurring animated Muslimah character.
+- Keep this mode as ai_animation video type and maintain strict character continuity across all segments.
 - Opening hook should feel like a real daily check-in and include date + cycle day + worship status from app.
 - Include practical daily-life beats: salah routine, Quran reading progress, chores/work/study, and one meal moment.
 - Integrate app naturally when she checks worship status before prayer and Quran moments (show app UI overlay cues).
@@ -2260,7 +2260,8 @@ CAMPAIGN MODE: daily_ugc_quran_journey
   * at least one related hadith,
   * one trusted scholarly interpretation,
   * concise takeaways for daily practice.
-- Make first half mostly UGC diary energy; final portion transitions to faceless explanatory style with voiceover.
+- Quran reflection segments must show the animated character looking into camera and explaining like a warm teacher/mentor.
+- Keep Quran prop closed in frame if visible (closed mushaf cover only, no open pages in frame generation prompts).
 - Keep delivery educational, compassionate, and non-preachy.
 `
     : "";
@@ -2950,7 +2951,7 @@ export async function buildCycleDayCalendarPlan({
   const prompt = `You are a senior Muslimah wellness content strategist.
 
 TASK:
-Create a full cycle-day content plan for a UGC + faceless daily video campaign.
+Create a full cycle-day content plan for a 3D animated daily video campaign with one recurring character.
 
 APP CONTEXT:
 - App name: ${appName}
@@ -3101,20 +3102,20 @@ function buildCycleDayDiaryBeatTemplates(args: {
 
   const fajrBeat = isPrayerPausedDay
     ? {
-      visual: `UGC dawn routine with ${appName} app open on worship-status card, tasbih and dua journal on desk, calm morning light.`,
+      visual: `3D animated dawn routine with ${appName} app open on worship-status card, tasbih and dua journal on desk, warm morning light.`,
       narration: "At Fajr time, I checked the app and my prayer status is paused today, so I did dhikr, dua, and morning adhkar.",
       onScreenText: "Fajr time check: prayer paused today",
-      editNote: "No salah performance visuals on paused days; show practical worship-support alternatives.",
+      editNote: "No salah performance visuals on paused days; show practical worship-support alternatives with expressive animation.",
     }
     : isIstihadaDay
       ? {
-        visual: `UGC morning worship setup: ${appName} istihada guidance screen, wudu prep space, prayer mat ready, soft dawn light.`,
+        visual: `3D animated morning worship setup: ${appName} istihada guidance screen, wudu prep space, prayer mat ready, soft dawn light.`,
         narration: "I started at Fajr time by checking istihada guidance in the app, then I followed it and prayed with confidence.",
         onScreenText: "Fajr with istihada guidance",
         editNote: "Show app guidance first, then respectful prayer-ready continuity.",
       }
       : {
-        visual: "UGC morning prayer routine: wudu prep space, prayer mat setup, soft dawn light.",
+        visual: "3D animated morning prayer routine: wudu prep space, prayer mat setup, soft dawn light.",
         narration: "I started my day with Fajr salah, then made dua and set my intention for the day.",
         onScreenText: "Started with Fajr + dua",
         editNote: "Respectful modest framing and calm pace.",
@@ -3122,20 +3123,20 @@ function buildCycleDayDiaryBeatTemplates(args: {
 
   const dhuhrBeat = isPrayerPausedDay
     ? {
-      visual: `UGC midday check-in with ${appName} showing paused worship status, character doing quiet dhikr reflection in a calm corner.`,
+      visual: `3D animated midday check-in with ${appName} showing paused worship status, character doing quiet dhikr reflection in a calm corner.`,
       narration: "Now it was Dhuhr time, so I checked the app again, saw prayer is paused today, and continued with dhikr and dua.",
       onScreenText: "Dhuhr check: paused status",
       editNote: appHookPrayer,
     }
     : isIstihadaDay
       ? {
-        visual: `UGC phone-in-hand shot checking ${appName} istihada support card before Dhuhr, then prayer-ready setup.`,
+        visual: `3D animated phone-in-hand shot checking ${appName} istihada support card before Dhuhr, then prayer-ready setup.`,
         narration: "By Dhuhr, I checked the app guidance again and followed it for my prayer routine.",
         onScreenText: "Dhuhr with istihada support",
         editNote: appHookPrayer,
       }
       : {
-        visual: `UGC phone-in-hand shot checking ${appName} before Dhuhr, then transitioning to prayer-ready setup.`,
+        visual: `3D animated phone-in-hand shot checking ${appName} before Dhuhr, then transitioning to prayer-ready setup.`,
         narration: "Now it was Dhuhr time, so I checked the app first and followed today's worship guidance.",
         onScreenText: "Dhuhr time check in app",
         editNote: appHookPrayer,
@@ -3143,20 +3144,20 @@ function buildCycleDayDiaryBeatTemplates(args: {
 
   const eveningWorshipBeat = isPrayerPausedDay
     ? {
-      visual: `UGC late-afternoon to evening routine with ${appName} worship status card, journaling, and calm home atmosphere.`,
+      visual: `3D animated late-afternoon to evening routine with ${appName} worship status card, journaling, and calm home atmosphere.`,
       narration: "In the evening, I checked the app once more and stayed consistent with dhikr, dua, and reflection.",
       onScreenText: "Evening worship-support routine",
       editNote: "Keep it practical and aligned with paused worship status.",
     }
     : isIstihadaDay
       ? {
-        visual: "UGC late-afternoon to evening transition with app check-ins and prayer-time preparation in a calm home setting.",
+        visual: "3D animated late-afternoon to evening transition with app check-ins and prayer-time preparation in a calm home setting.",
         narration: "I wrapped up my afternoon tasks, checked app guidance again, and moved through my evening worship routine.",
         onScreenText: "Evening routine + guided check",
         editNote: "Maintain continuity of istihada-support guidance before worship decisions.",
       }
       : {
-        visual: "UGC late-afternoon to evening transition with prayer-time reminders and calm home atmosphere.",
+        visual: "3D animated late-afternoon to evening transition with prayer-time reminders and calm home atmosphere.",
         narration: "I wrapped up my afternoon tasks, checked in again for prayer timing, and moved into my evening routine.",
         onScreenText: "Evening routine + prayer check",
         editNote: "Keep app hook subtle and useful before worship decisions.",
@@ -3164,29 +3165,29 @@ function buildCycleDayDiaryBeatTemplates(args: {
 
   const quranIntroBeat = isPrayerPausedDay
     ? {
-      visual: "Faceless Quran study B-roll: translation notes, tafsir highlights, pen marks, and desk lamp glow.",
+      visual: "3D animated teacher-to-camera Quran segment: character facing camera with gentle hand gestures, closed Quran on desk, study-lamp ambiance.",
       narration: `Before ending the day, I opened ${appName} and used Quran reflection mode for ${day.quran.reference}.`,
       onScreenText: `${day.quran.reference} | Quran reflection mode`,
-      editNote: `Transition from UGC diary to faceless voiceover mode. ${appHookQuran}`,
+      editNote: `Transition into direct-to-camera teacher explanation mode. ${appHookQuran}`,
     }
     : {
-      visual: "Faceless Quran study B-roll: open mushaf, highlighted notes, pen marks, and desk lamp glow.",
+      visual: "3D animated teacher-to-camera Quran segment: character looking at camera like a teacher, closed Quran prop on desk.",
       narration: `Before ending the day, I opened ${appName} and started my Quran reflection for ${day.quran.reference}.`,
       onScreenText: `${day.quran.reference} | Quran reflection`,
-      editNote: `Transition from UGC diary to faceless voiceover mode. ${appHookQuran}`,
+      editNote: `Transition into direct-to-camera teacher explanation mode. ${appHookQuran}`,
     };
 
   return [
     {
       phase: "hook",
-      visual: "Fast-paced cinematic UGC opening: character tying hijab, grabbing phone, and stepping into morning light.",
+      visual: "Fast-paced cinematic 3D animated opening: character tying hijab, grabbing phone, and stepping into morning light.",
       narration: "Day in my life starts now.",
       onScreenText: "Day in my life",
       editNote: "Open with a strong visual hook and quick cut rhythm.",
     },
     {
       phase: "morning",
-      visual: `UGC selfie + phone close-up showing ${appName} daily dashboard with date and cycle status.`,
+      visual: `3D animated close-up showing ${appName} daily dashboard with date and cycle status while character addresses camera.`,
       narration: `So today is ${readableDate}, it's my cycle day ${day.cycleDay}, and ${worshipShort}.`,
       onScreenText: `${readableDate} | Cycle day ${day.cycleDay} | ${day.worshipStatus}`,
       editNote: `Keep this as fixed intro line and show app UI clearly. ${appHookMorning}`,
@@ -3200,21 +3201,21 @@ function buildCycleDayDiaryBeatTemplates(args: {
     },
     {
       phase: "routine",
-      visual: "UGC home routine montage: making bed, tidy kitchen, preparing workspace, light household chores.",
+      visual: "3D animated home routine montage: making bed, tidy kitchen, preparing workspace, light household chores.",
       narration: closeOpenEndedLine(day.dailyStory.chores || "Then I moved into my morning chores and routine tasks."),
       onScreenText: "Morning chores and routine",
       editNote: "Keep this practical and relatable, not polished or ad-like.",
     },
     {
       phase: "meal",
-      visual: "UGC breakfast prep and table shot with natural kitchen audio ambiance.",
+      visual: "3D animated breakfast prep and table shot with warm kitchen ambiance.",
       narration: `For breakfast, I had ${meals.breakfast}`,
       onScreenText: "Cycle-day breakfast",
       editNote: "Show food clearly and keep portions realistic for daily life.",
     },
     {
       phase: "routine",
-      visual: "UGC midday productivity sequence: errands, study/work block, and quick home reset.",
+      visual: "3D animated midday productivity sequence: errands, study/work block, and quick home reset.",
       narration: "After breakfast, I handled more chores and focused on my main tasks for the day.",
       onScreenText: "More chores + focused work",
       editNote: "Maintain diary continuity and natural time progression.",
@@ -3228,14 +3229,14 @@ function buildCycleDayDiaryBeatTemplates(args: {
     },
     {
       phase: "meal",
-      visual: "UGC lunch scene: plated meal, water refill, quick gratitude pause before eating.",
+      visual: "3D animated lunch scene: plated meal, water refill, quick gratitude pause before eating.",
       narration: `For lunch, I had ${meals.lunch}`,
       onScreenText: "Cycle-day lunch",
       editNote: "Keep this warm, grounded, and home-realistic.",
     },
     {
       phase: "routine",
-      visual: "UGC afternoon reset: curtains dimmed, short rest setup, then returning with refreshed energy.",
+      visual: "3D animated afternoon reset: curtains dimmed, short rest setup, then returning with refreshed energy.",
       narration: "Then I took a little afternoon nap, which is sunnah, and got back to my day feeling refreshed.",
       onScreenText: "Afternoon nap (sunnah)",
       editNote: "Gentle transition pacing and soft ambient sound bed.",
@@ -3256,21 +3257,21 @@ function buildCycleDayDiaryBeatTemplates(args: {
     },
     {
       phase: "quran",
-      visual: "Faceless educational cards over Quran B-roll explaining verse context and revelation background.",
+      visual: "3D animated character looking at camera like a teacher, explaining verse context with clear hand gestures and closed Quran prop on desk.",
       narration: closeOpenEndedLine(`${day.quran.revelationContext}`),
       onScreenText: "When these verses were revealed",
-      editNote: "Use concise context cards and clean subtitle design.",
+      editNote: "Teacher-to-camera delivery, clear pacing, and educational warmth.",
     },
     {
       phase: "quran",
-      visual: "Faceless recap card sequence with hadith excerpt and scholar interpretation highlights.",
+      visual: "3D animated character still facing camera like a mentor, summarizing hadith connection and scholar interpretation with calm authority.",
       narration: closeOpenEndedLine(`${day.quran.relatedHadith} ${day.quran.scholarlyInterpretation} ${day.quran.keyTakeaway}`),
       onScreenText: "Hadith link + scholar tafsir + takeaway",
-      editNote: "Educational, balanced, and practical tone.",
+      editNote: "Keep direct-to-camera teacher style and practical tone.",
     },
     {
       phase: "outro",
-      visual: "UGC night close shot: character closing journal, soft smile to camera, lights dimming.",
+      visual: "3D animated night close shot: character closing journal, soft smile to camera, lights dimming.",
       narration: "That was my cycle day diary today. See you tomorrow, inshaAllah.",
       onScreenText: "See you tomorrow, inshaAllah",
       editNote: "Close with warmth and continuity for next-day series retention.",
@@ -3319,15 +3320,15 @@ function applyCycleDayNarrativeTemplate(args: {
     const beat = normalizedBeats[Math.max(0, Math.min(normalizedBeats.length - 1, beatIndex))] || normalizedBeats[0];
     const template = beatTemplates[Math.max(0, Math.min(beatTemplates.length - 1, beatIndex))] || beatTemplates[0];
     const isQuranPhase = template.phase === "quran";
-    const generationType: MultiShotPrompt["generationType"] = isQuranPhase ? "ai_broll" : "ugc_video";
+    const generationType: MultiShotPrompt["generationType"] = "base_ai_video";
     const promptText = cleanText([
       beat.visual,
       `Narration intent: ${beat.narration}`,
       `On-screen text direction: ${beat.onScreenText}`,
       isQuranPhase
-        ? "Faceless educational tone, calm transitions, and clean subtitle cards."
-        : "Authentic day-in-the-life UGC realism with natural handheld pacing.",
-      "Vertical 9:16, coherent continuity, realistic lighting and texture, no artifacts.",
+        ? "3D animated teacher-to-camera explanation, warm mentor energy, clear hand gestures, and direct eye contact to camera."
+        : "3D animated day-in-the-life storytelling, expressive but grounded performance, cinematic pacing.",
+      "Vertical 9:16, stylized 3D animation quality, coherent continuity, no visual artifacts.",
     ].join(" "));
 
     return {
@@ -3363,7 +3364,7 @@ function applyCycleDayNarrativeTemplate(args: {
 
   const transitionReadySegments = enforceSegmentBoundaryTransitions(mappedSegments);
   const campaignAdjustedSegments = enforceDailyUgcQuranJourneyPattern(transitionReadySegments, appName);
-  const styleHint = "hybrid social explainer";
+  const styleHint = "stylized 3D animated social explainer";
   const veoReadySegments = campaignAdjustedSegments.map((segment, index, all) => ({
     ...segment,
     veoPrompt: buildVeo31SegmentPrompt({
@@ -3380,11 +3381,11 @@ function applyCycleDayNarrativeTemplate(args: {
 
   return {
     ...plan,
-    title: `Cycle Plan ${cyclePlanNumber} - Day ${day.cycleDay} Day-in-the-Life + Quran Reflection`,
+    title: `Cycle Plan ${cyclePlanNumber} - Day ${day.cycleDay} 3D Day-in-the-Life + Quran Reflection`,
     objective: cleanText(
-      `Coherent day-in-the-life vlog for cycle day ${day.cycleDay}: hook, worship-aware routine, meal moments, prayer transitions, then Quran reflection and tomorrow hook.`
+      `Coherent 3D animated day-in-the-life episode for cycle day ${day.cycleDay}: hook, worship-aware routine, meal moments, app check-ins, teacher-style Quran reflection, then tomorrow hook.`
     ),
-    appHookStrategy: "Show app at morning status check, prayer decision moments, and Quran reflection start.",
+    appHookStrategy: "Show app at morning status check, prayer-status decision moments, and Quran reflection start while keeping story fun and coherent.",
     script: {
       hook: openingLine,
       beats: normalizedBeats,
@@ -3393,9 +3394,10 @@ function applyCycleDayNarrativeTemplate(args: {
     motionControlSegments: veoReadySegments,
     socialCaption: {
       caption: closeOpenEndedLine(
-        `Cycle day ${day.cycleDay} day-in-the-life: worship check-ins, daily routine, and ${day.quran.reference} reflection. See you tomorrow, inshaAllah.`
+        `Cycle day ${day.cycleDay} 3D day-in-the-life: worship check-ins, daily routine, and teacher-style ${day.quran.reference} reflection. See you tomorrow, inshaAllah.`
       ),
       hashtags: [
+        "#3DAnimation",
         "#DayInTheLife",
         "#CycleDayDiary",
         "#MuslimahRoutine",
@@ -3454,8 +3456,10 @@ export async function buildCycleDayVideoScriptPlan({
     day.isPeriodDay
       ? "Use app hooks naturally at worship-status checks and Quran-start moment; do not include salah performance visuals on paused days."
       : "Use app hooks naturally at worship status check, prayer-time decisions, and Quran-start moment.",
-    "Video structure must be mixed: UGC daily-life storytelling first, faceless educational voiceover in final section.",
-    "Ending should include a detailed verse recap card with revelation timing, hadith link, scholar insight, and see-you-tomorrow outro.",
+    "Video structure must be 3D animated from start to end with one recurring animated character.",
+    "Quran reflection segments must be teacher-style: character looking into camera and explaining clearly.",
+    "If Quran prop appears in frame, keep it closed (cover visible), not open.",
+    "Ending should include a detailed verse recap with revelation timing, hadith link, scholar insight, and see-you-tomorrow outro.",
   ].join(" "));
 
   const basePlan = await buildVideoScriptIdeationPlan({
@@ -3463,7 +3467,7 @@ export async function buildCycleDayVideoScriptPlan({
     appContext,
     topicBrief,
     targetDurationSeconds: suggestedDuration,
-    preferredVideoType: "hybrid",
+    preferredVideoType: "ai_animation",
     campaignMode: "daily_ugc_quran_journey",
     ugcCharacter,
     reasoningModel,

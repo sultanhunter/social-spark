@@ -38,6 +38,7 @@ type VideoUgcCharacterRow = {
   prompt_template: string;
   reference_image_url: string | null;
   image_model: string | null;
+  character_type?: string | null;
   is_default?: boolean | null;
 };
 
@@ -91,6 +92,17 @@ function sanitizeInteger(value: unknown, fallback: number): number {
     if (Number.isFinite(parsed)) return Math.round(parsed);
   }
   return fallback;
+}
+
+function normalizeCharacterType(value: unknown): "ugc" | "animated" {
+  const cleaned = typeof value === "string" ? value.trim().toLowerCase() : "";
+  return cleaned === "animated" ? "animated" : "ugc";
+}
+
+function resolveCharacterType(row: Pick<VideoUgcCharacterRow, "character_type" | "prompt_template">): "ugc" | "animated" {
+  const byColumn = normalizeCharacterType(row.character_type);
+  if (byColumn === "animated") return "animated";
+  return /CharacterType:\s*animated/i.test(row.prompt_template || "") ? "animated" : "ugc";
 }
 
 function mapScriptAgentVideoTypeToFormatType(videoType: ScriptAgentVideoType): "ugc" | "ai_video" | "hybrid" | "editorial" {
@@ -285,49 +297,105 @@ export async function POST(request: NextRequest) {
 
     let ugcCharacter: UGCCharacterProfile | null = null;
     const fullSelect =
-      "id, character_name, persona_summary, visual_style, wardrobe_notes, voice_tone, prompt_template, reference_image_url, image_model, is_default";
+      "id, character_name, persona_summary, visual_style, wardrobe_notes, voice_tone, prompt_template, reference_image_url, image_model, character_type, is_default";
+    const fallbackSelect =
+      "id, character_name, persona_summary, visual_style, wardrobe_notes, voice_tone, prompt_template, reference_image_url, image_model";
 
-    let characterResult = selectedCharacterId
-      ? await supabase
+    let selectedCharacterRow: VideoUgcCharacterRow | null = null;
+
+    if (selectedCharacterId) {
+      let byId = await supabase
         .from("video_ugc_characters")
         .select(fullSelect)
         .eq("collection_id", collectionId)
         .eq("id", selectedCharacterId)
-        .maybeSingle()
-      : await supabase
+        .maybeSingle();
+
+      if (byId.error && (isMissingColumnError(byId.error, "character_type") || isMissingColumnError(byId.error, "is_default"))) {
+        byId = await supabase
+          .from("video_ugc_characters")
+          .select(fallbackSelect)
+          .eq("collection_id", collectionId)
+          .eq("id", selectedCharacterId)
+          .maybeSingle();
+      }
+
+      if (!byId.data) {
+        return NextResponse.json({ error: "Selected character not found for this collection." }, { status: 404 });
+      }
+
+      const row = byId.data as unknown as VideoUgcCharacterRow;
+      if (resolveCharacterType(row) !== "animated") {
+        return NextResponse.json(
+          { error: "Cycle Day Agent requires an animated character. Please select a 3D animated character." },
+          { status: 400 }
+        );
+      }
+
+      selectedCharacterRow = row;
+    } else {
+      let animatedDefault = await supabase
         .from("video_ugc_characters")
         .select(fullSelect)
         .eq("collection_id", collectionId)
+        .eq("character_type", "animated")
         .eq("is_default", true)
         .maybeSingle();
 
-    if (characterResult.error && isMissingColumnError(characterResult.error, "is_default")) {
-      characterResult = selectedCharacterId
-        ? await supabase
+      if (animatedDefault.error && (isMissingColumnError(animatedDefault.error, "character_type") || isMissingColumnError(animatedDefault.error, "is_default"))) {
+        animatedDefault = await supabase
           .from("video_ugc_characters")
-          .select("id, character_name, persona_summary, visual_style, wardrobe_notes, voice_tone, prompt_template, reference_image_url, image_model")
-          .eq("collection_id", collectionId)
-          .eq("id", selectedCharacterId)
-          .maybeSingle()
-        : await supabase
-          .from("video_ugc_characters")
-          .select("id, character_name, persona_summary, visual_style, wardrobe_notes, voice_tone, prompt_template, reference_image_url, image_model")
+          .select(fallbackSelect)
           .eq("collection_id", collectionId)
           .order("created_at", { ascending: true })
           .limit(1)
           .maybeSingle();
+      }
+
+      if (animatedDefault.data) {
+        const row = animatedDefault.data as unknown as VideoUgcCharacterRow;
+        if (resolveCharacterType(row) === "animated") {
+          selectedCharacterRow = row;
+        }
+      }
+
+      if (!selectedCharacterRow) {
+        let firstAnimated = await supabase
+          .from("video_ugc_characters")
+          .select(fullSelect)
+          .eq("collection_id", collectionId)
+          .eq("character_type", "animated")
+          .order("created_at", { ascending: true })
+          .limit(1)
+          .maybeSingle();
+
+        if (firstAnimated.error && isMissingColumnError(firstAnimated.error, "character_type")) {
+          firstAnimated = await supabase
+            .from("video_ugc_characters")
+            .select(fallbackSelect)
+            .eq("collection_id", collectionId)
+            .order("created_at", { ascending: true })
+            .limit(1)
+            .maybeSingle();
+        }
+
+        if (firstAnimated.data) {
+          const row = firstAnimated.data as unknown as VideoUgcCharacterRow;
+          if (resolveCharacterType(row) === "animated") {
+            selectedCharacterRow = row;
+          }
+        }
+      }
+
+      if (!selectedCharacterRow) {
+        return NextResponse.json(
+          { error: "No animated character found for this collection. Create a 3D animated character first." },
+          { status: 400 }
+        );
+      }
     }
 
-    if (selectedCharacterId && !characterResult.data) {
-      return NextResponse.json(
-        { error: "Selected character not found for this collection." },
-        { status: 404 }
-      );
-    }
-
-    if (characterResult.data) {
-      ugcCharacter = toUgcCharacterProfile(characterResult.data as unknown as VideoUgcCharacterRow);
-    }
+    ugcCharacter = toUgcCharacterProfile(selectedCharacterRow);
 
     const appName = (collection.app_name || "Muslimah Pro").trim() || "Muslimah Pro";
     const appContext = (collection.app_description || collection.app_context || "").trim();

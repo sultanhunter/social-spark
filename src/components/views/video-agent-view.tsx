@@ -1565,8 +1565,12 @@ export function VideoAgentView({ collectionId }: { collectionId: string }) {
         if (current !== "auto" && characters.some((item) => item.id === current)) {
           return current;
         }
-        const defaultCharacter = characters.find((item) => item.isDefault) || null;
-        return defaultCharacter?.id || "auto";
+        const defaultAnimatedCharacter =
+          characters.find((item) => (item.characterType || "ugc") === "animated" && item.isDefault) || null;
+        if (defaultAnimatedCharacter?.id) return defaultAnimatedCharacter.id;
+        const firstAnimatedCharacter =
+          characters.find((item) => (item.characterType || "ugc") === "animated") || null;
+        return firstAnimatedCharacter?.id || "auto";
       });
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load UGC characters.");
@@ -2802,7 +2806,7 @@ export function VideoAgentView({ collectionId }: { collectionId: string }) {
             <DialogHeader className="border-b border-slate-200">
               <DialogTitle className="text-base">Cycle Day Agent</DialogTitle>
               <DialogDescription className="text-xs text-slate-600">
-                Generate calendar-based cycle plans, then pick one cycle day to produce a full UGC + faceless Quran diary script.
+                Generate calendar-based cycle plans, then pick one cycle day to produce a full 3D animated day-in-the-life Quran diary script.
               </DialogDescription>
             </DialogHeader>
 
@@ -2895,9 +2899,9 @@ export function VideoAgentView({ collectionId }: { collectionId: string }) {
                       onChange={(event) => setCycleDayCharacterId(event.target.value)}
                       className="w-full rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-xs text-slate-800 outline-none transition focus:border-rose-400 focus:ring-2 focus:ring-rose-200"
                     >
-                      <option value="auto">Auto/default character</option>
+                      <option value="auto">Auto/default animated character</option>
                       {ugcCharacters
-                        .filter((character) => (character.characterType || "ugc") === "ugc")
+                        .filter((character) => (character.characterType || "ugc") === "animated")
                         .map((character) => (
                           <option key={character.id} value={character.id}>
                             {character.characterName}
