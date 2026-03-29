@@ -176,6 +176,17 @@ function normalizeShotPromptForStartFrame(value: unknown): string {
   return cleanText(beforeThen);
 }
 
+function hasWorshipGestureCue(...values: unknown[]): boolean {
+  const combined = values.map((value) => cleanText(value)).join(" ").toLowerCase();
+  if (!combined) return false;
+  return /\b(dua|du'a|supplication|prayer|salah|salat|dhikr|adhkar|gratitude|shukr)\b/i.test(combined);
+}
+
+function worshipGestureInstruction(shouldEnforce: boolean): string {
+  if (!shouldEnforce) return "";
+  return "If a worship/gratitude gesture appears, use authentic Muslim dua posture: both hands open with palms facing upward near chest level; do not use clasped-hands or namaste-style gesture.";
+}
+
 function buildStartFramePrompt(args: {
   appName: string;
   formatType: string;
@@ -194,6 +205,16 @@ function buildStartFramePrompt(args: {
     segmentIndex,
     previousSegmentStartFrameUrl,
   } = args;
+  const globalWorshipPoseInstruction = worshipGestureInstruction(
+    hasWorshipGestureCue(
+      video.title,
+      video.description,
+      plan.title,
+      plan.objective,
+      plan.script?.hook,
+      plan.script?.cta
+    )
+  );
 
   if (plan.klingMotionControlOnly) {
     const characterInstruction = character
@@ -210,6 +231,7 @@ function buildStartFramePrompt(args: {
       `Source video title/context: ${video.title || video.description || "N/A"}.`,
       characterInstruction,
       "If a woman appears, wardrobe must include long sleeves with both arms fully covered to the wrists.",
+      globalWorshipPoseInstruction,
       "Vertical 9:16 composition at 1080x1920 output framing.",
       "Photorealistic ultra-detailed 4K-quality look (true skin texture, realistic fabric, plausible natural lighting, no uncanny artifacts).",
       "No text overlays, no subtitles, no logos, no watermark.",
@@ -229,6 +251,16 @@ function buildStartFramePrompt(args: {
     const segmentCta = cleanText(segment.script?.cta);
     const firstSegmentPrompt = Array.isArray(segment.multiShotPrompts) ? cleanText(segment.multiShotPrompts?.[0]?.prompt) : "";
     const veoPromptCue = cleanText(segment.veoPrompt || "");
+    const worshipPoseInstruction = worshipGestureInstruction(
+      hasWorshipGestureCue(
+        segment.startFramePrompt,
+        segmentHook,
+        segmentVisualCue,
+        segmentCta,
+        firstSegmentPrompt,
+        veoPromptCue
+      )
+    );
     const continuityInstruction =
       typeof segmentIndex === "number" && segmentIndex > 0
         ? "Continuity requirement: this segment must look like an immediate continuation of earlier generated segments. Keep the same main character identity unless script explicitly introduces a new person."
@@ -283,6 +315,7 @@ function buildStartFramePrompt(args: {
       `Photorealistic ultra-detailed 4K-quality look (high texture fidelity, clean dynamic range, realistic skin and fabric detail).`,
       `If a person appears, enforce modest, non-sexual framing: neutral posture, respectful body language, and modest wardrobe.`,
       `If a woman appears, enforce long sleeves with both arms fully covered to the wrists in every frame.`,
+      worshipPoseInstruction,
       `No suggestive posing, no cleavage, no lingerie/swimwear styling, no glamourized sensual focus.`,
       `No text overlays, no subtitles, no logos, no watermark.`,
       `High realism and coherent scene setup suitable for AI video generation start frame input.`,
@@ -298,6 +331,9 @@ function buildStartFramePrompt(args: {
     plan.higgsfieldPrompts?.[0]
     : null;
   const firstScenePrompt = normalizeShotPromptForStartFrame(firstScene?.prompt);
+  const worshipPoseInstruction = worshipGestureInstruction(
+    hasWorshipGestureCue(hook, firstBeatVisual, firstBeatNarration, firstScenePrompt)
+  );
 
   const characterInstruction = character
     ? `Use the selected recurring character identity (${character.character_name}). Keep face identity and styling consistent.`
@@ -320,6 +356,7 @@ function buildStartFramePrompt(args: {
     `Photorealistic ultra-detailed 4K-quality look (high texture fidelity, clean dynamic range, realistic skin and fabric detail), while keeping output composition suitable for 1080x1920 video start frame usage.`,
     `If a person appears, enforce modest, non-sexual framing: neutral posture, respectful body language, and modest wardrobe with no tight/transparent clothing.`,
     `If a woman appears, enforce long sleeves with both arms fully covered to the wrists in every frame.`,
+    worshipPoseInstruction,
     `Avoid camera angles or poses that emphasize chest, hips, or body contours. Prefer chest-up or waist-up framing unless script requires wider context.`,
     `No suggestive posing, no cleavage, no lingerie/swimwear styling, no glamourized sensual focus.`,
     `No text overlays, no subtitles, no logos, no watermark.`,

@@ -562,6 +562,16 @@ function enforceDailyUgcQuranJourneyPattern(segments: MotionControlSegment[], ap
   });
 }
 
+function hasWorshipGestureCue(...values: unknown[]): boolean {
+  const combined = values
+    .map((value) => cleanText(typeof value === "string" ? value : ""))
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
+  if (!combined) return false;
+  return /\b(dua|du'a|supplication|prayer|salah|salat|dhikr|adhkar|gratitude|shukr)\b/i.test(combined);
+}
+
 function buildVeo31SegmentPrompt(args: {
   segment: MotionControlSegment;
   nextSegment?: MotionControlSegment;
@@ -588,6 +598,14 @@ function buildVeo31SegmentPrompt(args: {
     ];
 
   const shotDurationSeconds = Math.max(1, Math.round(durationSeconds / Math.max(1, resolvedShots.length)));
+  const worshipPoseInstruction = hasWorshipGestureCue(
+    segment.startFramePrompt,
+    segment.script?.hook,
+    segment.script?.cta,
+    ...resolvedShots.map((shot) => `${shot.visual || ""} ${shot.narration || ""} ${shot.editNote || ""}`)
+  )
+    ? "If worship or gratitude gesture appears, use authentic Muslim dua posture: both hands open with palms facing upward near chest level, never clasped-hands or namaste-style gesture."
+    : "";
 
   const voiceStyleInstruction = isAnimatedStyle
     ? "Speech delivery: clear and expressive, emotionally natural, no robotic cadence, medium pacing."
@@ -627,6 +645,7 @@ function buildVeo31SegmentPrompt(args: {
       characterLock,
       `App integration: if app is referenced, show practical phone interaction with ${appName}, subtle and natural to the scene.`,
       `Do not render text overlays, captions, subtitles, logos, or watermarks in the generated video.`,
+      worshipPoseInstruction,
       scriptHook ? `Segment hook intent: ${scriptHook}` : "",
       `Shot plan: ${shotLines}`,
       scriptCta ? `Segment close intent: ${scriptCta}` : "",
