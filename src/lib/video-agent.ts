@@ -344,49 +344,8 @@ function planBeatsToSegmentShots(beats: PlanBeat[]): SegmentScriptShot[] {
   }));
 }
 
-function shortenForTransition(value: string, maxWords = 12): string {
-  const cleaned = cleanText(value);
-  if (!cleaned) return "";
-  const words = cleaned.split(/\s+/).filter(Boolean);
-  if (words.length <= maxWords) return cleaned;
-  return `${words.slice(0, maxWords).join(" ")}...`;
-}
-
 function enforceSegmentBoundaryTransitions(segments: MotionControlSegment[]): MotionControlSegment[] {
-  return segments.map((segment, index) => {
-    const next = segments[index + 1];
-    if (!segment.script?.shots?.length || !next?.script?.shots?.length) {
-      return segment;
-    }
-
-    const shots = [...segment.script.shots];
-    const lastShot = shots[shots.length - 1];
-    const nextFirstShot = next.script.shots[0];
-    const nextAnchor = shortenForTransition(
-      nextFirstShot.visual || nextFirstShot.onScreenText || next.startFramePrompt
-    );
-
-    const transitionNote = cleanText(
-      `End this shot with a clean handoff into Segment ${next.segmentId}. ` +
-      `${nextAnchor ? `Match cut toward next opening: ${nextAnchor}. ` : ""}` +
-      "Keep camera axis, subject placement, and lighting continuity for seamless merge in final edit."
-    );
-
-    shots[shots.length - 1] = {
-      ...lastShot,
-      narration: closeOpenEndedLine(lastShot.narration),
-      onScreenText: closeOpenEndedLine(lastShot.onScreenText),
-      editNote: cleanText(`${lastShot.editNote || ""} ${transitionNote}`),
-    };
-
-    return {
-      ...segment,
-      script: {
-        ...segment.script,
-        shots,
-      },
-    };
-  });
+  return segments;
 }
 
 function enforceWidgetReactionSeriesPattern(segments: MotionControlSegment[], appName: string): MotionControlSegment[] {
@@ -610,7 +569,7 @@ function buildVeo31SegmentPrompt(args: {
   appName: string;
   ugcCharacter?: UGCCharacterProfile | null;
 }): string {
-  const { segment, nextSegment, styleHint, appName, ugcCharacter } = args;
+  const { segment, styleHint, appName, ugcCharacter } = args;
   const isAnimatedStyle = /animated|animation|cgi/i.test(styleHint);
   const isUgcLikeStyle = /ugc|hybrid|vlog|social/i.test(styleHint);
   const durationSeconds = Math.max(2, Math.round(segment.durationSeconds || MAX_SINGLE_VIDEO_CLIP_SECONDS));
@@ -655,10 +614,6 @@ function buildVeo31SegmentPrompt(args: {
       ? "Character consistency: keep same animated character silhouette, face shape language, color palette, and costume continuity throughout this segment."
       : "Character consistency: keep same person identity, face geometry, and wardrobe continuity throughout this segment.";
 
-  const transitionHint = nextSegment
-    ? `End frame transition: finish with a clean match-cut handoff toward the next segment opening (${shortenForTransition(nextSegment.startFramePrompt, 14)}).`
-    : "End frame transition: finish cleanly with no abrupt visual jump so final edit can close naturally.";
-
   const scriptHook = closeOpenEndedLine(segment.script?.hook || "");
   const scriptCta = closeOpenEndedLine(segment.script?.cta || "");
 
@@ -676,7 +631,6 @@ function buildVeo31SegmentPrompt(args: {
       `Shot plan: ${shotLines}`,
       scriptCta ? `Segment close intent: ${scriptCta}` : "",
       `Audio mix: prioritize clear spoken voice and natural room tone; keep any background sound subtle and non-distracting.`,
-      transitionHint,
     ].join(" ")
   );
 }
@@ -1818,7 +1772,7 @@ SHOT GROUP CONSTRAINTS:
 - Do NOT end a segment with unfinished dialogue that requires continuation in next segment.
 - End every segment's spoken lines as complete thoughts with full stop punctuation.
 - In each segment script, shots are ordered by shotId only (shot1, shot2, ...). Do NOT use per-shot timing.
-- The last shot of each segment must be transition-friendly with the next segment opening (matching camera axis/lighting/subject position where possible).
+- Keep each segment focused on its own content window; do not add explicit handoff/transition instructions to the end of the segment.
 - For each segment, provide one complete detailed veoPrompt optimized for Veo 3.1. It must be copy-paste ready, include shot-wise structure (Shot 1: ... Shot 2: ...), and push photorealistic UGC realism.
 - Veo prompt realism directives: natural skin texture and pores, realistic eye blinks/micro-expressions, physically plausible lighting, authentic handheld phone motion, no uncanny facial artifacts, no waxy/plastic skin look.
 - For each segment, provide multiShotPrompts tailored to that segment only.
@@ -2341,7 +2295,7 @@ RULES:
 - Each shot group must include startFramePrompt, segment script (hook/shots/cta), and one copy-paste-ready veoPrompt for Veo 3.1.
 - Segment scripts must be self-contained per group with no unfinished sentence that continues into the next segment.
 - Use shotId ordering inside each segment (shot1, shot2, ...), no per-shot timing.
-- Last shot in each segment should transition smoothly into next segment opening for clean final merge.
+- Keep each segment focused on its own content; do not spend duration on explicit handoff-to-next-segment actions.
 - Veo prompt must be a single detailed prompt with explicit shot-wise structure (Shot 1: ..., Shot 2: ...).
 - Veo prompt style directives by video type:
   - ugc/hybrid/faceless_broll: photoreal live-action realism (natural skin detail, plausible lighting, no uncanny artifacts).
@@ -3112,15 +3066,96 @@ function buildCycleDayDiaryBeatTemplates(args: {
 }): CycleDayDiaryBeatTemplate[] {
   const { appName, readableDate, day } = args;
   const meals = buildCycleAwareMealPlan(day);
+  const isPrayerPausedDay = day.isPeriodDay;
+  const isIstihadaDay = !day.isPeriodDay && day.isIstihada;
   const worshipShort =
-    day.isPeriodDay
+    isPrayerPausedDay
       ? "my worship statuses are paused for today"
-      : day.isIstihada
+      : isIstihadaDay
         ? "my worship status is istihada support mode today"
         : "my worship statuses are active today";
   const appHookMorning = day.appHooks[0] || "Show app dashboard with cycle day and worship status.";
-  const appHookPrayer = day.appHooks[1] || "Before Dhuhr, check prayer status in app.";
+  const appHookPrayer = day.appHooks[1] || (isPrayerPausedDay
+    ? "Before each prayer window, show app worship status as paused and continue with dhikr/dua routine."
+    : "Before Dhuhr, check prayer status in app.");
   const appHookQuran = day.appHooks[2] || "Before Quran reflection, open verse tracker in app.";
+
+  const fajrBeat = isPrayerPausedDay
+    ? {
+      visual: `UGC dawn routine with ${appName} app open on worship-status card, tasbih and dua journal on desk, calm morning light.`,
+      narration: "At Fajr time, I checked the app and my prayer status is paused today, so I did dhikr, dua, and morning adhkar.",
+      onScreenText: "Fajr time check: prayer paused today",
+      editNote: "No salah performance visuals on paused days; show practical worship-support alternatives.",
+    }
+    : isIstihadaDay
+      ? {
+        visual: `UGC morning worship setup: ${appName} istihada guidance screen, wudu prep space, prayer mat ready, soft dawn light.`,
+        narration: "I started at Fajr time by checking istihada guidance in the app, then I followed it and prayed with confidence.",
+        onScreenText: "Fajr with istihada guidance",
+        editNote: "Show app guidance first, then respectful prayer-ready continuity.",
+      }
+      : {
+        visual: "UGC morning prayer routine: wudu prep space, prayer mat setup, soft dawn light.",
+        narration: "I started my day with Fajr salah, then made dua and set my intention for the day.",
+        onScreenText: "Started with Fajr + dua",
+        editNote: "Respectful modest framing and calm pace.",
+      };
+
+  const dhuhrBeat = isPrayerPausedDay
+    ? {
+      visual: `UGC midday check-in with ${appName} showing paused worship status, character doing quiet dhikr reflection in a calm corner.`,
+      narration: "Now it was Dhuhr time, so I checked the app again, saw prayer is paused today, and continued with dhikr and dua.",
+      onScreenText: "Dhuhr check: paused status",
+      editNote: appHookPrayer,
+    }
+    : isIstihadaDay
+      ? {
+        visual: `UGC phone-in-hand shot checking ${appName} istihada support card before Dhuhr, then prayer-ready setup.`,
+        narration: "By Dhuhr, I checked the app guidance again and followed it for my prayer routine.",
+        onScreenText: "Dhuhr with istihada support",
+        editNote: appHookPrayer,
+      }
+      : {
+        visual: `UGC phone-in-hand shot checking ${appName} before Dhuhr, then transitioning to prayer-ready setup.`,
+        narration: "Now it was Dhuhr time, so I checked the app first and followed today's worship guidance.",
+        onScreenText: "Dhuhr time check in app",
+        editNote: appHookPrayer,
+      };
+
+  const eveningWorshipBeat = isPrayerPausedDay
+    ? {
+      visual: `UGC late-afternoon to evening routine with ${appName} worship status card, journaling, and calm home atmosphere.`,
+      narration: "In the evening, I checked the app once more and stayed consistent with dhikr, dua, and reflection.",
+      onScreenText: "Evening worship-support routine",
+      editNote: "Keep it practical and aligned with paused worship status.",
+    }
+    : isIstihadaDay
+      ? {
+        visual: "UGC late-afternoon to evening transition with app check-ins and prayer-time preparation in a calm home setting.",
+        narration: "I wrapped up my afternoon tasks, checked app guidance again, and moved through my evening worship routine.",
+        onScreenText: "Evening routine + guided check",
+        editNote: "Maintain continuity of istihada-support guidance before worship decisions.",
+      }
+      : {
+        visual: "UGC late-afternoon to evening transition with prayer-time reminders and calm home atmosphere.",
+        narration: "I wrapped up my afternoon tasks, checked in again for prayer timing, and moved into my evening routine.",
+        onScreenText: "Evening routine + prayer check",
+        editNote: "Keep app hook subtle and useful before worship decisions.",
+      };
+
+  const quranIntroBeat = isPrayerPausedDay
+    ? {
+      visual: "Faceless Quran study B-roll: translation notes, tafsir highlights, pen marks, and desk lamp glow.",
+      narration: `Before ending the day, I opened ${appName} and used Quran reflection mode for ${day.quran.reference}.`,
+      onScreenText: `${day.quran.reference} | Quran reflection mode`,
+      editNote: `Transition from UGC diary to faceless voiceover mode. ${appHookQuran}`,
+    }
+    : {
+      visual: "Faceless Quran study B-roll: open mushaf, highlighted notes, pen marks, and desk lamp glow.",
+      narration: `Before ending the day, I opened ${appName} and started my Quran reflection for ${day.quran.reference}.`,
+      onScreenText: `${day.quran.reference} | Quran reflection`,
+      editNote: `Transition from UGC diary to faceless voiceover mode. ${appHookQuran}`,
+    };
 
   return [
     {
@@ -3139,10 +3174,10 @@ function buildCycleDayDiaryBeatTemplates(args: {
     },
     {
       phase: "prayer",
-      visual: "UGC morning prayer routine: wudu prep space, prayer mat setup, soft dawn light.",
-      narration: "I started my day with Fajr salah, then made dua and set my intention for the day.",
-      onScreenText: "Started with Fajr + dua",
-      editNote: "Respectful modest framing and calm pace.",
+      visual: fajrBeat.visual,
+      narration: fajrBeat.narration,
+      onScreenText: fajrBeat.onScreenText,
+      editNote: fajrBeat.editNote,
     },
     {
       phase: "routine",
@@ -3167,10 +3202,10 @@ function buildCycleDayDiaryBeatTemplates(args: {
     },
     {
       phase: "prayer",
-      visual: `UGC phone-in-hand shot checking ${appName} before Dhuhr, then transitioning to prayer-ready setup.`,
-      narration: "Now it was Dhuhr time, so I checked the app first and followed today's worship guidance.",
-      onScreenText: "Dhuhr time check in app",
-      editNote: appHookPrayer,
+      visual: dhuhrBeat.visual,
+      narration: dhuhrBeat.narration,
+      onScreenText: dhuhrBeat.onScreenText,
+      editNote: dhuhrBeat.editNote,
     },
     {
       phase: "meal",
@@ -3188,17 +3223,17 @@ function buildCycleDayDiaryBeatTemplates(args: {
     },
     {
       phase: "prayer",
-      visual: "UGC late-afternoon to evening transition with prayer-time reminders and calm home atmosphere.",
-      narration: "I wrapped up my afternoon tasks, checked in again for prayer timing, and moved into my evening routine.",
-      onScreenText: "Evening routine + prayer check",
-      editNote: "Keep app hook subtle and useful before worship decisions.",
+      visual: eveningWorshipBeat.visual,
+      narration: eveningWorshipBeat.narration,
+      onScreenText: eveningWorshipBeat.onScreenText,
+      editNote: eveningWorshipBeat.editNote,
     },
     {
       phase: "quran",
-      visual: "Faceless Quran study B-roll: open mushaf, highlighted notes, pen marks, and desk lamp glow.",
-      narration: `Before ending the day, I opened ${appName} and started my Quran reflection for ${day.quran.reference}.`,
-      onScreenText: `${day.quran.reference} | Quran reflection`,
-      editNote: `Transition from UGC diary to faceless voiceover mode. ${appHookQuran}`,
+      visual: quranIntroBeat.visual,
+      narration: quranIntroBeat.narration,
+      onScreenText: quranIntroBeat.onScreenText,
+      editNote: quranIntroBeat.editNote,
     },
     {
       phase: "quran",
@@ -3392,8 +3427,14 @@ export async function buildCycleDayVideoScriptPlan({
     `Scholar interpretation: ${day.quran.scholarlyInterpretation}.`,
     `Key takeaway: ${day.quran.keyTakeaway}.`,
     "Narrative sequence must be coherent and chronological like a real day-in-the-life vlog.",
-    "Sequence: cool visual hook -> cycle day + worship status intro -> fajr -> chores -> breakfast -> chores/work -> dhuhr check -> lunch -> afternoon nap (sunnah) -> evening routine -> Quran reflection segments -> see you tomorrow close.",
-    "Use app hooks naturally at worship status check, prayer-time decisions, and Quran-start moment.",
+    day.isPeriodDay
+      ? "Sequence: cool visual hook -> cycle day + worship status intro -> fajr-time paused-status check with dhikr/dua -> chores -> breakfast -> chores/work -> dhuhr-time paused-status check -> lunch -> afternoon nap (sunnah) -> evening worship-support routine -> Quran reflection segments -> see you tomorrow close."
+      : day.isIstihada
+        ? "Sequence: cool visual hook -> cycle day + worship status intro -> fajr with istihada app guidance -> chores -> breakfast -> chores/work -> dhuhr app-guided check -> lunch -> afternoon nap (sunnah) -> evening worship routine with guidance -> Quran reflection segments -> see you tomorrow close."
+        : "Sequence: cool visual hook -> cycle day + worship status intro -> fajr salah -> chores -> breakfast -> chores/work -> dhuhr check -> lunch -> afternoon nap (sunnah) -> evening routine -> Quran reflection segments -> see you tomorrow close.",
+    day.isPeriodDay
+      ? "Use app hooks naturally at worship-status checks and Quran-start moment; do not include salah performance visuals on paused days."
+      : "Use app hooks naturally at worship status check, prayer-time decisions, and Quran-start moment.",
     "Video structure must be mixed: UGC daily-life storytelling first, faceless educational voiceover in final section.",
     "Ending should include a detailed verse recap card with revelation timing, hadith link, scholar insight, and see-you-tomorrow outro.",
   ].join(" "));
