@@ -3079,6 +3079,52 @@ function buildCycleAwareMealPlan(day: CycleDayCalendarDay): { breakfast: string;
   };
 }
 
+function buildQuranTeacherLines(day: CycleDayCalendarDay): {
+  reflectionIntro: string;
+  revelationExplanation: string;
+  hadithScholarTakeaway: string;
+} {
+  const reference = cleanText(day.quran.reference) || `Surah ${day.quran.surahName} ${day.quran.verseStart}-${day.quran.verseEnd}`;
+  const rawContext = cleanText(day.quran.revelationContext);
+  const rawHadith = cleanText(day.quran.relatedHadith);
+  const rawScholar = cleanText(day.quran.scholarlyInterpretation);
+  const rawTakeaway = cleanText(day.quran.keyTakeaway);
+
+  const revelationExplanation = (() => {
+    if (!rawContext || /^include\b/i.test(rawContext)) {
+      return "These verses were revealed in a context that calls the believer back to patience, trust, and steadiness in worship.";
+    }
+    if (/^meccan\.?$/i.test(rawContext)) {
+      return "These verses were revealed in the Meccan period, when believers were being taught patience, hope, and complete trust in Allah during hardship.";
+    }
+    if (/^medinan\.?$/i.test(rawContext)) {
+      return "These verses were revealed in the Medinan period, when the Muslim community was receiving practical guidance for worship and daily life.";
+    }
+    if (/\b(meccan|medinan)\b/i.test(rawContext)) {
+      return closeOpenEndedLine(`These verses were revealed ${rawContext}`);
+    }
+    return closeOpenEndedLine(`These verses were revealed in this context: ${rawContext}`);
+  })();
+
+  const hadithLine = !rawHadith || /^include\b/i.test(rawHadith)
+    ? "A related hadith reminds us that with hardship comes relief, and patience opens the door to Allah's help."
+    : closeOpenEndedLine(`A related hadith says: ${rawHadith}`);
+
+  const scholarLine = !rawScholar || /^include\b/i.test(rawScholar)
+    ? "Trusted scholars explain that these verses train the heart to remain hopeful and disciplined even in physically difficult days."
+    : closeOpenEndedLine(`A trusted scholar explains: ${rawScholar}`);
+
+  const takeawayLine = !rawTakeaway || /^daily practice takeaway|^include\b/i.test(rawTakeaway)
+    ? "Today's takeaway: stay consistent with what is available to you today, and trust that Allah records sincere effort."
+    : closeOpenEndedLine(`Today's practical takeaway: ${rawTakeaway}`);
+
+  return {
+    reflectionIntro: closeOpenEndedLine(`Before we close, the verses we are reflecting on today are ${reference}`),
+    revelationExplanation: closeOpenEndedLine(revelationExplanation),
+    hadithScholarTakeaway: closeOpenEndedLine(`${hadithLine} ${scholarLine} ${takeawayLine}`),
+  };
+}
+
 function buildCycleDayDiaryBeatTemplates(args: {
   appName: string;
   readableDate: string;
@@ -3086,6 +3132,7 @@ function buildCycleDayDiaryBeatTemplates(args: {
 }): CycleDayDiaryBeatTemplate[] {
   const { appName, readableDate, day } = args;
   const meals = buildCycleAwareMealPlan(day);
+  const quranTeacherLines = buildQuranTeacherLines(day);
   const isPrayerPausedDay = day.isPeriodDay;
   const isIstihadaDay = !day.isPeriodDay && day.isIstihada;
   const worshipShort =
@@ -3166,13 +3213,13 @@ function buildCycleDayDiaryBeatTemplates(args: {
   const quranIntroBeat = isPrayerPausedDay
     ? {
       visual: "3D animated teacher-to-camera Quran segment: character facing camera with gentle hand gestures, closed Quran on desk, study-lamp ambiance.",
-      narration: `Before ending the day, I opened ${appName} and used Quran reflection mode for ${day.quran.reference}.`,
+      narration: `${quranTeacherLines.reflectionIntro} I opened ${appName} in Quran reflection mode so we can go through them together.`,
       onScreenText: `${day.quran.reference} | Quran reflection mode`,
       editNote: `Transition into direct-to-camera teacher explanation mode. ${appHookQuran}`,
     }
     : {
       visual: "3D animated teacher-to-camera Quran segment: character looking at camera like a teacher, closed Quran prop on desk.",
-      narration: `Before ending the day, I opened ${appName} and started my Quran reflection for ${day.quran.reference}.`,
+      narration: `${quranTeacherLines.reflectionIntro} I opened ${appName} so we can reflect on them step by step.`,
       onScreenText: `${day.quran.reference} | Quran reflection`,
       editNote: `Transition into direct-to-camera teacher explanation mode. ${appHookQuran}`,
     };
@@ -3258,14 +3305,14 @@ function buildCycleDayDiaryBeatTemplates(args: {
     {
       phase: "quran",
       visual: "3D animated character looking at camera like a teacher, explaining verse context with clear hand gestures and closed Quran prop on desk.",
-      narration: closeOpenEndedLine(`${day.quran.revelationContext}`),
+      narration: quranTeacherLines.revelationExplanation,
       onScreenText: "When these verses were revealed",
       editNote: "Teacher-to-camera delivery, clear pacing, and educational warmth.",
     },
     {
       phase: "quran",
       visual: "3D animated character still facing camera like a mentor, summarizing hadith connection and scholar interpretation with calm authority.",
-      narration: closeOpenEndedLine(`${day.quran.relatedHadith} ${day.quran.scholarlyInterpretation} ${day.quran.keyTakeaway}`),
+      narration: quranTeacherLines.hadithScholarTakeaway,
       onScreenText: "Hadith link + scholar tafsir + takeaway",
       editNote: "Keep direct-to-camera teacher style and practical tone.",
     },
