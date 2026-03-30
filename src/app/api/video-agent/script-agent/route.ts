@@ -97,6 +97,14 @@ function normalizeCampaignMode(value: unknown): ScriptAgentCampaignMode {
     return "widget_reaction_ugc";
   }
   if (
+    cleaned === "widget_shock_hook_ugc" ||
+    cleaned === "widget-shock-hook-ugc" ||
+    cleaned === "shock_widget_reaction_ugc" ||
+    cleaned === "shock-widget-reaction-ugc"
+  ) {
+    return "widget_shock_hook_ugc";
+  }
+  if (
     cleaned === "daily_ugc_quran_journey" ||
     cleaned === "daily-ugc-quran-journey" ||
     cleaned === "daily_ugc_quran" ||
@@ -185,7 +193,9 @@ export async function POST(request: NextRequest) {
 
     let ugcCharacter: UGCCharacterProfile | null = null;
     const campaignNeedsUgcCharacter =
-      campaignMode === "widget_reaction_ugc" || campaignMode === "daily_ugc_quran_journey";
+      campaignMode === "widget_reaction_ugc" ||
+      campaignMode === "widget_shock_hook_ugc" ||
+      campaignMode === "daily_ugc_quran_journey";
     const shouldResolveCharacter =
       Boolean(selectedCharacterId) ||
       preferredVideoType === "ugc" ||

@@ -180,7 +180,11 @@ export interface UGCCharacterProfile {
 
 export type ScriptAgentVideoType = "ugc" | "ai_animation" | "faceless_broll" | "hybrid";
 export type ScriptAgentTopicCategory = "period_pregnancy" | "islamic_period_pregnancy";
-export type ScriptAgentCampaignMode = "standard" | "widget_reaction_ugc" | "daily_ugc_quran_journey";
+export type ScriptAgentCampaignMode =
+  | "standard"
+  | "widget_reaction_ugc"
+  | "widget_shock_hook_ugc"
+  | "daily_ugc_quran_journey";
 
 export interface VideoScriptIdeationPlan {
   title: string;
@@ -410,6 +414,92 @@ function enforceWidgetReactionSeriesPattern(segments: MotionControlSegment[], ap
           ? closeOpenEndedLine(segment.script?.cta || "Save this and try the widget setup today.")
           : closeOpenEndedLine(segment.script?.cta || ""),
       },
+    };
+  });
+}
+
+function enforceWidgetShockHookSeriesPattern(segments: MotionControlSegment[], appName: string): MotionControlSegment[] {
+  return segments.map((segment, index, all) => {
+    const shots = [...(segment.script?.shots || [])];
+    if (shots.length === 0) {
+      shots.push({
+        shotId: "shot1",
+        visual: "UGC selfie reaction at home, character notices phone screen and is visibly shocked.",
+        narration: "Wait... I just found this and I'm shocked.",
+        onScreenText: "Hook title",
+        editNote: "Open with sharp shocked reaction then a smile of relief.",
+      });
+    }
+
+    const firstShot = shots[0];
+    const aiGeneratedHookText =
+      cleanText(firstShot.onScreenText) ||
+      cleanText(firstShot.narration) ||
+      cleanText(segment.script?.hook) ||
+      "Halal period and pregnancy tracking app for Muslim women.";
+    shots[0] = {
+      ...firstShot,
+      visual: cleanText(
+        `${firstShot.visual} Start with a clear shocked reaction in first second, then shift to excited relief.`
+      ),
+      narration: closeOpenEndedLine(
+        firstShot.narration || "Wait... I just found this and did not expect it."
+      ),
+      onScreenText: closeOpenEndedLine(aiGeneratedHookText),
+      editNote: cleanText(
+        `${firstShot.editNote || ""} Keep the hook AI-generated, punchy, and emotional, not salesy.`
+      ),
+    };
+
+    const showcaseShotIndex = Math.min(1, shots.length - 1);
+    const showcaseShot = shots[showcaseShotIndex];
+    shots[showcaseShotIndex] = {
+      ...showcaseShot,
+      visual: cleanText(
+        `${showcaseShot.visual || "Phone close-up"} Quick app showcase: lock-screen/home-screen widget plus one fast app dashboard glance.`
+      ),
+      onScreenText:
+        cleanText(showcaseShot.onScreenText) ||
+        "Quick showcase: cycle phase + worship status widget in seconds",
+      editNote: cleanText(
+        `${showcaseShot.editNote || ""} Keep app showcase quick (about 1-2 seconds) and clear.`
+      ),
+    };
+
+    const prompts = (segment.multiShotPrompts || []).map((promptItem) => {
+      if (promptItem.generationType === "product_ui_overlay") return promptItem;
+      return {
+        ...promptItem,
+        generationType: "ugc_video" as const,
+      };
+    });
+
+    const isLastSegment = index === all.length - 1;
+    const lastShotIndex = shots.length - 1;
+    const lastShot = shots[lastShotIndex];
+    shots[lastShotIndex] = {
+      ...lastShot,
+      narration: closeOpenEndedLine(lastShot.narration),
+      onScreenText: closeOpenEndedLine(lastShot.onScreenText),
+      editNote: cleanText(
+        `${lastShot.editNote || ""} End with a brief visual hold. In final edit, append quick full-screen ${appName} app showcase.`
+      ),
+    };
+
+    return {
+      ...segment,
+      startFramePrompt: cleanText(
+        segment.startFramePrompt ||
+        `UGC shocked reaction opening frame with phone visible, then quick transition to ${appName} widget showcase.`
+      ),
+      script: {
+        hook: segment.script?.hook || "",
+        shots,
+        cta: isLastSegment
+          ? closeOpenEndedLine(segment.script?.cta || "I just found this. Save and try the widget setup today.")
+          : closeOpenEndedLine(segment.script?.cta || ""),
+      },
+      multiShotPrompts: prompts,
     };
   });
 }
@@ -1109,6 +1199,14 @@ function sanitizeScriptAgentCampaignMode(value: unknown): ScriptAgentCampaignMod
   const cleaned = value.trim().toLowerCase();
   if (cleaned === "widget_reaction_ugc" || cleaned === "widget-reaction-ugc") {
     return "widget_reaction_ugc";
+  }
+  if (
+    cleaned === "widget_shock_hook_ugc" ||
+    cleaned === "widget-shock-hook-ugc" ||
+    cleaned === "shock_widget_reaction_ugc" ||
+    cleaned === "shock-widget-reaction-ugc"
+  ) {
+    return "widget_shock_hook_ugc";
   }
   if (
     cleaned === "daily_ugc_quran_journey" ||
@@ -2221,12 +2319,14 @@ export async function buildVideoScriptIdeationPlan({
   const safeDurationSeconds =
     resolvedCampaignMode === "daily_ugc_quran_journey"
       ? Math.max(30, Math.round(targetDurationSeconds))
+      : resolvedCampaignMode === "widget_shock_hook_ugc"
+        ? clamp(Math.round(targetDurationSeconds), 30, 90)
       : clamp(Math.round(targetDurationSeconds), 30, 180);
   const minBeatCount = Math.min(64, Math.max(8, Math.ceil(safeDurationSeconds / 4)));
   const normalizedTopicBrief = cleanText(topicBrief);
   const hasTopicBrief = normalizedTopicBrief.length > 0;
   const forcedVideoType: ScriptAgentVideoType | null =
-    resolvedCampaignMode === "widget_reaction_ugc"
+    resolvedCampaignMode === "widget_reaction_ugc" || resolvedCampaignMode === "widget_shock_hook_ugc"
       ? "ugc"
       : resolvedCampaignMode === "daily_ugc_quran_journey"
         ? "ai_animation"
@@ -2245,6 +2345,22 @@ CAMPAIGN MODE: widget_reaction_ugc
   * "Always confused about whether prayer is permissible in each phase?"
 - Ensure script clearly communicates: widget shows current cycle phase plus worship status (prayer, fasting, Quran: permissible or paused).
 - Reserve final handoff for external full-screen app screen recording after generated segment (recording added in edit).
+- Keep this mode strictly UGC (not animation).
+`
+    : resolvedCampaignMode === "widget_shock_hook_ugc"
+      ? `
+CAMPAIGN MODE: widget_shock_hook_ugc
+- Build short, shock-hook, reaction-driven UGC videos for Muslim women app widgets.
+- Keep pacing tight and punchy (quick hook, quick app showcase, quick close).
+- Main hook energy: visibly shocked reaction in first second, then relieved excitement.
+- The hook must be AI-generated (no fixed template reuse) and should position the app as a halal alternative to Flo for Muslim women.
+- Hook angle should communicate: period + pregnancy tracking for Muslim women without haram content.
+- Preferred hook flavor examples (as style direction only, not exact copy):
+  * "Flo for Muslim women"
+  * "No more period tracking app with haram contents"
+  * "I just found..."
+- After hook, include a brief app quick showcase (widget + one app glance), then close.
+- Ensure message highlights cycle phase + worship status clarity.
 - Keep this mode strictly UGC (not animation).
 `
     : resolvedCampaignMode === "daily_ugc_quran_journey"
@@ -2546,6 +2662,8 @@ Return strict JSON only:
   const campaignAdjustedSegments =
     resolvedCampaignMode === "widget_reaction_ugc"
       ? enforceWidgetReactionSeriesPattern(transitionReadySegments, appName)
+      : resolvedCampaignMode === "widget_shock_hook_ugc"
+        ? enforceWidgetShockHookSeriesPattern(transitionReadySegments, appName)
       : resolvedCampaignMode === "daily_ugc_quran_journey"
         ? enforceDailyUgcQuranJourneyPattern(transitionReadySegments, appName)
       : transitionReadySegments;

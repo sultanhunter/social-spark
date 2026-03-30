@@ -185,8 +185,12 @@ type StartFrameResponse = {
 };
 
 type ScriptAgentVideoType = "auto" | "ugc" | "ai_animation" | "faceless_broll" | "hybrid";
-type ScriptAgentCampaignMode = "standard" | "widget_reaction_ugc" | "daily_ugc_quran_journey";
-type ScriptAgentSelectableCampaignMode = "standard" | "widget_reaction_ugc";
+type ScriptAgentCampaignMode =
+  | "standard"
+  | "widget_reaction_ugc"
+  | "widget_shock_hook_ugc"
+  | "daily_ugc_quran_journey";
+type ScriptAgentSelectableCampaignMode = "standard" | "widget_reaction_ugc" | "widget_shock_hook_ugc";
 
 type ScriptAgentPlan = {
   title: string;
@@ -1634,7 +1638,10 @@ export function VideoAgentView({ collectionId }: { collectionId: string }) {
   }, [loadLibrary, loadCharacters, loadPlans, loadCycleDayPlans]);
 
   useEffect(() => {
-    if (scriptAgentCampaignMode === "widget_reaction_ugc" && scriptAgentVideoType !== "ugc") {
+    if (
+      (scriptAgentCampaignMode === "widget_reaction_ugc" || scriptAgentCampaignMode === "widget_shock_hook_ugc") &&
+      scriptAgentVideoType !== "ugc"
+    ) {
       setScriptAgentVideoType("ugc");
     }
   }, [scriptAgentCampaignMode, scriptAgentVideoType]);
@@ -2642,6 +2649,7 @@ export function VideoAgentView({ collectionId }: { collectionId: string }) {
                     >
                       <option value="standard">Standard educational</option>
                       <option value="widget_reaction_ugc">Widget reaction UGC</option>
+                      <option value="widget_shock_hook_ugc">Widget shock-hook UGC</option>
                     </select>
                   </div>
 
@@ -2688,7 +2696,12 @@ export function VideoAgentView({ collectionId }: { collectionId: string }) {
                       {ugcCharacters
                         .filter((character) => {
                           const type = character.characterType || "ugc";
-                          if (scriptAgentCampaignMode === "widget_reaction_ugc") return type === "ugc";
+                          if (
+                            scriptAgentCampaignMode === "widget_reaction_ugc" ||
+                            scriptAgentCampaignMode === "widget_shock_hook_ugc"
+                          ) {
+                            return type === "ugc";
+                          }
                           if (scriptAgentVideoType === "ai_animation") return type === "animated";
                           if (scriptAgentVideoType === "ugc") return type === "ugc";
                           if (scriptAgentVideoType === "hybrid") return type === "ugc";
