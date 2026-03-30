@@ -198,6 +198,22 @@ function quranClosedInstruction(shouldEnforce: boolean): string {
   return "Hard rule: if the Quran/mushaf appears in frame, it must be CLOSED with cover visible; do not show open pages, open spread, or readable Arabic text pages.";
 }
 
+function hasAnimatedCue(...values: unknown[]): boolean {
+  const combined = values.map((value) => cleanText(value)).join(" ").toLowerCase();
+  if (!combined) return false;
+  return /\b(3d|animated|animation|cgi|stylized)\b/i.test(combined);
+}
+
+function isAnimatedFormat(formatType: string): boolean {
+  const cleaned = cleanText(formatType).toLowerCase();
+  return cleaned === "ai_video" || /\b(animated|animation|cgi|3d)\b/i.test(cleaned);
+}
+
+function animatedLightingInstruction(shouldEnforce: boolean): string {
+  if (!shouldEnforce) return "";
+  return "Lighting lock for 3D animation: keep soft, even, and stable lighting with fixed key/fill intensity and fixed color temperature; use gentle diffuse fill and subtle ambient bounce; avoid dramatic high-contrast lighting, harsh spotlights, flicker, color shifts, dynamic lighting changes, and deep hard shadows.";
+}
+
 function buildStartFramePrompt(args: {
   appName: string;
   formatType: string;
@@ -236,6 +252,16 @@ function buildStartFramePrompt(args: {
       plan.script?.cta
     )
   );
+  const isAnimatedContext =
+    isAnimatedFormat(formatType) ||
+    hasAnimatedCue(
+      plan.title,
+      plan.objective,
+      plan.script?.hook,
+      plan.script?.cta,
+      character?.prompt_template
+    );
+  const globalAnimatedLightingInstruction = animatedLightingInstruction(isAnimatedContext);
 
   if (plan.klingMotionControlOnly) {
     const characterInstruction = character
@@ -254,6 +280,7 @@ function buildStartFramePrompt(args: {
       "If a woman appears, wardrobe must include long sleeves with both arms fully covered to the wrists.",
       globalWorshipPoseInstruction,
       globalQuranClosedInstruction,
+      globalAnimatedLightingInstruction,
       "Vertical 9:16 composition at 1080x1920 output framing.",
       "Photorealistic ultra-detailed 4K-quality look (true skin texture, realistic fabric, plausible natural lighting, no uncanny artifacts).",
       "No text overlays, no subtitles, no logos, no watermark.",
@@ -291,6 +318,18 @@ function buildStartFramePrompt(args: {
         segmentCta,
         firstSegmentPrompt,
         veoPromptCue
+      )
+    );
+    const segmentAnimatedLightingInstruction = animatedLightingInstruction(
+      isAnimatedContext ||
+      hasAnimatedCue(
+        segment.startFramePrompt,
+        segmentHook,
+        segmentVisualCue,
+        segmentCta,
+        firstSegmentPrompt,
+        veoPromptCue,
+        character?.prompt_template
       )
     );
     const continuityInstruction =
@@ -349,6 +388,7 @@ function buildStartFramePrompt(args: {
       `If a woman appears, enforce long sleeves with both arms fully covered to the wrists in every frame.`,
       worshipPoseInstruction,
       segmentQuranClosedInstruction,
+      segmentAnimatedLightingInstruction,
       `No suggestive posing, no cleavage, no lingerie/swimwear styling, no glamourized sensual focus.`,
       `No text overlays, no subtitles, no logos, no watermark.`,
       `High realism and coherent scene setup suitable for AI video generation start frame input.`,
@@ -369,6 +409,10 @@ function buildStartFramePrompt(args: {
   );
   const quranClosedPoseInstruction = quranClosedInstruction(
     hasQuranCue(hook, firstBeatVisual, firstBeatNarration, firstScenePrompt)
+  );
+  const animatedLightingPoseInstruction = animatedLightingInstruction(
+    isAnimatedContext ||
+    hasAnimatedCue(hook, firstBeatVisual, firstBeatNarration, firstScenePrompt, character?.prompt_template)
   );
 
   const characterInstruction = character
@@ -394,6 +438,7 @@ function buildStartFramePrompt(args: {
     `If a woman appears, enforce long sleeves with both arms fully covered to the wrists in every frame.`,
     worshipPoseInstruction,
     quranClosedPoseInstruction,
+    animatedLightingPoseInstruction,
     `Avoid camera angles or poses that emphasize chest, hips, or body contours. Prefer chest-up or waist-up framing unless script requires wider context.`,
     `No suggestive posing, no cleavage, no lingerie/swimwear styling, no glamourized sensual focus.`,
     `No text overlays, no subtitles, no logos, no watermark.`,
