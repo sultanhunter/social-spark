@@ -420,7 +420,7 @@ function enforceWidgetReactionSeriesPattern(segments: MotionControlSegment[], ap
 
 function enforceWidgetShockHookSeriesPattern(segments: MotionControlSegment[], appName: string): MotionControlSegment[] {
   return segments.map((segment, index, all) => {
-    const shots = [...(segment.script?.shots || [])];
+    let shots = [...(segment.script?.shots || [])];
     if (shots.length === 0) {
       shots.push({
         shotId: "shot1",
@@ -432,39 +432,74 @@ function enforceWidgetShockHookSeriesPattern(segments: MotionControlSegment[], a
     }
 
     const firstShot = shots[0];
-    const aiGeneratedHookText =
+    const secondShot = shots[1] || null;
+    const aiGeneratedHookTitleOne = closeOpenEndedLine(
       cleanText(firstShot.onScreenText) ||
-      cleanText(firstShot.narration) ||
       cleanText(segment.script?.hook) ||
-      "Halal period and pregnancy tracking app for Muslim women.";
-    shots[0] = {
-      ...firstShot,
-      visual: cleanText(
-        `${firstShot.visual} Start with a clear shocked reaction in first second, then shift to excited relief.`
-      ),
-      narration: closeOpenEndedLine(
-        firstShot.narration || "Wait... I just found this and did not expect it."
-      ),
-      onScreenText: closeOpenEndedLine(aiGeneratedHookText),
-      editNote: cleanText(
-        `${firstShot.editNote || ""} Keep the hook AI-generated, punchy, and emotional, not salesy.`
-      ),
-    };
+      "Flo for Muslim women"
+    );
+    const aiGeneratedHookTitleTwo = closeOpenEndedLine(
+      cleanText(secondShot?.onScreenText) ||
+      cleanText(secondShot?.narration) ||
+      "No more period tracking app with haram contents"
+    );
+
+    if (index === 0) {
+      shots = [
+        {
+          shotId: "shot1",
+          visual: cleanText(
+            `${firstShot.visual || "UGC selfie reaction shot"} Shocked reaction only. Keep expression strong, silent, and emotionally clear.`
+          ),
+          narration: "",
+          onScreenText: aiGeneratedHookTitleOne,
+          editNote:
+            "0-4 seconds only: reaction-only hook. No app explanation, no dialogue. Title 1 overlay is added in post.",
+        },
+        {
+          shotId: "shot2",
+          visual: cleanText(
+            `${secondShot?.visual || firstShot.visual || "Same framing continuation"} Continue shock-to-relief expression with slight head movement.`
+          ),
+          narration: "",
+          onScreenText: aiGeneratedHookTitleTwo,
+          editNote:
+            "4-8 seconds only: reaction-only continuation. No dialogue. Title 2 overlay is added in post.",
+        },
+      ];
+    } else {
+      shots[0] = {
+        ...firstShot,
+        visual: cleanText(
+          `${firstShot.visual} Character now starts talking about the app and why it is a halal alternative for Muslim women.`
+        ),
+        narration: closeOpenEndedLine(
+          firstShot.narration ||
+          "I just found this app and it feels like a halal alternative built for Muslim women."
+        ),
+        onScreenText: closeOpenEndedLine(cleanText(firstShot.onScreenText) || "Halal alternative for Muslim women"),
+        editNote: cleanText(
+          `${firstShot.editNote || ""} From this segment onward, character can speak and explain the app quickly.`
+        ),
+      };
+    }
 
     const showcaseShotIndex = Math.min(1, shots.length - 1);
     const showcaseShot = shots[showcaseShotIndex];
-    shots[showcaseShotIndex] = {
-      ...showcaseShot,
-      visual: cleanText(
-        `${showcaseShot.visual || "Phone close-up"} Quick app showcase: lock-screen/home-screen widget plus one fast app dashboard glance.`
-      ),
-      onScreenText:
-        cleanText(showcaseShot.onScreenText) ||
-        "Quick showcase: cycle phase + worship status widget in seconds",
-      editNote: cleanText(
-        `${showcaseShot.editNote || ""} Keep app showcase quick (about 1-2 seconds) and clear.`
-      ),
-    };
+    if (index !== 0) {
+      shots[showcaseShotIndex] = {
+        ...showcaseShot,
+        visual: cleanText(
+          `${showcaseShot.visual || "Phone close-up"} Quick app showcase: lock-screen/home-screen widget plus one fast app dashboard glance.`
+        ),
+        onScreenText:
+          cleanText(showcaseShot.onScreenText) ||
+          "Quick showcase: cycle phase + worship status widget in seconds",
+        editNote: cleanText(
+          `${showcaseShot.editNote || ""} Keep app showcase quick (about 1-2 seconds) and clear.`
+        ),
+      };
+    }
 
     const prompts = (segment.multiShotPrompts || []).map((promptItem) => {
       if (promptItem.generationType === "product_ui_overlay") return promptItem;
@@ -740,6 +775,53 @@ function buildVeo31SegmentPrompt(args: {
       `Shot plan: ${shotLines}`,
       scriptCta ? `Segment close intent: ${scriptCta}` : "",
       `Audio mix: prioritize clear spoken voice and natural room tone; keep any background sound subtle and non-distracting.`,
+    ].join(" ")
+  );
+}
+
+function buildWidgetShockHookCompactVeoPrompt(args: {
+  segment: MotionControlSegment;
+  segmentIndex: number;
+  appName: string;
+}): string {
+  const { segment, segmentIndex, appName } = args;
+  const durationSeconds = Math.max(2, Math.round(segment.durationSeconds || MAX_SINGLE_VIDEO_CLIP_SECONDS));
+  const shots = segment.script?.shots || [];
+
+  if (segmentIndex === 0) {
+    const titleOne = closeOpenEndedLine(cleanText(shots[0]?.onScreenText) || "Flo for Muslim women");
+    const titleTwo = closeOpenEndedLine(
+      cleanText(shots[1]?.onScreenText) || "No more period tracking app with haram contents"
+    );
+
+    return cleanText(
+      [
+        `Veo 3.1 prompt for segment ${segment.segmentId}. Generate one continuous ${durationSeconds}-second vertical 9:16 UGC reaction clip.`,
+        "This first segment is hook-only. No spoken dialogue, no app explanation, no lip-sync.",
+        `0-4 seconds: shocked facial reaction only with subtle hand movement. Overlay reference for post edit: "${titleOne}".`,
+        `4-8 seconds: continue shocked-to-relieved reaction in same framing. Overlay reference for post edit: "${titleTwo}".`,
+        "Keep camera mostly static selfie framing, natural home realism, and consistent lighting.",
+        `Do not render text overlays, captions, subtitles, logos, or watermarks in the generated video.`,
+      ].join(" ")
+    );
+  }
+
+  const spokenLines = shots
+    .map((shot) => closeOpenEndedLine(shot.narration || ""))
+    .filter(Boolean)
+    .slice(0, 2)
+    .join(" ");
+  const visualFocus = closeOpenEndedLine(cleanText(shots[0]?.visual) || segment.startFramePrompt);
+
+  return cleanText(
+    [
+      `Veo 3.1 prompt for segment ${segment.segmentId}. Generate one continuous ${durationSeconds}-second vertical 9:16 UGC clip.`,
+      `From this segment onward, character talks about ${appName} as a halal alternative for Muslim women (period + pregnancy tracking without haram content).`,
+      `Visual focus: ${visualFocus}`,
+      spokenLines ? `Spoken lines: ${spokenLines}` : "Spoken line: quick app explanation with excited relief tone.",
+      "Include quick app showcase beats (widget + one app dashboard glance) while keeping pacing concise.",
+      "Natural UGC realism, clear facial performance, clean audio focus.",
+      `Do not render text overlays, captions, subtitles, logos, or watermarks in the generated video.`,
     ].join(" ")
   );
 }
@@ -2353,6 +2435,10 @@ CAMPAIGN MODE: widget_shock_hook_ugc
 - Build short, shock-hook, reaction-driven UGC videos for Muslim women app widgets.
 - Keep pacing tight and punchy (quick hook, quick app showcase, quick close).
 - Main hook energy: visibly shocked reaction in first second, then relieved excitement.
+- The first 8 seconds must be ONLY shocked reaction hook (no dialogue), split into two 4-second title moments.
+- Title moment 1 (0-4s): AI-generated hook title.
+- Title moment 2 (4-8s): second AI-generated hook title.
+- Character should start talking about the app only after the first 8 seconds.
 - The hook must be AI-generated (no fixed template reuse) and should position the app as a halal alternative to Flo for Muslim women.
 - Hook angle should communicate: period + pregnancy tracking for Muslim women without haram content.
 - Preferred hook flavor examples (as style direction only, not exact copy):
@@ -2677,13 +2763,20 @@ Return strict JSON only:
           : "hybrid social explainer";
   const veoReadySegments = campaignAdjustedSegments.map((segment, index, all) => ({
     ...segment,
-    veoPrompt: buildVeo31SegmentPrompt({
-      segment,
-      nextSegment: all[index + 1],
-      styleHint: scriptAgentStyleHint,
-      appName,
-      ugcCharacter,
-    }),
+    veoPrompt:
+      resolvedCampaignMode === "widget_shock_hook_ugc"
+        ? buildWidgetShockHookCompactVeoPrompt({
+          segment,
+          segmentIndex: index,
+          appName,
+        })
+        : buildVeo31SegmentPrompt({
+          segment,
+          nextSegment: all[index + 1],
+          styleHint: scriptAgentStyleHint,
+          appName,
+          ugcCharacter,
+        }),
   }));
 
   const resolvedTopicCategory =
