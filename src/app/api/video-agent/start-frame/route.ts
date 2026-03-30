@@ -209,9 +209,56 @@ function isAnimatedFormat(formatType: string): boolean {
   return cleaned === "ai_video" || /\b(animated|animation|cgi|3d)\b/i.test(cleaned);
 }
 
-function animatedLightingInstruction(shouldEnforce: boolean): string {
+type SceneTimeOfDay = "morning" | "midday" | "afternoon" | "evening" | "night" | "neutral";
+
+function detectSceneTimeOfDay(...values: unknown[]): SceneTimeOfDay {
+  const combined = values.map((value) => cleanText(value)).join(" ").toLowerCase();
+  if (!combined) return "neutral";
+
+  if (/\b(isha|night|nighttime|late\s*night|moonlight|starlight|study\s*lamp|desk\s*lamp)\b/i.test(combined)) {
+    return "night";
+  }
+  if (/\b(maghrib|sunset|evening|golden\s*hour|dusk)\b/i.test(combined)) {
+    return "evening";
+  }
+  if (/\b(afternoon|asr|after\s*lunch|nap)\b/i.test(combined)) {
+    return "afternoon";
+  }
+  if (/\b(dhuhr|noon|midday|mid\s*day)\b/i.test(combined)) {
+    return "midday";
+  }
+  if (/\b(fajr|dawn|sunrise|morning|breakfast|early\s*day)\b/i.test(combined)) {
+    return "morning";
+  }
+
+  return "neutral";
+}
+
+function animatedLightingInstruction(args: { shouldEnforce: boolean; timeOfDay: SceneTimeOfDay }): string {
+  const { shouldEnforce, timeOfDay } = args;
   if (!shouldEnforce) return "";
-  return "Lighting lock for 3D animation: keep soft, even, and stable lighting with fixed key/fill intensity and fixed color temperature; use gentle diffuse fill and subtle ambient bounce; avoid dramatic high-contrast lighting, harsh spotlights, flicker, color shifts, dynamic lighting changes, and deep hard shadows.";
+
+  const baseLock =
+    "Lighting lock for 3D animation: keep lighting stable and coherent for this shot with fixed key/fill ratio, fixed color temperature, soft diffuse shadows, and no flicker, no color shifts, no exposure pumping, and no dramatic dynamic-lighting swings.";
+
+  const timeRule = (() => {
+    switch (timeOfDay) {
+      case "morning":
+        return "Time-of-day lighting: morning only - soft warm morning daylight, gentle window-side key light, light pastel ambience, mild shadow contrast.";
+      case "midday":
+        return "Time-of-day lighting: midday only - bright neutral daylight, balanced white tone, clean fill, clear but soft shadow edges.";
+      case "afternoon":
+        return "Time-of-day lighting: afternoon only - warm natural daylight with slightly lower sun angle, calm golden-neutral ambience, moderate soft shadows.";
+      case "evening":
+        return "Time-of-day lighting: evening only - warm sunset/early-evening tones or warm indoor practicals, lower overall brightness, soft amber ambience.";
+      case "night":
+        return "Time-of-day lighting: night only - low-key warm indoor practical lighting (lamp-like), no bright white daytime fill, controlled soft contrast.";
+      default:
+        return "Time-of-day lighting: infer from script context and keep one coherent lighting setup without mixing day and night traits.";
+    }
+  })();
+
+  return `${baseLock} ${timeRule}`;
 }
 
 function buildStartFramePrompt(args: {
@@ -261,7 +308,18 @@ function buildStartFramePrompt(args: {
       plan.script?.cta,
       character?.prompt_template
     );
-  const globalAnimatedLightingInstruction = animatedLightingInstruction(isAnimatedContext);
+  const globalTimeOfDay = detectSceneTimeOfDay(
+    video.title,
+    video.description,
+    plan.title,
+    plan.objective,
+    plan.script?.hook,
+    plan.script?.cta
+  );
+  const globalAnimatedLightingInstruction = animatedLightingInstruction({
+    shouldEnforce: isAnimatedContext,
+    timeOfDay: globalTimeOfDay,
+  });
 
   if (plan.klingMotionControlOnly) {
     const characterInstruction = character
@@ -321,16 +379,27 @@ function buildStartFramePrompt(args: {
       )
     );
     const segmentAnimatedLightingInstruction = animatedLightingInstruction(
-      isAnimatedContext ||
-      hasAnimatedCue(
-        segment.startFramePrompt,
-        segmentHook,
-        segmentVisualCue,
-        segmentCta,
-        firstSegmentPrompt,
-        veoPromptCue,
-        character?.prompt_template
-      )
+      {
+        shouldEnforce:
+          isAnimatedContext ||
+          hasAnimatedCue(
+            segment.startFramePrompt,
+            segmentHook,
+            segmentVisualCue,
+            segmentCta,
+            firstSegmentPrompt,
+            veoPromptCue,
+            character?.prompt_template
+          ),
+        timeOfDay: detectSceneTimeOfDay(
+          segment.startFramePrompt,
+          segmentHook,
+          segmentVisualCue,
+          segmentCta,
+          firstSegmentPrompt,
+          veoPromptCue
+        ),
+      }
     );
     const continuityInstruction =
       typeof segmentIndex === "number" && segmentIndex > 0
@@ -411,8 +480,12 @@ function buildStartFramePrompt(args: {
     hasQuranCue(hook, firstBeatVisual, firstBeatNarration, firstScenePrompt)
   );
   const animatedLightingPoseInstruction = animatedLightingInstruction(
-    isAnimatedContext ||
-    hasAnimatedCue(hook, firstBeatVisual, firstBeatNarration, firstScenePrompt, character?.prompt_template)
+    {
+      shouldEnforce:
+        isAnimatedContext ||
+        hasAnimatedCue(hook, firstBeatVisual, firstBeatNarration, firstScenePrompt, character?.prompt_template),
+      timeOfDay: detectSceneTimeOfDay(hook, firstBeatVisual, firstBeatNarration, firstScenePrompt),
+    }
   );
 
   const characterInstruction = character
