@@ -2620,6 +2620,7 @@ type CycleDayQuranDetails = {
   verseStart: number;
   verseEnd: number;
   reference: string;
+  verseMeaningSummary: string;
   revelationContext: string;
   relatedHadith: string;
   scholarlyInterpretation: string;
@@ -2797,8 +2798,9 @@ function defaultQuranDetailsForDay(dayNumber: number): CycleDayQuranDetails {
     verseStart,
     verseEnd,
     reference,
+    verseMeaningSummary: "Include a quick 1-2 sentence plain-language summary of the meaning of these verses.",
     revelationContext: "Include whether these verses are generally classified as Meccan or Medinan and why that context matters.",
-    relatedHadith: "Include one authentic hadith connection relevant to the verse theme and practice.",
+    relatedHadith: "Include one related hadith only if it is explicitly sahih (e.g., Sahih al-Bukhari, Sahih Muslim, or clearly graded sahih). If none is confidently sahih, return an empty string.",
     scholarlyInterpretation: "Include one concise interpretation from a trusted tafsir source such as Ibn Kathir, Al-Tabari, or Al-Qurtubi.",
     keyTakeaway: "Daily practice takeaway: one action point and one reflection question.",
   };
@@ -2817,6 +2819,7 @@ function coerceCycleDayQuranDetails(value: unknown, dayNumber: number): CycleDay
     verseStart,
     verseEnd,
     reference,
+    verseMeaningSummary: sanitizeString(row.verseMeaningSummary, defaults.verseMeaningSummary),
     revelationContext: sanitizeString(row.revelationContext, defaults.revelationContext),
     relatedHadith: sanitizeString(row.relatedHadith, defaults.relatedHadith),
     scholarlyInterpretation: sanitizeString(row.scholarlyInterpretation, defaults.scholarlyInterpretation),
@@ -2967,8 +2970,9 @@ REQUIREMENTS:
 - Every day must include: cycle day metadata, worship status, practical daily routine beats, and Quran verse assignment.
 - Quran section per day must include:
   * verse reference,
+  * quick plain-language meaning summary of the verses,
   * revelation context (Meccan/Medinan where relevant),
-  * one related hadith,
+  * one related hadith only if it is sahih and verifiable,
   * one trusted scholarly interpretation,
   * one practical takeaway.
 - Keep language clear, practical, and educational.
@@ -2991,6 +2995,7 @@ Return strict JSON only:
         "verseStart": 1,
         "verseEnd": 5,
         "reference": "string",
+        "verseMeaningSummary": "string",
         "revelationContext": "string",
         "relatedHadith": "string",
         "scholarlyInterpretation": "string",
@@ -3085,10 +3090,24 @@ function buildQuranTeacherLines(day: CycleDayCalendarDay): {
   hadithScholarTakeaway: string;
 } {
   const reference = cleanText(day.quran.reference) || `Surah ${day.quran.surahName} ${day.quran.verseStart}-${day.quran.verseEnd}`;
+  const rawMeaningSummary = cleanText(day.quran.verseMeaningSummary);
   const rawContext = cleanText(day.quran.revelationContext);
   const rawHadith = cleanText(day.quran.relatedHadith);
   const rawScholar = cleanText(day.quran.scholarlyInterpretation);
   const rawTakeaway = cleanText(day.quran.keyTakeaway);
+
+  const normalizedHadith = rawHadith.toLowerCase();
+  const isSahihHadith =
+    Boolean(rawHadith) &&
+    !/^include\b/i.test(rawHadith) &&
+    (/\bsahih\b/i.test(normalizedHadith) ||
+      /\bbukhari\b/i.test(normalizedHadith) ||
+      /\bmuslim\b/i.test(normalizedHadith) ||
+      /\bmuttafaq\b/i.test(normalizedHadith));
+
+  const meaningSummaryLine = !rawMeaningSummary || /^include\b/i.test(rawMeaningSummary)
+    ? "In simple words, these verses remind us that Allah does not leave us in hardship and always opens a path of relief and hope."
+    : closeOpenEndedLine(`In simple words, these verses mean: ${rawMeaningSummary}`);
 
   const revelationExplanation = (() => {
     if (!rawContext || /^include\b/i.test(rawContext)) {
@@ -3106,9 +3125,9 @@ function buildQuranTeacherLines(day: CycleDayCalendarDay): {
     return closeOpenEndedLine(`These verses were revealed in this context: ${rawContext}`);
   })();
 
-  const hadithLine = !rawHadith || /^include\b/i.test(rawHadith)
-    ? "A related hadith reminds us that with hardship comes relief, and patience opens the door to Allah's help."
-    : closeOpenEndedLine(`A related hadith says: ${rawHadith}`);
+  const hadithLine = isSahihHadith
+    ? closeOpenEndedLine(`A related sahih hadith says: ${rawHadith}`)
+    : "";
 
   const scholarLine = !rawScholar || /^include\b/i.test(rawScholar)
     ? "Trusted scholars explain that these verses train the heart to remain hopeful and disciplined even in physically difficult days."
@@ -3120,8 +3139,10 @@ function buildQuranTeacherLines(day: CycleDayCalendarDay): {
 
   return {
     reflectionIntro: closeOpenEndedLine(`Before we close, the verses we are reflecting on today are ${reference}`),
-    revelationExplanation: closeOpenEndedLine(revelationExplanation),
-    hadithScholarTakeaway: closeOpenEndedLine(`${hadithLine} ${scholarLine} ${takeawayLine}`),
+    revelationExplanation: closeOpenEndedLine(`${meaningSummaryLine} ${revelationExplanation}`),
+    hadithScholarTakeaway: closeOpenEndedLine(
+      `${hadithLine || "No specific sahih hadith link is confirmed for today's verses, so we focus on the Quran meaning and trusted tafsir."} ${scholarLine} ${takeawayLine}`
+    ),
   };
 }
 
@@ -3490,8 +3511,10 @@ export async function buildCycleDayVideoScriptPlan({
     `Daily actions: ${day.plannedActions.join(" ")}.`,
     `App hook moments: ${day.appHooks.join(" ")}.`,
     `Quran assignment: ${day.quran.reference}.`,
+    `Quick verse meaning summary: ${day.quran.verseMeaningSummary}.`,
     `Revelation context: ${day.quran.revelationContext}.`,
     `Related hadith: ${day.quran.relatedHadith}.`,
+    "Hadith rule: mention a hadith only if it is sahih and clearly verifiable; otherwise skip hadith claim and focus on verse meaning + tafsir.",
     `Scholar interpretation: ${day.quran.scholarlyInterpretation}.`,
     `Key takeaway: ${day.quran.keyTakeaway}.`,
     "Narrative sequence must be coherent and chronological like a real day-in-the-life vlog.",
