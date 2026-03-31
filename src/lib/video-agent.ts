@@ -592,7 +592,7 @@ function enforceDailyUgcQuranJourneyPattern(segments: MotionControlSegment[], ap
       shots[0] = {
         ...firstShot,
         visual: cleanText(
-          `${firstShot.visual} 3D animated teacher-to-camera setup: character facing camera, warm classroom-desk vibe, closed Quran on desk as prop.`
+          `${firstShot.visual} 3D animated teacher-to-camera setup in her room at night: character facing camera, warm desk-lamp glow, low-key soothing lighting, closed Quran on desk as prop.`
         ),
         narration: closeOpenEndedLine(
           firstShot.narration ||
@@ -666,7 +666,7 @@ function enforceDailyUgcQuranJourneyPattern(segments: MotionControlSegment[], ap
         : isQuranDeepDive
           ? cleanText(
             segment.startFramePrompt ||
-            "3D animated teacher-to-camera Quran reflection frame with a closed Quran prop on desk."
+            "3D animated teacher-to-camera Quran reflection frame in her room at night with warm desk-lamp glow, soft low-key soothing lighting, and a closed Quran prop on desk."
           )
           : cleanText(
             segment.startFramePrompt ||
@@ -3444,13 +3444,13 @@ function buildCycleDayDiaryBeatTemplates(args: {
 
   const quranIntroBeat = isPrayerPausedDay
     ? {
-      visual: "3D animated teacher-to-camera Quran segment: character facing camera with gentle hand gestures, closed Quran on desk, study-lamp ambiance.",
+      visual: "3D animated teacher-to-camera Quran segment in her room at night: character facing camera with gentle hand gestures, closed Quran on desk, warm lamp glow, soft low-key soothing lighting.",
       narration: `${quranTeacherLines.reflectionIntro} I opened ${appName} in Quran reflection mode so we can go through them together.`,
       onScreenText: `${day.quran.reference} | Quran reflection mode`,
       editNote: `Transition into direct-to-camera teacher explanation mode. ${appHookQuran}`,
     }
     : {
-      visual: "3D animated teacher-to-camera Quran segment: character looking at camera like a teacher, closed Quran prop on desk.",
+      visual: "3D animated teacher-to-camera Quran segment in her room at night: character looking at camera like a teacher, closed Quran prop on desk, warm lamp-lit soothing scene.",
       narration: `${quranTeacherLines.reflectionIntro} I opened ${appName} so we can reflect on them step by step.`,
       onScreenText: `${day.quran.reference} | Quran reflection`,
       editNote: `Transition into direct-to-camera teacher explanation mode. ${appHookQuran}`,
@@ -3536,14 +3536,14 @@ function buildCycleDayDiaryBeatTemplates(args: {
     },
     {
       phase: "quran",
-      visual: "3D animated character looking at camera like a teacher, explaining verse context with clear hand gestures and closed Quran prop on desk.",
+      visual: "3D animated character in her room at night looking at camera like a teacher, explaining verse context with clear hand gestures, closed Quran prop on desk, warm low-key soothing lighting.",
       narration: quranTeacherLines.revelationExplanation,
       onScreenText: "When these verses were revealed",
       editNote: "Teacher-to-camera delivery, clear pacing, and educational warmth.",
     },
     {
       phase: "quran",
-      visual: "3D animated character still facing camera like a mentor, summarizing hadith connection and scholar interpretation with calm authority.",
+      visual: "3D animated character still facing camera like a mentor in a calm night room setup, summarizing hadith connection and scholar interpretation with warm focused lighting.",
       narration: quranTeacherLines.hadithScholarTakeaway,
       onScreenText: "Hadith link + scholar tafsir + takeaway",
       editNote: "Keep direct-to-camera teacher style and practical tone.",
