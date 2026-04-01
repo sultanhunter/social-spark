@@ -318,6 +318,12 @@ function closeOpenEndedLine(text: string): string {
   return `${candidate}.`;
 }
 
+function countWords(text: string): number {
+  const cleaned = cleanText(text);
+  if (!cleaned) return 0;
+  return cleaned.split(/\s+/).filter(Boolean).length;
+}
+
 function sanitizeSegmentScriptShots(value: unknown, maxShots: number): SegmentScriptShot[] {
   const shotsRaw = Array.isArray(value) ? value : [];
   return shotsRaw
@@ -350,6 +356,78 @@ function planBeatsToSegmentShots(beats: PlanBeat[]): SegmentScriptShot[] {
 
 function enforceSegmentBoundaryTransitions(segments: MotionControlSegment[]): MotionControlSegment[] {
   return segments;
+}
+
+function enforceSegmentNarrationWordBudget(
+  segments: MotionControlSegment[],
+  maxWordsPerSegment = 24
+): MotionControlSegment[] {
+  return segments.map((segment) => {
+    const shots = [...(segment.script?.shots || [])];
+    let remainingWords = maxWordsPerSegment;
+
+    let hook = closeOpenEndedLine(segment.script?.hook || "");
+    if (hook) {
+      if (remainingWords <= 0) {
+        hook = "";
+      } else {
+        const hookWordCount = countWords(hook);
+        if (hookWordCount > remainingWords) {
+          hook = closeOpenEndedLine(truncateToWordLimit(hook, remainingWords));
+        }
+        remainingWords -= countWords(hook);
+      }
+    }
+
+    const nextShots = shots.map((shot) => {
+      const narration = closeOpenEndedLine(shot.narration || "");
+      if (!narration || remainingWords <= 0) {
+        return {
+          ...shot,
+          narration: "",
+        };
+      }
+
+      const narrationWordCount = countWords(narration);
+      if (narrationWordCount <= remainingWords) {
+        remainingWords -= narrationWordCount;
+        return {
+          ...shot,
+          narration,
+        };
+      }
+
+      const trimmedNarration = truncateToWordLimit(narration, remainingWords);
+      const normalizedTrimmedNarration = closeOpenEndedLine(trimmedNarration);
+      remainingWords -= countWords(normalizedTrimmedNarration);
+      return {
+        ...shot,
+        narration: normalizedTrimmedNarration,
+      };
+    });
+
+    let cta = closeOpenEndedLine(segment.script?.cta || "");
+    if (cta) {
+      if (remainingWords <= 0) {
+        cta = "";
+      } else {
+        const ctaWordCount = countWords(cta);
+        if (ctaWordCount > remainingWords) {
+          cta = closeOpenEndedLine(truncateToWordLimit(cta, remainingWords));
+        }
+        remainingWords -= countWords(cta);
+      }
+    }
+
+    return {
+      ...segment,
+      script: {
+        hook,
+        shots: nextShots,
+        cta,
+      },
+    };
+  });
 }
 
 function enforceWidgetReactionSeriesPattern(segments: MotionControlSegment[], appName: string): MotionControlSegment[] {
@@ -2753,6 +2831,7 @@ Return strict JSON only:
       : resolvedCampaignMode === "daily_ugc_quran_journey"
         ? enforceDailyUgcQuranJourneyPattern(transitionReadySegments, appName)
       : transitionReadySegments;
+  const wordBudgetReadySegments = enforceSegmentNarrationWordBudget(campaignAdjustedSegments, 24);
   const scriptAgentStyleHint =
     resolvedVideoType === "ugc"
       ? "ugc creator-style live-action"
@@ -2761,7 +2840,7 @@ Return strict JSON only:
         : resolvedVideoType === "faceless_broll"
           ? "faceless b-roll educational live-action"
           : "hybrid social explainer";
-  const veoReadySegments = campaignAdjustedSegments.map((segment, index, all) => ({
+  const veoReadySegments = wordBudgetReadySegments.map((segment, index, all) => ({
     ...segment,
     veoPrompt:
       resolvedCampaignMode === "widget_shock_hook_ugc"
@@ -3643,8 +3722,9 @@ function applyCycleDayNarrativeTemplate(args: {
 
   const transitionReadySegments = enforceSegmentBoundaryTransitions(mappedSegments);
   const campaignAdjustedSegments = enforceDailyUgcQuranJourneyPattern(transitionReadySegments, appName);
+  const wordBudgetReadySegments = enforceSegmentNarrationWordBudget(campaignAdjustedSegments, 24);
   const styleHint = "stylized 3D animated social explainer";
-  const veoReadySegments = campaignAdjustedSegments.map((segment, index, all) => ({
+  const veoReadySegments = wordBudgetReadySegments.map((segment, index, all) => ({
     ...segment,
     veoPrompt: buildVeo31SegmentPrompt({
       segment,
