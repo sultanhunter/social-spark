@@ -296,6 +296,69 @@ type CycleDayAgentResponse = {
   error?: string;
 };
 
+type IslamicSeriesTopic = {
+  id: string;
+  title: string;
+  phase: "foundations" | "practical" | "madhab" | "advanced";
+  learningGoal: string;
+  keyPoints: string[];
+  certaintyTags: Array<"ijma" | "majority" | "disputed">;
+  sourceNotes: string[];
+};
+
+type IslamicSeriesKnowledge = {
+  seriesId: string;
+  title: string;
+  targetDurationSeconds: number;
+  style: string;
+  sequencingRule: string;
+  methodology: string[];
+  sourceFiles: string[];
+  quranReferences: string[];
+  hadithReferences: string[];
+  madhabReferenceSummary: string[];
+  scriptGuardrails: string[];
+  topics: IslamicSeriesTopic[];
+};
+
+type IslamicSeriesSavedPlanSummary = {
+  id: string;
+  planNumber: number;
+  episodeId: string;
+  episodeTitle: string;
+  phase: string;
+  targetDurationSeconds: number;
+  reasoningModel?: string;
+  customFocus?: string;
+  formatId?: string;
+  sourceVideoId?: string;
+  recreationPlanId?: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
+type IslamicSeriesMetaResponse = {
+  series?: IslamicSeriesKnowledge;
+  documentationPath?: string;
+  savedPlans?: IslamicSeriesSavedPlanSummary[];
+  warning?: string;
+  error?: string;
+};
+
+type IslamicSeriesAgentResponse = {
+  episode?: IslamicSeriesTopic;
+  plan?: ScriptAgentPlan;
+  saved?: {
+    seriesPlanId?: string;
+    planNumber?: number;
+    formatId?: string;
+    sourceVideoId?: string;
+    planId?: string;
+    createdAt?: string;
+  };
+  error?: string;
+};
+
 type SavedPlan = {
   id: string;
   source_video_id: string;
@@ -1325,6 +1388,19 @@ export function VideoAgentView({ collectionId }: { collectionId: string }) {
   const [cycleDayAgentPlan, setCycleDayAgentPlan] = useState<ScriptAgentPlan | null>(null);
   const [cycleDayAgentError, setCycleDayAgentError] = useState("");
   const [cycleDayAgentSuccess, setCycleDayAgentSuccess] = useState("");
+  const [isIslamicSeriesAgentModalOpen, setIsIslamicSeriesAgentModalOpen] = useState(false);
+  const [isLoadingIslamicSeriesMeta, setIsLoadingIslamicSeriesMeta] = useState(false);
+  const [isGeneratingIslamicSeriesEpisode, setIsGeneratingIslamicSeriesEpisode] = useState(false);
+  const [islamicSeriesKnowledge, setIslamicSeriesKnowledge] = useState<IslamicSeriesKnowledge | null>(null);
+  const [islamicSeriesDocumentationPath, setIslamicSeriesDocumentationPath] = useState("");
+  const [islamicSeriesSavedPlans, setIslamicSeriesSavedPlans] = useState<IslamicSeriesSavedPlanSummary[]>([]);
+  const [selectedIslamicSeriesEpisodeId, setSelectedIslamicSeriesEpisodeId] = useState("");
+  const [islamicSeriesDurationSeconds, setIslamicSeriesDurationSeconds] = useState<number>(150);
+  const [islamicSeriesCustomFocus, setIslamicSeriesCustomFocus] = useState("");
+  const [islamicSeriesPlan, setIslamicSeriesPlan] = useState<ScriptAgentPlan | null>(null);
+  const [islamicSeriesEpisode, setIslamicSeriesEpisode] = useState<IslamicSeriesTopic | null>(null);
+  const [islamicSeriesError, setIslamicSeriesError] = useState("");
+  const [islamicSeriesSuccess, setIslamicSeriesSuccess] = useState("");
   const [copiedScriptAgentSegmentId, setCopiedScriptAgentSegmentId] = useState<number | null>(null);
   const [nodePositions, setNodePositions] = useState<Record<string, { x: number; y: number }>>({});
 
@@ -1368,6 +1444,13 @@ export function VideoAgentView({ collectionId }: { collectionId: string }) {
     const days = selectedCycleDayPlan?.days || [];
     return [...days].sort((a, b) => a.dayNumber - b.dayNumber);
   }, [selectedCycleDayPlan]);
+
+  const selectedIslamicSeriesEpisode = useMemo(() => {
+    const topics = islamicSeriesKnowledge?.topics || [];
+    if (topics.length === 0) return null;
+    if (!selectedIslamicSeriesEpisodeId) return topics[0] || null;
+    return topics.find((topic) => topic.id === selectedIslamicSeriesEpisodeId) || topics[0] || null;
+  }, [islamicSeriesKnowledge, selectedIslamicSeriesEpisodeId]);
 
   const handleSelectVideo = useCallback((formatId: string, videoId: string) => {
     setSelectedFormatId(formatId);
@@ -1630,12 +1713,49 @@ export function VideoAgentView({ collectionId }: { collectionId: string }) {
     }
   }, [collectionId]);
 
+  const loadIslamicSeriesMeta = useCallback(async () => {
+    setIsLoadingIslamicSeriesMeta(true);
+    try {
+      const response = await fetch(
+        `/api/video-agent/islamic-menstruation-series-agent?collectionId=${encodeURIComponent(collectionId)}&limit=40`,
+        { method: "GET", cache: "no-store" }
+      );
+
+      const data = (await response.json()) as IslamicSeriesMetaResponse;
+      if (!response.ok) {
+        throw new Error(data.error || "Failed to load Islamic menstruation series metadata.");
+      }
+
+      const series = data.series || null;
+      const savedPlans = Array.isArray(data.savedPlans) ? data.savedPlans : [];
+
+      setIslamicSeriesKnowledge(series);
+      setIslamicSeriesDocumentationPath(data.documentationPath || "");
+      setIslamicSeriesSavedPlans(savedPlans);
+
+      setSelectedIslamicSeriesEpisodeId((current) => {
+        if (!series?.topics?.length) return "";
+        if (current && series.topics.some((topic) => topic.id === current)) return current;
+        return series.topics[0]?.id || "";
+      });
+
+      if (data.warning) {
+        setIslamicSeriesError(data.warning);
+      }
+    } catch (err) {
+      setIslamicSeriesError(err instanceof Error ? err.message : "Failed to load Islamic menstruation series metadata.");
+    } finally {
+      setIsLoadingIslamicSeriesMeta(false);
+    }
+  }, [collectionId]);
+
   useEffect(() => {
     void loadLibrary();
     void loadCharacters();
     void loadPlans();
     void loadCycleDayPlans();
-  }, [loadLibrary, loadCharacters, loadPlans, loadCycleDayPlans]);
+    void loadIslamicSeriesMeta();
+  }, [loadLibrary, loadCharacters, loadPlans, loadCycleDayPlans, loadIslamicSeriesMeta]);
 
   useEffect(() => {
     if (
@@ -2233,6 +2353,71 @@ export function VideoAgentView({ collectionId }: { collectionId: string }) {
     loadPlans,
   ]);
 
+  const handleGenerateIslamicSeriesEpisode = useCallback(async () => {
+    const selectedEpisode = selectedIslamicSeriesEpisode;
+    if (!selectedEpisode) {
+      setIslamicSeriesError("No series episode is available to generate.");
+      return;
+    }
+
+    setIsGeneratingIslamicSeriesEpisode(true);
+    setIslamicSeriesError("");
+    setIslamicSeriesSuccess("");
+
+    try {
+      const response = await fetch("/api/video-agent/islamic-menstruation-series-agent", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          collectionId,
+          episodeId: selectedEpisode.id,
+          targetDurationSeconds: islamicSeriesDurationSeconds,
+          customFocus: islamicSeriesCustomFocus.trim(),
+          reasoningModel,
+        }),
+      });
+
+      const data = (await response.json()) as IslamicSeriesAgentResponse;
+      if (!response.ok) {
+        throw new Error(data.error || "Failed to generate Islamic series episode script.");
+      }
+
+      if (!data.plan) {
+        throw new Error("No Islamic series plan returned.");
+      }
+
+      setIslamicSeriesPlan(data.plan);
+      setIslamicSeriesEpisode(data.episode || selectedEpisode);
+      setIslamicSeriesSuccess(
+        data.saved?.planNumber
+          ? `Episode script generated and saved as plan ${data.saved.planNumber}.`
+          : "Episode script generated."
+      );
+
+      if (data.saved?.formatId && data.saved?.sourceVideoId) {
+        await loadLibrary();
+        await loadPlans();
+        setSelectedFormatId(data.saved.formatId);
+        setSelectedVideoId(data.saved.sourceVideoId);
+      }
+
+      await loadIslamicSeriesMeta();
+    } catch (err) {
+      setIslamicSeriesError(err instanceof Error ? err.message : "Failed to generate Islamic series episode script.");
+    } finally {
+      setIsGeneratingIslamicSeriesEpisode(false);
+    }
+  }, [
+    selectedIslamicSeriesEpisode,
+    collectionId,
+    islamicSeriesDurationSeconds,
+    islamicSeriesCustomFocus,
+    reasoningModel,
+    loadLibrary,
+    loadPlans,
+    loadIslamicSeriesMeta,
+  ]);
+
   const handleCopyScriptAgentVeoPrompt = useCallback(async (segmentId: number, prompt: string) => {
     const text = prompt.trim();
     if (!text) return;
@@ -2614,6 +2799,16 @@ export function VideoAgentView({ collectionId }: { collectionId: string }) {
           >
             <Clock className="mr-1.5 h-4 w-4" />
             Cycle Day Agent
+          </Button>
+
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setIsIslamicSeriesAgentModalOpen(true)}
+            className="pointer-events-auto bg-white"
+          >
+            <FileText className="mr-1.5 h-4 w-4" />
+            Islamic Series Agent
           </Button>
         </div>
 
@@ -3013,6 +3208,187 @@ export function VideoAgentView({ collectionId }: { collectionId: string }) {
                       <div className="mt-1.5 space-y-1.5">
                         {cycleDayAgentPlan.motionControlSegments.map((segment) => (
                           <div key={`cycle-agent-segment-${segment.segmentId}`} className="rounded border border-indigo-200 bg-white px-2 py-1.5">
+                            <p className="text-xs font-semibold text-indigo-700">{`Segment ${segment.segmentId} - ${segment.timecode}`}</p>
+                            <p className="text-[11px] text-slate-700"><span className="font-semibold text-slate-500">Start Frame:</span> {segment.startFramePrompt}</p>
+                            {segment.veoPrompt ? (
+                              <div className="mt-1 rounded border border-emerald-200 bg-emerald-50 px-2 py-1.5">
+                                <div className="mb-1 flex items-center justify-between gap-2">
+                                  <p className="text-[10px] font-semibold uppercase tracking-wide text-emerald-700">Veo 3.1 Prompt</p>
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    className="h-7"
+                                    onClick={() => void handleCopyScriptAgentVeoPrompt(segment.segmentId, segment.veoPrompt || "")}
+                                  >
+                                    <Copy className="mr-1 h-3.5 w-3.5" />
+                                    {copiedScriptAgentSegmentId === segment.segmentId ? "Copied" : "Copy"}
+                                  </Button>
+                                </div>
+                                <p className="whitespace-pre-wrap text-[11px] text-slate-700">{segment.veoPrompt}</p>
+                              </div>
+                            ) : null}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  ) : null}
+                </div>
+              ) : null}
+            </div>
+          </DialogContent>
+        </Dialog>
+
+        <Dialog open={isIslamicSeriesAgentModalOpen} onOpenChange={setIsIslamicSeriesAgentModalOpen}>
+          <DialogContent className="max-h-[88vh] max-w-4xl overflow-hidden p-0">
+            <DialogHeader className="border-b border-slate-200">
+              <DialogTitle className="text-base">Islamic Menstruation Series Agent</DialogTitle>
+              <DialogDescription className="text-xs text-slate-600">
+                Generate 3D animated series episodes (~2:30) from foundational to advanced madhab-based menstruation teachings.
+              </DialogDescription>
+            </DialogHeader>
+
+            <div className="max-h-[74vh] space-y-3 overflow-y-auto px-6 pb-6 pt-4">
+              <div className="space-y-2 rounded-lg border border-slate-200 bg-slate-50 p-3">
+                <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">Episode Setup</p>
+                <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+                  <div>
+                    <p className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-slate-500">Episode</p>
+                    <select
+                      value={selectedIslamicSeriesEpisodeId}
+                      onChange={(event) => setSelectedIslamicSeriesEpisodeId(event.target.value)}
+                      disabled={!islamicSeriesKnowledge?.topics?.length}
+                      className="w-full rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-xs text-slate-800 outline-none transition focus:border-rose-400 focus:ring-2 focus:ring-rose-200"
+                    >
+                      {(islamicSeriesKnowledge?.topics || []).map((topic) => (
+                        <option key={topic.id} value={topic.id}>
+                          {`${topic.title} (${topic.phase})`}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div>
+                    <p className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-slate-500">Duration (seconds)</p>
+                    <input
+                      type="number"
+                      min={120}
+                      max={210}
+                      value={islamicSeriesDurationSeconds}
+                      onChange={(event) => {
+                        const value = Number(event.target.value);
+                        if (!Number.isFinite(value)) return;
+                        setIslamicSeriesDurationSeconds(Math.max(120, Math.min(210, Math.round(value))));
+                      }}
+                      className="w-full rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-xs text-slate-800 outline-none transition focus:border-rose-400 focus:ring-2 focus:ring-rose-200"
+                    />
+                  </div>
+
+                  <div className="flex items-end">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="w-full"
+                      isLoading={isLoadingIslamicSeriesMeta}
+                      onClick={() => void loadIslamicSeriesMeta()}
+                    >
+                      Refresh Series Data
+                    </Button>
+                  </div>
+                </div>
+
+                <div>
+                  <p className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-slate-500">Custom Focus (optional)</p>
+                  <textarea
+                    value={islamicSeriesCustomFocus}
+                    onChange={(event) => setIslamicSeriesCustomFocus(event.target.value)}
+                    rows={3}
+                    placeholder="Optional: Add custom angle for this episode, e.g. focus on Hanafi vs Shafii practical differences for prayer windows."
+                    className="w-full rounded-lg border border-slate-300 bg-white px-2.5 py-2 text-xs text-slate-800 outline-none transition focus:border-rose-400 focus:ring-2 focus:ring-rose-200"
+                  />
+                </div>
+
+                <Button
+                  variant="primary"
+                  size="sm"
+                  className="w-full"
+                  isLoading={isGeneratingIslamicSeriesEpisode}
+                  onClick={() => void handleGenerateIslamicSeriesEpisode()}
+                  disabled={!selectedIslamicSeriesEpisode}
+                >
+                  <Sparkles className="mr-1.5 h-3.5 w-3.5" />
+                  {isGeneratingIslamicSeriesEpisode ? "Generating Episode..." : "Generate Series Episode Script"}
+                </Button>
+
+                {selectedIslamicSeriesEpisode ? (
+                  <div className="rounded border border-slate-200 bg-white px-2.5 py-2">
+                    <p className="text-xs font-semibold text-slate-700">{selectedIslamicSeriesEpisode.title}</p>
+                    <p className="mt-0.5 text-[11px] text-slate-600">{selectedIslamicSeriesEpisode.learningGoal}</p>
+                    <p className="mt-1 text-[11px] text-slate-500">
+                      {`Certainty tags: ${selectedIslamicSeriesEpisode.certaintyTags.join(", ")}`}
+                    </p>
+                  </div>
+                ) : null}
+
+                {islamicSeriesDocumentationPath ? (
+                  <p className="text-[11px] text-slate-500">Knowledge base: <span className="font-mono">{islamicSeriesDocumentationPath}</span></p>
+                ) : null}
+
+                {islamicSeriesError ? (
+                  <div className="rounded-md border border-rose-200 bg-rose-50 px-2 py-1.5 text-[11px] text-rose-700">{islamicSeriesError}</div>
+                ) : null}
+                {islamicSeriesSuccess ? (
+                  <div className="rounded-md border border-emerald-200 bg-emerald-50 px-2 py-1.5 text-[11px] text-emerald-700">{islamicSeriesSuccess}</div>
+                ) : null}
+              </div>
+
+              {islamicSeriesSavedPlans.length ? (
+                <div className="space-y-2 rounded-lg border border-slate-200 bg-slate-50 p-3">
+                  <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">Saved Series Episodes</p>
+                  <div className="space-y-1.5">
+                    {islamicSeriesSavedPlans.slice(0, 10).map((item) => (
+                      <div key={item.id} className="rounded border border-slate-200 bg-white px-2 py-1.5">
+                        <p className="text-xs font-semibold text-slate-700">{`Plan ${item.planNumber} - ${item.episodeTitle}`}</p>
+                        <p className="text-[11px] text-slate-600">{`${item.phase} | ${item.targetDurationSeconds}s | ${new Date(item.createdAt).toLocaleString()}`}</p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
+
+              {islamicSeriesPlan ? (
+                <div className="space-y-3 rounded-lg border border-indigo-200 bg-indigo-50/40 p-3">
+                  <div>
+                    <p className="text-xs font-semibold text-indigo-800">{islamicSeriesPlan.title}</p>
+                    <div className="mt-1 flex flex-wrap items-center gap-1.5">
+                      <Badge variant="default">{islamicSeriesEpisode?.phase || "series"}</Badge>
+                      <Badge variant="default">{islamicSeriesPlan.selectedVideoType.replace(/_/g, " ")}</Badge>
+                      <Badge variant="default">{`${islamicSeriesPlan.targetDurationSeconds}s`}</Badge>
+                    </div>
+                    <p className="mt-1 text-xs text-slate-700">{islamicSeriesPlan.objective}</p>
+                  </div>
+
+                  <div>
+                    <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">Script</p>
+                    <p className="mt-1 text-xs text-slate-700"><span className="font-semibold text-slate-500">Hook:</span> {islamicSeriesPlan.script.hook}</p>
+                    <div className="mt-1.5 space-y-1.5">
+                      {islamicSeriesPlan.script.beats.map((beat, i) => (
+                        <div key={`islamic-series-beat-${i}`} className="rounded border border-slate-200 bg-white px-2 py-1.5">
+                          <p className="text-[10px] font-mono text-slate-500">{beat.timecode}</p>
+                          {beat.visual ? <p className="text-xs text-slate-700"><span className="font-semibold text-slate-500">Visual:</span> {beat.visual}</p> : null}
+                          {beat.narration ? <p className="text-xs text-slate-700"><span className="font-semibold text-slate-500">VO:</span> {beat.narration}</p> : null}
+                          {beat.onScreenText ? <p className="text-xs text-slate-700"><span className="font-semibold text-slate-500">Text:</span> {beat.onScreenText}</p> : null}
+                        </div>
+                      ))}
+                    </div>
+                    <p className="mt-1 text-xs text-slate-700"><span className="font-semibold text-slate-500">CTA:</span> {islamicSeriesPlan.script.cta}</p>
+                  </div>
+
+                  {islamicSeriesPlan.motionControlSegments?.length ? (
+                    <div>
+                      <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">Shot Groups</p>
+                      <div className="mt-1.5 space-y-1.5">
+                        {islamicSeriesPlan.motionControlSegments.map((segment) => (
+                          <div key={`islamic-series-segment-${segment.segmentId}`} className="rounded border border-indigo-200 bg-white px-2 py-1.5">
                             <p className="text-xs font-semibold text-indigo-700">{`Segment ${segment.segmentId} - ${segment.timecode}`}</p>
                             <p className="text-[11px] text-slate-700"><span className="font-semibold text-slate-500">Start Frame:</span> {segment.startFramePrompt}</p>
                             {segment.veoPrompt ? (

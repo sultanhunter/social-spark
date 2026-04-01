@@ -160,6 +160,26 @@ CREATE TABLE video_cycle_day_plans (
   UNIQUE(collection_id, plan_number)
 );
 
+-- Saved series episodes for Islamic menstruation 3D agent
+CREATE TABLE video_islamic_menstruation_series_plans (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  collection_id UUID NOT NULL REFERENCES collections(id) ON DELETE CASCADE,
+  plan_number INT NOT NULL,
+  episode_id TEXT NOT NULL,
+  episode_title TEXT NOT NULL,
+  phase TEXT NOT NULL,
+  target_duration_seconds INT NOT NULL,
+  reasoning_model TEXT,
+  custom_focus TEXT,
+  format_id UUID REFERENCES video_formats(id) ON DELETE SET NULL,
+  source_video_id UUID REFERENCES video_format_videos(id) ON DELETE SET NULL,
+  recreation_plan_id UUID REFERENCES video_recreation_plans(id) ON DELETE SET NULL,
+  plan_payload JSONB DEFAULT '{}'::jsonb,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW(),
+  UNIQUE(collection_id, plan_number)
+);
+
 -- Create indexes for better query performance
 CREATE INDEX idx_saved_posts_collection_id ON saved_posts(collection_id);
 CREATE INDEX idx_recreated_posts_collection_id ON recreated_posts(collection_id);
@@ -174,6 +194,8 @@ CREATE INDEX idx_video_ugc_character_angles_collection_id ON video_ugc_character
 CREATE INDEX idx_video_ugc_character_angles_character_id ON video_ugc_character_angles(character_id);
 CREATE INDEX idx_video_cycle_day_plans_collection_id ON video_cycle_day_plans(collection_id);
 CREATE INDEX idx_video_cycle_day_plans_plan_number ON video_cycle_day_plans(collection_id, plan_number DESC);
+CREATE INDEX idx_video_islamic_series_plans_collection_id ON video_islamic_menstruation_series_plans(collection_id);
+CREATE INDEX idx_video_islamic_series_plans_episode_id ON video_islamic_menstruation_series_plans(collection_id, episode_id);
 
 -- Enable Row Level Security (RLS)
 ALTER TABLE collections ENABLE ROW LEVEL SECURITY;
@@ -186,6 +208,7 @@ ALTER TABLE video_recreation_plans ENABLE ROW LEVEL SECURITY;
 ALTER TABLE video_ugc_characters ENABLE ROW LEVEL SECURITY;
 ALTER TABLE video_ugc_character_angles ENABLE ROW LEVEL SECURITY;
 ALTER TABLE video_cycle_day_plans ENABLE ROW LEVEL SECURITY;
+ALTER TABLE video_islamic_menstruation_series_plans ENABLE ROW LEVEL SECURITY;
 
 -- Create policies (allow all for now - customize based on your auth setup)
 CREATE POLICY "Enable all operations for all users" ON collections
@@ -216,4 +239,7 @@ CREATE POLICY "Enable all operations for all users" ON video_ugc_character_angle
   FOR ALL USING (true) WITH CHECK (true);
 
 CREATE POLICY "Enable all operations for all users" ON video_cycle_day_plans
+  FOR ALL USING (true) WITH CHECK (true);
+
+CREATE POLICY "Enable all operations for all users" ON video_islamic_menstruation_series_plans
   FOR ALL USING (true) WITH CHECK (true);
