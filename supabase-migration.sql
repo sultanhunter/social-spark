@@ -211,3 +211,27 @@ CREATE INDEX IF NOT EXISTS idx_video_islamic_series_plans_collection
 
 CREATE INDEX IF NOT EXISTS idx_video_islamic_series_plans_episode
   ON video_islamic_menstruation_series_plans(collection_id, episode_id);
+
+-- Saved plans for Image Slide Agent (UGC TikTok slides + Figma plan)
+CREATE TABLE IF NOT EXISTS video_image_slide_plans (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  collection_id UUID NOT NULL REFERENCES collections(id) ON DELETE CASCADE,
+  plan_number INT NOT NULL,
+  campaign_type TEXT NOT NULL,
+  topic_brief TEXT,
+  slide_count INT NOT NULL,
+  reasoning_model TEXT,
+  character_id UUID REFERENCES video_ugc_characters(id) ON DELETE SET NULL,
+  character_name TEXT,
+  script TEXT NOT NULL,
+  plan_payload JSONB DEFAULT '{}'::jsonb,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW(),
+  UNIQUE(collection_id, plan_number)
+);
+
+CREATE INDEX IF NOT EXISTS idx_video_image_slide_plans_collection
+  ON video_image_slide_plans(collection_id);
+
+CREATE INDEX IF NOT EXISTS idx_video_image_slide_plans_campaign
+  ON video_image_slide_plans(collection_id, campaign_type);

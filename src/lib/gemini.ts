@@ -432,7 +432,8 @@ export async function generateSlideDesignPlans(
   appName: string,
   visualVariant: VisualVariant = "brand_optimized",
   forceCarouselAspect = false,
-  reasoningModel: ReasoningModel = DEFAULT_REASONING_MODEL
+  reasoningModel: ReasoningModel = DEFAULT_REASONING_MODEL,
+  expectedSlideCount?: number
 ): Promise<SlideGenerationPlan[]> {
   const model = genAI.getGenerativeModel({ model: reasoningModel });
   const imageSpec = getSlideImageSpec(platform, { forceCarouselAspect });
@@ -519,8 +520,18 @@ JSON only. No markdown.`;
     : [{ text: prompt }];
 
   const result = await model.generateContent(content);
-  const plans = parseSlideDesignPlans(result.response.text(), originalImageUrls.length);
-  const slideScripts = extractSlideScriptSections(script);
+  const scriptSections = extractSlideScriptSections(script);
+  const resolvedSlideCount = clamp(
+    Math.round(
+      Number.isFinite(expectedSlideCount)
+        ? Number(expectedSlideCount)
+        : (originalImageUrls.length || scriptSections.length || 1)
+    ),
+    1,
+    20
+  );
+  const plans = parseSlideDesignPlans(result.response.text(), resolvedSlideCount);
+  const slideScripts = scriptSections;
 
   return plans.map((plan, index) => {
     const slideScript = slideScripts[index];

@@ -180,6 +180,24 @@ CREATE TABLE video_islamic_menstruation_series_plans (
   UNIQUE(collection_id, plan_number)
 );
 
+-- Saved plans for Image Slide Agent (UGC TikTok slides + Figma plan)
+CREATE TABLE video_image_slide_plans (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  collection_id UUID NOT NULL REFERENCES collections(id) ON DELETE CASCADE,
+  plan_number INT NOT NULL,
+  campaign_type TEXT NOT NULL,
+  topic_brief TEXT,
+  slide_count INT NOT NULL,
+  reasoning_model TEXT,
+  character_id UUID REFERENCES video_ugc_characters(id) ON DELETE SET NULL,
+  character_name TEXT,
+  script TEXT NOT NULL,
+  plan_payload JSONB DEFAULT '{}'::jsonb,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW(),
+  UNIQUE(collection_id, plan_number)
+);
+
 -- Create indexes for better query performance
 CREATE INDEX idx_saved_posts_collection_id ON saved_posts(collection_id);
 CREATE INDEX idx_recreated_posts_collection_id ON recreated_posts(collection_id);
@@ -196,6 +214,8 @@ CREATE INDEX idx_video_cycle_day_plans_collection_id ON video_cycle_day_plans(co
 CREATE INDEX idx_video_cycle_day_plans_plan_number ON video_cycle_day_plans(collection_id, plan_number DESC);
 CREATE INDEX idx_video_islamic_series_plans_collection_id ON video_islamic_menstruation_series_plans(collection_id);
 CREATE INDEX idx_video_islamic_series_plans_episode_id ON video_islamic_menstruation_series_plans(collection_id, episode_id);
+CREATE INDEX idx_video_image_slide_plans_collection_id ON video_image_slide_plans(collection_id);
+CREATE INDEX idx_video_image_slide_plans_campaign_type ON video_image_slide_plans(collection_id, campaign_type);
 
 -- Enable Row Level Security (RLS)
 ALTER TABLE collections ENABLE ROW LEVEL SECURITY;
@@ -209,6 +229,7 @@ ALTER TABLE video_ugc_characters ENABLE ROW LEVEL SECURITY;
 ALTER TABLE video_ugc_character_angles ENABLE ROW LEVEL SECURITY;
 ALTER TABLE video_cycle_day_plans ENABLE ROW LEVEL SECURITY;
 ALTER TABLE video_islamic_menstruation_series_plans ENABLE ROW LEVEL SECURITY;
+ALTER TABLE video_image_slide_plans ENABLE ROW LEVEL SECURITY;
 
 -- Create policies (allow all for now - customize based on your auth setup)
 CREATE POLICY "Enable all operations for all users" ON collections
@@ -242,4 +263,7 @@ CREATE POLICY "Enable all operations for all users" ON video_cycle_day_plans
   FOR ALL USING (true) WITH CHECK (true);
 
 CREATE POLICY "Enable all operations for all users" ON video_islamic_menstruation_series_plans
+  FOR ALL USING (true) WITH CHECK (true);
+
+CREATE POLICY "Enable all operations for all users" ON video_image_slide_plans
   FOR ALL USING (true) WITH CHECK (true);
