@@ -6,6 +6,7 @@ import {
   ArrowRight,
   BookMarked,
   Clapperboard,
+  FileText,
   GalleryVerticalEnd,
   FolderOpen,
   Image as ImageIcon,
@@ -152,6 +153,13 @@ export function StorageView() {
               >
                 <Clapperboard className="mr-2 h-4 w-4" />
                 Video Agent
+              </Button>
+              <Button
+                variant="outline"
+                onClick={() => router.push(`/collections/${activeCollection.id}/image-slide-agent`)}
+              >
+                <FileText className="mr-2 h-4 w-4" />
+                Image Slides Agent
               </Button>
               <Button
                 variant="outline"

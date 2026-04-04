@@ -359,67 +359,6 @@ type IslamicSeriesAgentResponse = {
   error?: string;
 };
 
-type ImageSlideCampaignType = "widget_shock_hook_ugc";
-
-type ImageSlideCampaignOption = {
-  id: ImageSlideCampaignType;
-  label: string;
-  description: string;
-};
-
-type ImageSlideDesignAssetPrompt = {
-  prompt: string;
-  description: string;
-};
-
-type ImageSlideDesignPlan = {
-  headline: string;
-  supportingText: string;
-  figmaInstructions: string[];
-  assetPrompts: ImageSlideDesignAssetPrompt[];
-};
-
-type ImageSlideSavedPlanSummary = {
-  id: string;
-  planNumber: number;
-  campaignType: ImageSlideCampaignType | string;
-  topicBrief?: string;
-  slideCount: number;
-  reasoningModel?: string;
-  characterId?: string;
-  characterName?: string;
-  scriptPreview?: string;
-  slidePlanCount?: number | null;
-  createdAt: string;
-  updatedAt: string;
-};
-
-type ImageSlideMetaResponse = {
-  campaigns?: ImageSlideCampaignOption[];
-  savedPlans?: ImageSlideSavedPlanSummary[];
-  warning?: string;
-  error?: string;
-};
-
-type ImageSlideAgentResponse = {
-  campaignType?: ImageSlideCampaignType | string;
-  script?: string;
-  slidePlans?: ImageSlideDesignPlan[];
-  meta?: {
-    topicBrief?: string;
-    reasoningModel?: string;
-    slideCount?: number;
-    characterId?: string;
-    characterName?: string;
-  };
-  saved?: {
-    id?: string;
-    planNumber?: number;
-    createdAt?: string;
-  };
-  error?: string;
-};
-
 type SavedPlan = {
   id: string;
   source_video_id: string;
@@ -1462,19 +1401,6 @@ export function VideoAgentView({ collectionId }: { collectionId: string }) {
   const [islamicSeriesEpisode, setIslamicSeriesEpisode] = useState<IslamicSeriesTopic | null>(null);
   const [islamicSeriesError, setIslamicSeriesError] = useState("");
   const [islamicSeriesSuccess, setIslamicSeriesSuccess] = useState("");
-  const [isImageSlideAgentModalOpen, setIsImageSlideAgentModalOpen] = useState(false);
-  const [isLoadingImageSlideMeta, setIsLoadingImageSlideMeta] = useState(false);
-  const [isGeneratingImageSlidePlan, setIsGeneratingImageSlidePlan] = useState(false);
-  const [imageSlideCampaigns, setImageSlideCampaigns] = useState<ImageSlideCampaignOption[]>([]);
-  const [imageSlideSavedPlans, setImageSlideSavedPlans] = useState<ImageSlideSavedPlanSummary[]>([]);
-  const [imageSlideCampaignType, setImageSlideCampaignType] = useState<ImageSlideCampaignType>("widget_shock_hook_ugc");
-  const [imageSlideCharacterId, setImageSlideCharacterId] = useState<string>("auto");
-  const [imageSlideCount, setImageSlideCount] = useState<number>(6);
-  const [imageSlideTopicBrief, setImageSlideTopicBrief] = useState("");
-  const [imageSlideScript, setImageSlideScript] = useState("");
-  const [imageSlideDesignPlans, setImageSlideDesignPlans] = useState<ImageSlideDesignPlan[]>([]);
-  const [imageSlideError, setImageSlideError] = useState("");
-  const [imageSlideSuccess, setImageSlideSuccess] = useState("");
   const [copiedScriptAgentSegmentId, setCopiedScriptAgentSegmentId] = useState<number | null>(null);
   const [nodePositions, setNodePositions] = useState<Record<string, { x: number; y: number }>>({});
 
@@ -1506,11 +1432,6 @@ export function VideoAgentView({ collectionId }: { collectionId: string }) {
   const selectedUgcCharacter = useMemo(
     () => ugcCharacters.find((character) => character.id === selectedUgcCharacterId) || null,
     [ugcCharacters, selectedUgcCharacterId]
-  );
-
-  const selectedImageSlideCharacter = useMemo(
-    () => ugcCharacters.find((character) => character.id === imageSlideCharacterId) || null,
-    [ugcCharacters, imageSlideCharacterId]
   );
 
   const selectedCycleDayPlan = useMemo(() => {
@@ -1738,17 +1659,6 @@ export function VideoAgentView({ collectionId }: { collectionId: string }) {
           characters.find((item) => (item.characterType || "ugc") === "animated") || null;
         return firstAnimatedCharacter?.id || "auto";
       });
-      setImageSlideCharacterId((current) => {
-        if (current !== "auto" && characters.some((item) => item.id === current)) {
-          return current;
-        }
-        const defaultUgcCharacter =
-          characters.find((item) => (item.characterType || "ugc") === "ugc" && item.isDefault) || null;
-        if (defaultUgcCharacter?.id) return defaultUgcCharacter.id;
-        const firstUgcCharacter =
-          characters.find((item) => (item.characterType || "ugc") === "ugc") || null;
-        return firstUgcCharacter?.id || "auto";
-      });
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load UGC characters.");
     } finally {
@@ -1839,49 +1749,13 @@ export function VideoAgentView({ collectionId }: { collectionId: string }) {
     }
   }, [collectionId]);
 
-  const loadImageSlideMeta = useCallback(async () => {
-    setIsLoadingImageSlideMeta(true);
-    try {
-      const response = await fetch(
-        `/api/video-agent/image-slide-agent?collectionId=${encodeURIComponent(collectionId)}&limit=40`,
-        { method: "GET", cache: "no-store" }
-      );
-
-      const data = (await response.json()) as ImageSlideMetaResponse;
-      if (!response.ok) {
-        throw new Error(data.error || "Failed to load image-slide agent metadata.");
-      }
-
-      const campaigns = Array.isArray(data.campaigns) ? data.campaigns : [];
-      const savedPlans = Array.isArray(data.savedPlans) ? data.savedPlans : [];
-
-      setImageSlideCampaigns(campaigns);
-      setImageSlideSavedPlans(savedPlans);
-      setImageSlideCampaignType((current) => {
-        if (campaigns.some((campaign) => campaign.id === current)) {
-          return current;
-        }
-        return (campaigns[0]?.id || "widget_shock_hook_ugc") as ImageSlideCampaignType;
-      });
-
-      if (data.warning) {
-        setImageSlideError(data.warning);
-      }
-    } catch (err) {
-      setImageSlideError(err instanceof Error ? err.message : "Failed to load image-slide agent metadata.");
-    } finally {
-      setIsLoadingImageSlideMeta(false);
-    }
-  }, [collectionId]);
-
   useEffect(() => {
     void loadLibrary();
     void loadCharacters();
     void loadPlans();
     void loadCycleDayPlans();
     void loadIslamicSeriesMeta();
-    void loadImageSlideMeta();
-  }, [loadLibrary, loadCharacters, loadPlans, loadCycleDayPlans, loadIslamicSeriesMeta, loadImageSlideMeta]);
+  }, [loadLibrary, loadCharacters, loadPlans, loadCycleDayPlans, loadIslamicSeriesMeta]);
 
   useEffect(() => {
     if (
@@ -2544,58 +2418,6 @@ export function VideoAgentView({ collectionId }: { collectionId: string }) {
     loadIslamicSeriesMeta,
   ]);
 
-  const handleGenerateImageSlidePlan = useCallback(async () => {
-    setIsGeneratingImageSlidePlan(true);
-    setImageSlideError("");
-    setImageSlideSuccess("");
-
-    try {
-      const response = await fetch("/api/video-agent/image-slide-agent", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          collectionId,
-          campaignType: imageSlideCampaignType,
-          characterId: imageSlideCharacterId === "auto" ? null : imageSlideCharacterId,
-          slideCount: imageSlideCount,
-          topicBrief: imageSlideTopicBrief.trim(),
-          reasoningModel,
-        }),
-      });
-
-      const data = (await response.json()) as ImageSlideAgentResponse;
-      if (!response.ok) {
-        throw new Error(data.error || "Failed to generate image-slide script and Figma plan.");
-      }
-
-      if (!data.script || !Array.isArray(data.slidePlans)) {
-        throw new Error("Image-slide agent did not return script and slide plans.");
-      }
-
-      setImageSlideScript(data.script);
-      setImageSlideDesignPlans(data.slidePlans);
-      setImageSlideSuccess(
-        data.saved?.planNumber
-          ? `Image-slide plan generated and saved as plan ${data.saved.planNumber}.`
-          : "Image-slide plan generated."
-      );
-
-      await loadImageSlideMeta();
-    } catch (err) {
-      setImageSlideError(err instanceof Error ? err.message : "Failed to generate image-slide script and Figma plan.");
-    } finally {
-      setIsGeneratingImageSlidePlan(false);
-    }
-  }, [
-    collectionId,
-    imageSlideCampaignType,
-    imageSlideCharacterId,
-    imageSlideCount,
-    imageSlideTopicBrief,
-    reasoningModel,
-    loadImageSlideMeta,
-  ]);
-
   const handleCopyScriptAgentVeoPrompt = useCallback(async (segmentId: number, prompt: string) => {
     const text = prompt.trim();
     if (!text) return;
@@ -2987,16 +2809,6 @@ export function VideoAgentView({ collectionId }: { collectionId: string }) {
           >
             <FileText className="mr-1.5 h-4 w-4" />
             Islamic Series Agent
-          </Button>
-
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => setIsImageSlideAgentModalOpen(true)}
-            className="pointer-events-auto bg-white"
-          >
-            <FileText className="mr-1.5 h-4 w-4" />
-            Image Slides Agent
           </Button>
         </div>
 
@@ -3601,208 +3413,6 @@ export function VideoAgentView({ collectionId }: { collectionId: string }) {
                       </div>
                     </div>
                   ) : null}
-                </div>
-              ) : null}
-            </div>
-          </DialogContent>
-        </Dialog>
-
-        <Dialog open={isImageSlideAgentModalOpen} onOpenChange={setIsImageSlideAgentModalOpen}>
-          <DialogContent className="max-h-[88vh] max-w-4xl overflow-hidden p-0">
-            <DialogHeader className="border-b border-slate-200">
-              <DialogTitle className="text-base">Image Slides Agent</DialogTitle>
-              <DialogDescription className="text-xs text-slate-600">
-                Generate TikTok UGC image-slide scripts (5-6 slides) plus per-slide Figma recreation instructions and asset prompts.
-              </DialogDescription>
-            </DialogHeader>
-
-            <div className="max-h-[74vh] space-y-3 overflow-y-auto px-6 pb-6 pt-4">
-              <div className="space-y-2 rounded-lg border border-slate-200 bg-slate-50 p-3">
-                <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">Campaign Setup</p>
-
-                <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
-                  <div>
-                    <p className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-slate-500">Campaign Type</p>
-                    <select
-                      value={imageSlideCampaignType}
-                      onChange={(event) => setImageSlideCampaignType(event.target.value as ImageSlideCampaignType)}
-                      className="w-full rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-xs text-slate-800 outline-none transition focus:border-rose-400 focus:ring-2 focus:ring-rose-200"
-                    >
-                      {(imageSlideCampaigns.length > 0
-                        ? imageSlideCampaigns
-                        : [{ id: "widget_shock_hook_ugc", label: "UGC Shock Hook (Halal Flo Alternative)", description: "" }]
-                      ).map((campaign) => (
-                        <option key={campaign.id} value={campaign.id}>
-                          {campaign.label}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-
-                  <div>
-                    <p className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-slate-500">Slides</p>
-                    <input
-                      type="number"
-                      min={5}
-                      max={6}
-                      value={imageSlideCount}
-                      onChange={(event) => {
-                        const value = Number(event.target.value);
-                        if (!Number.isFinite(value)) return;
-                        setImageSlideCount(Math.max(5, Math.min(6, Math.round(value))));
-                      }}
-                      className="w-full rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-xs text-slate-800 outline-none transition focus:border-rose-400 focus:ring-2 focus:ring-rose-200"
-                    />
-                  </div>
-
-                  <div>
-                    <p className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-slate-500">Character</p>
-                    <select
-                      value={imageSlideCharacterId}
-                      onChange={(event) => setImageSlideCharacterId(event.target.value)}
-                      className="w-full rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-xs text-slate-800 outline-none transition focus:border-rose-400 focus:ring-2 focus:ring-rose-200"
-                    >
-                      <option value="auto">Auto/default UGC character</option>
-                      {ugcCharacters
-                        .filter((character) => (character.characterType || "ugc") === "ugc")
-                        .map((character) => (
-                          <option key={character.id} value={character.id}>
-                            {character.characterName}
-                            {character.isDefault ? " (Default)" : ""}
-                          </option>
-                        ))}
-                    </select>
-                  </div>
-                </div>
-
-                <div>
-                  <p className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-slate-500">Topic Focus (optional)</p>
-                  <textarea
-                    value={imageSlideTopicBrief}
-                    onChange={(event) => setImageSlideTopicBrief(event.target.value)}
-                    rows={3}
-                    placeholder="Optional: specific angle for this campaign, screenshot emphasis, tone tweaks, or audience context."
-                    className="w-full rounded-lg border border-slate-300 bg-white px-2.5 py-2 text-xs text-slate-800 outline-none transition focus:border-rose-400 focus:ring-2 focus:ring-rose-200"
-                  />
-                </div>
-
-                {selectedImageSlideCharacter ? (
-                  <div className="rounded border border-slate-200 bg-white px-2.5 py-2">
-                    <p className="text-xs font-semibold text-slate-700">{selectedImageSlideCharacter.characterName}</p>
-                    <p className="mt-0.5 text-[11px] text-slate-600">{selectedImageSlideCharacter.personaSummary}</p>
-                  </div>
-                ) : null}
-
-                <div className="flex flex-wrap items-center gap-2">
-                  <Button
-                    variant="primary"
-                    size="sm"
-                    className="min-w-[220px]"
-                    isLoading={isGeneratingImageSlidePlan}
-                    onClick={() => void handleGenerateImageSlidePlan()}
-                  >
-                    <Sparkles className="mr-1.5 h-3.5 w-3.5" />
-                    {isGeneratingImageSlidePlan ? "Generating Slide Plan..." : "Generate Script + Figma Plan"}
-                  </Button>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    isLoading={isLoadingImageSlideMeta}
-                    onClick={() => void loadImageSlideMeta()}
-                  >
-                    Refresh Saved Plans
-                  </Button>
-                  {imageSlideScript ? (
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => void navigator.clipboard.writeText(imageSlideScript)}
-                    >
-                      <Copy className="mr-1.5 h-3.5 w-3.5" />
-                      Copy Script
-                    </Button>
-                  ) : null}
-                </div>
-
-                {imageSlideError ? (
-                  <div className="rounded-md border border-rose-200 bg-rose-50 px-2 py-1.5 text-[11px] text-rose-700">{imageSlideError}</div>
-                ) : null}
-                {imageSlideSuccess ? (
-                  <div className="rounded-md border border-emerald-200 bg-emerald-50 px-2 py-1.5 text-[11px] text-emerald-700">{imageSlideSuccess}</div>
-                ) : null}
-              </div>
-
-              {imageSlideSavedPlans.length ? (
-                <div className="space-y-2 rounded-lg border border-slate-200 bg-slate-50 p-3">
-                  <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">Saved Image Slide Plans</p>
-                  <div className="space-y-1.5">
-                    {imageSlideSavedPlans.slice(0, 10).map((item) => (
-                      <div key={item.id} className="rounded border border-slate-200 bg-white px-2 py-1.5">
-                        <p className="text-xs font-semibold text-slate-700">
-                          {`Plan ${item.planNumber} - ${item.campaignType.replace(/_/g, " ")}`}
-                        </p>
-                        <p className="text-[11px] text-slate-600">
-                          {`${item.slideCount} slides${item.characterName ? ` | ${item.characterName}` : ""} | ${new Date(item.createdAt).toLocaleString()}`}
-                        </p>
-                        {item.scriptPreview ? (
-                          <p className="mt-0.5 text-[11px] text-slate-500">{item.scriptPreview}</p>
-                        ) : null}
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              ) : null}
-
-              {imageSlideScript ? (
-                <div className="space-y-2 rounded-lg border border-indigo-200 bg-indigo-50/40 p-3">
-                  <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">Generated Script</p>
-                  <pre className="whitespace-pre-wrap rounded border border-slate-200 bg-white px-2.5 py-2 text-xs leading-relaxed text-slate-700">
-                    {imageSlideScript}
-                  </pre>
-                </div>
-              ) : null}
-
-              {imageSlideDesignPlans.length ? (
-                <div className="space-y-3 rounded-lg border border-indigo-200 bg-indigo-50/40 p-3">
-                  <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">Figma Recreation Plan</p>
-                  {imageSlideDesignPlans.map((plan, index) => (
-                    <div key={`image-slide-plan-${index}`} className="rounded border border-indigo-200 bg-white px-2.5 py-2">
-                      <p className="text-xs font-semibold text-indigo-700">{`Slide ${index + 1}`}</p>
-                      {plan.headline ? (
-                        <p className="mt-0.5 text-xs text-slate-700"><span className="font-semibold text-slate-500">Headline:</span> {plan.headline}</p>
-                      ) : null}
-                      {plan.supportingText ? (
-                        <p className="mt-0.5 text-xs text-slate-700"><span className="font-semibold text-slate-500">Supporting:</span> {plan.supportingText}</p>
-                      ) : null}
-
-                      {plan.figmaInstructions.length ? (
-                        <div className="mt-2">
-                          <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">Figma Instructions</p>
-                          <ol className="mt-1 list-inside list-decimal space-y-0.5">
-                            {plan.figmaInstructions.map((step, stepIndex) => (
-                              <li key={`image-slide-step-${index}-${stepIndex}`} className="text-xs leading-relaxed text-slate-600">
-                                {step}
-                              </li>
-                            ))}
-                          </ol>
-                        </div>
-                      ) : null}
-
-                      {plan.assetPrompts.length ? (
-                        <div className="mt-2">
-                          <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">Asset Prompts</p>
-                          <div className="mt-1 space-y-1">
-                            {plan.assetPrompts.map((asset, assetIndex) => (
-                              <div key={`image-slide-asset-${index}-${assetIndex}`} className="rounded border border-slate-200 bg-slate-50 px-2 py-1.5">
-                                <p className="text-[11px] font-semibold text-slate-700">{asset.description || `Asset ${assetIndex + 1}`}</p>
-                                <p className="text-[11px] text-slate-600">{asset.prompt}</p>
-                              </div>
-                            ))}
-                          </div>
-                        </div>
-                      ) : null}
-                    </div>
-                  ))}
                 </div>
               ) : null}
             </div>
