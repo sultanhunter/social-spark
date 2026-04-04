@@ -208,34 +208,34 @@ function buildFallbackScript({
 }): string {
   const fallbackSlides = [
     {
-      headline: "Wait... a halal alternative to Flo?",
-      supporting: "Yes. Built for Muslim women.",
-      body: `${appName} helps with period and pregnancy tracking in a faith-aware way.`,
+      headline: "wait... there is a halal alternative to flo?",
+      supporting: "i just found this today",
+      body: `${appName} is for period + pregnancy tracking for muslim women`,
     },
     {
-      headline: "I thought Flo was the only option",
-      supporting: "Not anymore.",
-      body: "This app blends cycle tracking, pregnancy support, and practical Muslimah guidance.",
+      headline: "i thought flo was the only option",
+      supporting: "apparently not anymore",
+      body: "this one actually feels made for us",
     },
     {
-      headline: "What you see inside",
-      supporting: "Simple daily dashboard",
-      body: "Clear cycle day, reminders, and practical guidance that feels natural for Muslim women.",
+      headline: "what it looks like inside",
+      supporting: "super simple dashboard",
+      body: "cycle day, reminders, and helpful guidance without weird vibes",
     },
     {
-      headline: "Why this feels different",
-      supporting: "Designed with your life in mind",
-      body: "No awkward tone. Just clear, supportive insights you can actually use every day.",
+      headline: "why it feels different",
+      supporting: "not giving generic advice",
+      body: "it actually matches how muslim women track and reflect",
     },
     {
-      headline: "This is my favorite part",
-      supporting: "Everything in one flow",
-      body: "Track period, pregnancy, symptoms, and habits without juggling multiple apps.",
+      headline: "my favorite part",
+      supporting: "everything in one place",
+      body: "period, pregnancy, symptoms, habits... all in one flow",
     },
     {
-      headline: "Try it and compare",
-      supporting: "Save this for later",
-      body: `If you wanted a halal alternative to Flo, test ${appName} and see what fits you best.`,
+      headline: "save this for later",
+      supporting: "try both and compare",
+      body: `if you wanted a halal alternative to flo, test ${appName} yourself`,
     },
   ];
 
@@ -290,6 +290,12 @@ function buildDesignPlannerContext({
     "Additional design-only requirements for Figma planner (not on-slide copy):",
     campaignDirective,
     characterDirective,
+    "Text style direction (critical):",
+    "- Text should look like native TikTok UGC slideshow overlays, not polished brand campaign typography.",
+    "- Keep text short and conversational, mostly lowercase, with social-native phrasing.",
+    "- Prefer either: (a) simple white overlay text near top/center, or (b) soft rounded sticker labels with short lines.",
+    "- Avoid formal title/subtitle corporate layout and avoid long explanatory paragraphs on-slide.",
+    "- Each slide should feel like a candid personal note, not a designed ad deck.",
     "Include app showcase moments naturally:",
     "- At least 2 slides should include app screenshot containers (dashboard, cycle calendar, symptom or pregnancy tracker).",
     "- At least 1 slide should include a widget-style close-up panel.",
@@ -453,6 +459,11 @@ Body: ...
 
 Rules:
 - Keep tone natural, punchy, and UGC-like (not corporate).
+- Write in social-native phrasing, mostly lower-case friendly, like candid TikTok slideshow text.
+- Avoid formal/professional marketing language like "comprehensive", "solution", "platform", "optimize", "seamless experience".
+- Keep primary line short and emotional (around 4-12 words), with optional second short line.
+- Use max one emoji burst when it feels natural; do not overuse emojis.
+- It should feel like a personal confession/reaction style, not a brand brochure.
 - Each slide should have concise copy, but complete thoughts.
 - Keep language English only.
 - Keep content faith-sensitive and respectful.

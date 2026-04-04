@@ -450,6 +450,8 @@ VISUAL VARIANT MODE: UGC_REAL
 - Keep natural environments and textures (home/table/room/real-life scenes), not studio-white cutout look unless explicitly needed for a specific small icon.
 - If a recurring person is implied, prompts should support one consistent woman identity across slides.
 - Branding should be subtle and secondary (small accents), not a dominant visual language.
+- Typography should feel native TikTok slideshow style: candid, minimal, imperfectly casual (not polished corporate deck style).
+- Prefer short overlay copy blocks (1-3 lines), lower-case friendly phrasing, and social-native emphasis words instead of formal marketing language.
 `
       : `
 VISUAL VARIANT MODE: BRAND_OPTIMIZED
@@ -459,14 +461,30 @@ VISUAL VARIANT MODE: BRAND_OPTIMIZED
 - Person consistency can be maintained when needed, but brand expression is primary.
 `;
 
+  const logoPlacementRule =
+    visualVariant === "ugc_real"
+      ? "- Logo placement is optional and subtle. If used, keep it tiny and natural; do not force a visible logo on every slide."
+      : "- Include brand logo placement (position, size).";
+
+  const textStyleRule =
+    visualVariant === "ugc_real"
+      ? "- Use social-native text treatment in figmaInstructions: short casual overlays, lower-case friendly tone, quick punchy phrases, and avoid formal headline/subheadline corporate composition."
+      : "- Use polished brand-forward copy hierarchy and typography treatment.";
+
+  const adaptationGoal =
+    visualVariant === "ugc_real"
+      ? "using our app context with subtle branding cues (UGC authenticity first)"
+      : "using OUR brand identity";
+
   const prompt = `You are an expert art director and Figma designer. I am showing you ${imageParts.length} original carousel slide images and a rewritten script for our brand.
 
 YOUR TASK: For EACH slide, produce:
-1. **figmaInstructions** — step-by-step instructions to recreate this slide's EXACT visual layout and style in Figma, but using OUR brand identity. Be extremely specific:
+1. **figmaInstructions** — step-by-step instructions to recreate this slide's EXACT visual layout and style in Figma, but ${adaptationGoal}. Be extremely specific:
    - Mention exact positions (e.g. "48px from top-left"), sizes (e.g. "width: 600px"), spacings
    - Reference our brand gradient: ${gradientStr} — use these for backgrounds, panels, accent shapes, overlays
-   - Include brand logo placement (position, size)
+   - ${logoPlacementRule}
    - Specify font names, weights, sizes, colors for each text layer
+   - ${textStyleRule}
    - Describe any shapes, dividers, icons, overlays, and their exact styling
    - The goal is that a designer can follow these steps to build the slide in Figma without guessing
 
