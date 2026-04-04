@@ -35,6 +35,17 @@ function asIndex(value: unknown): number | null {
   return rounded;
 }
 
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return typeof value === "object" && value !== null ? (value as Record<string, unknown>) : null;
+}
+
+function isCharacterAssetPrompt(prompt: string, description: string): boolean {
+  const combined = `${prompt} ${description}`.toLowerCase();
+  return /(woman|female|girl|lady|muslimah|hijab|character|person|portrait|face|model|influencer|selfie)/i.test(
+    combined
+  );
+}
+
 function isMissingTableError(error: unknown): boolean {
   if (!error || typeof error !== "object") return false;
   const row = error as Record<string, unknown>;
@@ -148,7 +159,7 @@ export async function POST(request: NextRequest) {
 
     const planResult = await supabase
       .from("video_image_slide_plans")
-      .select("id, collection_id, plan_payload")
+      .select("id, collection_id, character_id, plan_payload")
       .eq("id", planId)
       .eq("collection_id", collectionId)
       .maybeSingle();
@@ -182,6 +193,29 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: `Asset ${assetIndex + 1} not found for slide ${slideIndex + 1}.` }, { status: 400 });
     }
 
+    const payloadCharacter = asRecord(payload.character);
+    let characterReferenceImageUrl = payloadCharacter ? asText(payloadCharacter.referenceImageUrl) : "";
+    let characterLockDescriptor = payloadCharacter ? asText(payloadCharacter.promptTemplate) : "";
+
+    if (!characterReferenceImageUrl && typeof planResult.data.character_id === "string" && planResult.data.character_id) {
+      const characterLookup = await supabase
+        .from("video_ugc_characters")
+        .select("reference_image_url, prompt_template")
+        .eq("collection_id", collectionId)
+        .eq("id", planResult.data.character_id)
+        .maybeSingle();
+
+      if (!characterLookup.error && characterLookup.data) {
+        characterReferenceImageUrl = asText(characterLookup.data.reference_image_url);
+        if (!characterLockDescriptor) {
+          characterLockDescriptor = asText(characterLookup.data.prompt_template);
+        }
+      }
+    }
+
+    const shouldApplyCharacterReference =
+      Boolean(characterReferenceImageUrl) && isCharacterAssetPrompt(asset.prompt, asset.description);
+
     const appName = await fetchCollectionAppName(collectionId);
     const imageUrl = await generateImage(asset.prompt, {
       collectionId,
@@ -194,6 +228,12 @@ export async function POST(request: NextRequest) {
       visualVariant: "ugc_real",
       forceCarouselAspect: true,
       imageModel: imageGenerationModel,
+      characterReferenceImageUrls: shouldApplyCharacterReference && characterReferenceImageUrl
+        ? [characterReferenceImageUrl]
+        : [],
+      characterLockDescriptor: shouldApplyCharacterReference
+        ? characterLockDescriptor || "Same fictional woman identity across all assets."
+        : undefined,
       brandAssets: {
         appName,
         primaryColorHex: APP_BRAND_PRIMARY_COLOR,
