@@ -62,6 +62,16 @@ type CharacterProfile = {
   imageModel: string | null;
 };
 
+type GeneratedImageAssetEntry = {
+  slideIndex: number;
+  assetIndex: number;
+  imageUrl: string;
+  prompt: string;
+  description: string;
+  imageModel: string;
+  generatedAt: string;
+};
+
 function asText(value: unknown): string {
   return typeof value === "string" ? value.trim() : "";
 }
@@ -129,6 +139,64 @@ function cleanScriptText(value: string): string {
     .replace(/^```[\w-]*\s*/i, "")
     .replace(/```$/i, "")
     .trim();
+}
+
+function parseSlidePlans(value: unknown): SlideGenerationPlan[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((item): SlideGenerationPlan | null => {
+      if (typeof item !== "object" || item === null) return null;
+      const row = item as Record<string, unknown>;
+      const headline = typeof row.headline === "string" ? row.headline : "";
+      const supportingText = typeof row.supportingText === "string" ? row.supportingText : "";
+      const figmaInstructions = Array.isArray(row.figmaInstructions)
+        ? row.figmaInstructions.filter((step): step is string => typeof step === "string")
+        : [];
+      const assetPrompts = Array.isArray(row.assetPrompts)
+        ? row.assetPrompts
+          .filter((asset): asset is Record<string, unknown> => typeof asset === "object" && asset !== null)
+          .map((asset) => ({
+            prompt: typeof asset.prompt === "string" ? asset.prompt : "",
+            description: typeof asset.description === "string" ? asset.description : "Asset",
+          }))
+          .filter((asset) => asset.prompt.trim().length > 0)
+        : [];
+
+      return {
+        headline,
+        supportingText,
+        figmaInstructions,
+        assetPrompts,
+      };
+    })
+    .filter((plan): plan is SlideGenerationPlan => Boolean(plan));
+}
+
+function parseGeneratedAssets(value: unknown): GeneratedImageAssetEntry[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((item): GeneratedImageAssetEntry | null => {
+      if (typeof item !== "object" || item === null) return null;
+      const row = item as Record<string, unknown>;
+      const slideIndex = typeof row.slideIndex === "number" ? Math.max(0, Math.round(row.slideIndex)) : 0;
+      const assetIndex = typeof row.assetIndex === "number" ? Math.max(0, Math.round(row.assetIndex)) : 0;
+      const imageUrl = typeof row.imageUrl === "string" ? row.imageUrl.trim() : "";
+      const prompt = typeof row.prompt === "string" ? row.prompt : "";
+      const description = typeof row.description === "string" ? row.description : "Asset";
+      const imageModel = typeof row.imageModel === "string" ? row.imageModel : "unknown";
+      const generatedAt = typeof row.generatedAt === "string" ? row.generatedAt : new Date(0).toISOString();
+      if (!imageUrl) return null;
+      return {
+        slideIndex,
+        assetIndex,
+        imageUrl,
+        prompt,
+        description,
+        imageModel,
+        generatedAt,
+      };
+    })
+    .filter((asset): asset is GeneratedImageAssetEntry => Boolean(asset));
 }
 
 function buildFallbackScript({
@@ -414,6 +482,7 @@ Rules:
 export async function GET(request: NextRequest) {
   try {
     const collectionId = asText(request.nextUrl.searchParams.get("collectionId"));
+    const planId = asText(request.nextUrl.searchParams.get("planId"));
     const limitParam = Number(request.nextUrl.searchParams.get("limit") || "20");
     const limit = Number.isFinite(limitParam) ? Math.max(1, Math.min(100, Math.round(limitParam))) : 20;
 
@@ -428,6 +497,53 @@ export async function GET(request: NextRequest) {
           },
         ],
         savedPlans: [],
+      });
+    }
+
+    if (planId) {
+      const detailResult = await supabase
+        .from("video_image_slide_plans")
+        .select(
+          "id, collection_id, plan_number, campaign_type, topic_brief, slide_count, reasoning_model, character_id, character_name, script, plan_payload, created_at, updated_at"
+        )
+        .eq("collection_id", collectionId)
+        .eq("id", planId)
+        .maybeSingle();
+
+      if (detailResult.error) {
+        if (isMissingTableError(detailResult.error)) {
+          return NextResponse.json(
+            { error: "Table video_image_slide_plans is missing. Run latest Supabase migration." },
+            { status: 500 }
+          );
+        }
+        throw detailResult.error;
+      }
+
+      if (!detailResult.data) {
+        return NextResponse.json({ error: "Image-slide plan not found." }, { status: 404 });
+      }
+
+      const typed = detailResult.data as unknown as ImageSlidePlanRow;
+      const payload = typed.plan_payload || {};
+      const payloadRow = payload as Record<string, unknown>;
+
+      return NextResponse.json({
+        plan: {
+          id: typed.id,
+          planNumber: typed.plan_number,
+          campaignType: typed.campaign_type,
+          topicBrief: typed.topic_brief,
+          slideCount: typed.slide_count,
+          reasoningModel: typed.reasoning_model,
+          characterId: typed.character_id,
+          characterName: typed.character_name,
+          script: typed.script,
+          slidePlans: parseSlidePlans(payloadRow.slidePlans),
+          generatedAssets: parseGeneratedAssets(payloadRow.generatedAssets),
+          createdAt: typed.created_at,
+          updatedAt: typed.updated_at,
+        },
       });
     }
 

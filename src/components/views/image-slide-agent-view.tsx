@@ -13,6 +13,12 @@ import {
   isReasoningModel,
   type ReasoningModel,
 } from "@/lib/reasoning-model";
+import {
+  DEFAULT_IMAGE_GENERATION_MODEL,
+  IMAGE_GENERATION_MODELS,
+  isImageGenerationModel,
+  type ImageGenerationModel,
+} from "@/lib/image-generation-model";
 
 type ImageSlideCampaignType = "widget_shock_hook_ugc";
 
@@ -94,9 +100,11 @@ export function ImageSlideAgentView({ collectionId }: { collectionId: string }) 
   const { activeCollection } = useAppStore();
 
   const [reasoningModel, setReasoningModel] = useState<ReasoningModel>(DEFAULT_REASONING_MODEL);
+  const [imageGenerationModel, setImageGenerationModel] = useState<ImageGenerationModel>(DEFAULT_IMAGE_GENERATION_MODEL);
   const [isLoadingMeta, setIsLoadingMeta] = useState(false);
   const [isLoadingCharacters, setIsLoadingCharacters] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
+  const [latestGeneratedPlanId, setLatestGeneratedPlanId] = useState<string | null>(null);
 
   const [campaigns, setCampaigns] = useState<ImageSlideCampaignOption[]>([]);
   const [savedPlans, setSavedPlans] = useState<ImageSlideSavedPlanSummary[]>([]);
@@ -217,6 +225,7 @@ export function ImageSlideAgentView({ collectionId }: { collectionId: string }) 
 
       setScript(data.script);
       setSlidePlans(data.slidePlans);
+      setLatestGeneratedPlanId(typeof data.saved?.id === "string" ? data.saved.id : null);
       setSuccess(
         data.saved?.planNumber
           ? `Generated and saved as plan ${data.saved.planNumber}.`
@@ -345,6 +354,31 @@ export function ImageSlideAgentView({ collectionId }: { collectionId: string }) 
                   Copy Script
                 </Button>
               ) : null}
+              {latestGeneratedPlanId ? (
+                <Button
+                  variant="outline"
+                  onClick={() => router.push(`/collections/${collectionId}/image-slide-agent/${latestGeneratedPlanId}`)}
+                >
+                  <FileText className="mr-2 h-4 w-4" />
+                  Open Latest Plan
+                </Button>
+              ) : null}
+            </div>
+
+            <div className="max-w-xs space-y-1.5">
+              <label className="text-xs font-semibold uppercase tracking-wide text-slate-500">Image Model (for plan detail asset generation)</label>
+              <select
+                value={imageGenerationModel}
+                onChange={(event) => {
+                  const value = event.target.value;
+                  if (isImageGenerationModel(value)) setImageGenerationModel(value);
+                }}
+                className="w-full rounded-lg border border-slate-300 bg-white px-2.5 py-2 text-sm text-slate-800 outline-none transition focus:border-rose-400 focus:ring-2 focus:ring-rose-200"
+              >
+                {IMAGE_GENERATION_MODELS.map((model) => (
+                  <option key={model.id} value={model.id}>{model.label}</option>
+                ))}
+              </select>
             </div>
 
             {error ? (
@@ -366,11 +400,16 @@ export function ImageSlideAgentView({ collectionId }: { collectionId: string }) 
             </CardHeader>
             <CardContent className="space-y-2">
               {savedPlans.slice(0, 10).map((item) => (
-                <div key={item.id} className="rounded-lg border border-slate-200 bg-white px-3 py-2">
+                <button
+                  key={item.id}
+                  type="button"
+                  onClick={() => router.push(`/collections/${collectionId}/image-slide-agent/${item.id}`)}
+                  className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-left transition hover:border-rose-300 hover:bg-rose-50/40"
+                >
                   <p className="text-sm font-semibold text-slate-800">{`Plan ${item.planNumber} - ${item.campaignType.replace(/_/g, " ")}`}</p>
                   <p className="text-xs text-slate-500">{`${item.slideCount} slides${item.characterName ? ` | ${item.characterName}` : ""} | ${new Date(item.createdAt).toLocaleString()}`}</p>
                   {item.scriptPreview ? <p className="mt-1 text-xs text-slate-600">{item.scriptPreview}</p> : null}
-                </div>
+                </button>
               ))}
             </CardContent>
           </Card>
