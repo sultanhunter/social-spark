@@ -115,6 +115,16 @@ function normalizeCampaignMode(value: unknown): ScriptAgentCampaignMode {
     return "widget_late_period_reaction_hook_ugc";
   }
   if (
+    cleaned === "ai_objects_educational_explainer" ||
+    cleaned === "ai-objects-educational-explainer" ||
+    cleaned === "ai_objects_explainer" ||
+    cleaned === "ai-objects-explainer" ||
+    cleaned === "cute_ai_objects_explainer" ||
+    cleaned === "cute-ai-objects-explainer"
+  ) {
+    return "ai_objects_educational_explainer";
+  }
+  if (
     cleaned === "daily_ugc_quran_journey" ||
     cleaned === "daily-ugc-quran-journey" ||
     cleaned === "daily_ugc_quran" ||

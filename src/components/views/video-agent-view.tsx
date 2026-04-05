@@ -190,12 +190,14 @@ type ScriptAgentCampaignMode =
   | "widget_reaction_ugc"
   | "widget_shock_hook_ugc"
   | "widget_late_period_reaction_hook_ugc"
+  | "ai_objects_educational_explainer"
   | "daily_ugc_quran_journey";
 type ScriptAgentSelectableCampaignMode =
   | "standard"
   | "widget_reaction_ugc"
   | "widget_shock_hook_ugc"
-  | "widget_late_period_reaction_hook_ugc";
+  | "widget_late_period_reaction_hook_ugc"
+  | "ai_objects_educational_explainer";
 
 type ScriptAgentPlan = {
   title: string;
@@ -1763,15 +1765,19 @@ export function VideoAgentView({ collectionId }: { collectionId: string }) {
   }, [loadLibrary, loadCharacters, loadPlans, loadCycleDayPlans, loadIslamicSeriesMeta]);
 
   useEffect(() => {
-    if (
-      (
-        scriptAgentCampaignMode === "widget_reaction_ugc" ||
-        scriptAgentCampaignMode === "widget_shock_hook_ugc" ||
-        scriptAgentCampaignMode === "widget_late_period_reaction_hook_ugc"
-      ) &&
-      scriptAgentVideoType !== "ugc"
-    ) {
+    const forceUgc =
+      scriptAgentCampaignMode === "widget_reaction_ugc" ||
+      scriptAgentCampaignMode === "widget_shock_hook_ugc" ||
+      scriptAgentCampaignMode === "widget_late_period_reaction_hook_ugc";
+    const forceAiAnimation = scriptAgentCampaignMode === "ai_objects_educational_explainer";
+
+    if (forceUgc && scriptAgentVideoType !== "ugc") {
       setScriptAgentVideoType("ugc");
+      return;
+    }
+
+    if (forceAiAnimation && scriptAgentVideoType !== "ai_animation") {
+      setScriptAgentVideoType("ai_animation");
     }
   }, [scriptAgentCampaignMode, scriptAgentVideoType]);
 
@@ -1779,6 +1785,13 @@ export function VideoAgentView({ collectionId }: { collectionId: string }) {
     if (scriptAgentCampaignMode === "widget_late_period_reaction_hook_ugc") {
       if (scriptAgentDurationSeconds !== 8) {
         setScriptAgentDurationSeconds(8);
+      }
+      return;
+    }
+
+    if (scriptAgentCampaignMode === "ai_objects_educational_explainer") {
+      if (scriptAgentDurationSeconds < 75 || scriptAgentDurationSeconds > 110) {
+        setScriptAgentDurationSeconds(90);
       }
       return;
     }
@@ -2868,6 +2881,7 @@ export function VideoAgentView({ collectionId }: { collectionId: string }) {
                       <option value="widget_reaction_ugc">Widget reaction UGC</option>
                       <option value="widget_shock_hook_ugc">Widget shock-hook UGC</option>
                       <option value="widget_late_period_reaction_hook_ugc">Late-period reaction hook UGC (8s)</option>
+                      <option value="ai_objects_educational_explainer">AI objects educational explainer (~90s)</option>
                     </select>
                   </div>
 
@@ -2891,15 +2905,37 @@ export function VideoAgentView({ collectionId }: { collectionId: string }) {
                     <p className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-slate-500">Target Duration (seconds)</p>
                     <input
                       type="number"
-                      min={scriptAgentCampaignMode === "widget_late_period_reaction_hook_ugc" ? 8 : 30}
-                      max={scriptAgentCampaignMode === "widget_late_period_reaction_hook_ugc" ? 8 : 180}
+                      min={
+                        scriptAgentCampaignMode === "widget_late_period_reaction_hook_ugc"
+                          ? 8
+                          : scriptAgentCampaignMode === "ai_objects_educational_explainer"
+                            ? 75
+                            : 30
+                      }
+                      max={
+                        scriptAgentCampaignMode === "widget_late_period_reaction_hook_ugc"
+                          ? 8
+                          : scriptAgentCampaignMode === "ai_objects_educational_explainer"
+                            ? 110
+                            : 180
+                      }
                       disabled={scriptAgentCampaignMode === "widget_late_period_reaction_hook_ugc"}
                       value={scriptAgentDurationSeconds}
                       onChange={(event) => {
                         const value = Number(event.target.value);
                         if (!Number.isFinite(value)) return;
-                        const min = scriptAgentCampaignMode === "widget_late_period_reaction_hook_ugc" ? 8 : 30;
-                        const max = scriptAgentCampaignMode === "widget_late_period_reaction_hook_ugc" ? 8 : 180;
+                        const min =
+                          scriptAgentCampaignMode === "widget_late_period_reaction_hook_ugc"
+                            ? 8
+                            : scriptAgentCampaignMode === "ai_objects_educational_explainer"
+                              ? 75
+                              : 30;
+                        const max =
+                          scriptAgentCampaignMode === "widget_late_period_reaction_hook_ugc"
+                            ? 8
+                            : scriptAgentCampaignMode === "ai_objects_educational_explainer"
+                              ? 110
+                              : 180;
                         setScriptAgentDurationSeconds(Math.max(min, Math.min(max, Math.round(value))));
                       }}
                       className="w-full rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-xs text-slate-800 outline-none transition focus:border-rose-400 focus:ring-2 focus:ring-rose-200"

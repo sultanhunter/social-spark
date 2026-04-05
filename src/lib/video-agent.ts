@@ -185,6 +185,7 @@ export type ScriptAgentCampaignMode =
   | "widget_reaction_ugc"
   | "widget_shock_hook_ugc"
   | "widget_late_period_reaction_hook_ugc"
+  | "ai_objects_educational_explainer"
   | "daily_ugc_quran_journey";
 
 export interface VideoScriptIdeationPlan {
@@ -614,6 +615,104 @@ function enforceWidgetLatePeriodReactionHookPattern(segments: MotionControlSegme
       ],
     },
   ];
+}
+
+function enforceAiObjectsEducationalExplainerPattern(
+  segments: MotionControlSegment[],
+  appName: string
+): MotionControlSegment[] {
+  const normalizedAppName = cleanText(appName);
+  const appPattern = normalizedAppName ? new RegExp(escapeRegExp(normalizedAppName), "i") : null;
+  const appAlreadyMentioned = appPattern
+    ? segments.some((segment) => {
+      const script = segment.script;
+      const text = [
+        script?.hook || "",
+        script?.cta || "",
+        ...(script?.shots || []).map((shot) => `${shot.narration || ""} ${shot.onScreenText || ""}`),
+      ].join(" ");
+      return appPattern.test(text);
+    })
+    : false;
+
+  let appHookInjected = appAlreadyMentioned;
+  const appHookSegmentIndex = Math.max(1, Math.floor(segments.length * 0.6));
+
+  return segments.map((segment, index, all) => {
+    const shots = [...(segment.script?.shots || [])];
+    if (shots.length === 0) {
+      shots.push({
+        shotId: "shot1",
+        visual: "High-quality animated living objects explain a practical cycle-health concept with warm and cute expressions.",
+        narration: "Let us break this down in a simple way.",
+        onScreenText: "Simple object explainer",
+        editNote: "Keep educational pacing with expressive object acting.",
+      });
+    }
+
+    const firstShot = shots[0];
+    shots[0] = {
+      ...firstShot,
+      visual: cleanText(
+        `${firstShot.visual} Premium stylized 3D animation: cute anthropomorphic everyday objects with expressive faces explain the concept clearly.`
+      ),
+      editNote: cleanText(
+        `${firstShot.editNote || ""} Keep the look polished, cinematic, and educational with gentle humor.`
+      ),
+    };
+
+    const shouldInjectAppHook = !appHookInjected && index >= appHookSegmentIndex;
+    if (shouldInjectAppHook && normalizedAppName) {
+      const appHookShotIndex = Math.min(1, shots.length - 1);
+      const appHookShot = shots[appHookShotIndex];
+      shots[appHookShotIndex] = {
+        ...appHookShot,
+        narration: closeOpenEndedLine(
+          cleanText(appHookShot.narration) ||
+            `Quick practical step: check ${normalizedAppName} to confirm cycle and worship status before deciding what to do next.`
+        ),
+        onScreenText:
+          cleanText(appHookShot.onScreenText) ||
+          "Quick status check inside app",
+        editNote: cleanText(
+          `${appHookShot.editNote || ""} Keep app mention subtle and practical, never salesy.`
+        ),
+      };
+      appHookInjected = true;
+    }
+
+    const prompts = (segment.multiShotPrompts || []).map((promptItem) => {
+      const shouldPreserveType =
+        promptItem.generationType === "product_ui_overlay" || promptItem.generationType === "transition_fx";
+      return {
+        ...promptItem,
+        generationType: shouldPreserveType ? promptItem.generationType : "base_ai_video",
+        prompt: cleanText(
+          `${promptItem.prompt} Premium stylized 3D CGI, cute anthropomorphic everyday objects, expressive faces and limbs, educational storytelling clarity.`
+        ),
+      };
+    });
+
+    const isLastSegment = index === all.length - 1;
+
+    return {
+      ...segment,
+      startFramePrompt: cleanText(
+        segment.startFramePrompt ||
+          "Premium stylized 3D animated scene: cute living objects begin explaining a practical health concept in a warm educational tone."
+      ),
+      script: {
+        hook: segment.script?.hook || "",
+        shots,
+        cta: isLastSegment
+          ? closeOpenEndedLine(
+            segment.script?.cta || "Save this explainer for later and share it with someone who needs it."
+          )
+          : closeOpenEndedLine(segment.script?.cta || ""),
+      },
+      multiShotPrompts: prompts,
+    };
+  });
 }
 
 function enforceDailyUgcQuranJourneyPattern(segments: MotionControlSegment[], appName: string): MotionControlSegment[] {
@@ -1401,6 +1500,16 @@ function sanitizeScriptAgentCampaignMode(value: unknown): ScriptAgentCampaignMod
     cleaned === "late-period-reaction-ugc"
   ) {
     return "widget_late_period_reaction_hook_ugc";
+  }
+  if (
+    cleaned === "ai_objects_educational_explainer" ||
+    cleaned === "ai-objects-educational-explainer" ||
+    cleaned === "ai_objects_explainer" ||
+    cleaned === "ai-objects-explainer" ||
+    cleaned === "cute_ai_objects_explainer" ||
+    cleaned === "cute-ai-objects-explainer"
+  ) {
+    return "ai_objects_educational_explainer";
   }
   if (
     cleaned === "daily_ugc_quran_journey" ||
@@ -2515,12 +2624,16 @@ export async function buildVideoScriptIdeationPlan({
       ? Math.max(30, Math.round(targetDurationSeconds))
       : resolvedCampaignMode === "widget_late_period_reaction_hook_ugc"
         ? 8
+      : resolvedCampaignMode === "ai_objects_educational_explainer"
+        ? clamp(Math.round(targetDurationSeconds), 75, 110)
       : resolvedCampaignMode === "widget_shock_hook_ugc"
         ? clamp(Math.round(targetDurationSeconds), 30, 90)
       : clamp(Math.round(targetDurationSeconds), 30, 180);
   const minBeatCount =
     resolvedCampaignMode === "widget_late_period_reaction_hook_ugc"
       ? 2
+      : resolvedCampaignMode === "ai_objects_educational_explainer"
+        ? Math.min(64, Math.max(12, Math.ceil(safeDurationSeconds / 6)))
       : Math.min(64, Math.max(8, Math.ceil(safeDurationSeconds / 4)));
   const normalizedTopicBrief = cleanText(topicBrief);
   const hasTopicBrief = normalizedTopicBrief.length > 0;
@@ -2529,6 +2642,8 @@ export async function buildVideoScriptIdeationPlan({
     resolvedCampaignMode === "widget_shock_hook_ugc" ||
     resolvedCampaignMode === "widget_late_period_reaction_hook_ugc"
       ? "ugc"
+      : resolvedCampaignMode === "ai_objects_educational_explainer"
+        ? "ai_animation"
       : resolvedCampaignMode === "daily_ugc_quran_journey"
         ? "ai_animation"
         : null;
@@ -2583,6 +2698,18 @@ CAMPAIGN MODE: widget_late_period_reaction_hook_ugc
   * "is everyone's period late in x month"
   * "raise your hand if it's x month and your period still hasn't shown up"
 - Keep this mode strictly UGC (not animation).
+`
+      : resolvedCampaignMode === "ai_objects_educational_explainer"
+        ? `
+CAMPAIGN MODE: ai_objects_educational_explainer
+- Build a high-quality AI animation educational explainer around 90 seconds.
+- Visual language: cute anthropomorphic everyday objects (living objects) that explain concepts clearly.
+- Keep look premium and cinematic: polished stylized 3D CGI, expressive faces, smooth motion, clean lighting.
+- Narrative style: object characters teach one practical period/pregnancy or worship-support concept in simple, memorable metaphors.
+- Keep education first: clear facts, practical steps, warm and friendly tone.
+- Include one natural app hook moment (subtle, useful, non-ad) where the explainer references checking app status for practical decision support.
+- Do not make hard sell claims; app mention should feel like a helpful tool inside the explanation.
+- Keep this mode strictly ai_animation.
 `
     : resolvedCampaignMode === "daily_ugc_quran_journey"
       ? `
@@ -2772,13 +2899,14 @@ Return strict JSON only:
   );
 
   const isLatePeriodReactionHookMode = resolvedCampaignMode === "widget_late_period_reaction_hook_ugc";
+  const isAiObjectsEducationalMode = resolvedCampaignMode === "ai_objects_educational_explainer";
   const forcedLatePeriodHookOne = "is everyone's period late in march?";
   const forcedLatePeriodHookTwo = "raise your hand if it's march and your period still hasn't shown up";
   const forcedLatePeriodVisual =
     "Medium close-up of a young woman indoors, thinking pose, then gentle head shake with slight disappointment.";
 
-  const hookForPlan = isLatePeriodReactionHookMode ? forcedLatePeriodHookOne : hook;
-  const beatsForPlan = isLatePeriodReactionHookMode
+  const baseHookForPlan = isLatePeriodReactionHookMode ? forcedLatePeriodHookOne : hook;
+  const baseBeatsForPlan = isLatePeriodReactionHookMode
     ? [
       {
         timecode: "0:00-0:04",
@@ -2796,7 +2924,42 @@ Return strict JSON only:
       },
     ]
     : beats;
-  const ctaForPlan = isLatePeriodReactionHookMode ? "" : cta;
+  const baseCtaForPlan = isLatePeriodReactionHookMode ? "" : cta;
+
+  const hookForPlan = baseHookForPlan;
+  let beatsForPlan = baseBeatsForPlan;
+  const ctaForPlan = baseCtaForPlan;
+
+  if (isAiObjectsEducationalMode) {
+    const normalizedAppName = cleanText(appName);
+    const appPattern = normalizedAppName ? new RegExp(escapeRegExp(normalizedAppName), "i") : null;
+    const scriptCombinedText = [
+      hookForPlan,
+      ctaForPlan,
+      ...beatsForPlan.map((beat) => `${beat.narration || ""} ${beat.onScreenText || ""}`),
+    ].join(" ");
+    const hasAppMention = appPattern ? appPattern.test(scriptCombinedText) : false;
+
+    if (!hasAppMention && normalizedAppName && beatsForPlan.length > 0) {
+      const hookBeatIndex = Math.min(beatsForPlan.length - 1, Math.floor(beatsForPlan.length * 0.6));
+      beatsForPlan = beatsForPlan.map((beat, index) => {
+        if (index !== hookBeatIndex) return beat;
+        return {
+          ...beat,
+          narration: closeOpenEndedLine(
+            cleanText(beat.narration) ||
+              `Quick practical check: I open ${normalizedAppName} to confirm cycle and worship status before deciding the next step.`
+          ),
+          onScreenText:
+            cleanText(beat.onScreenText) ||
+            "Quick app status check",
+          editNote: cleanText(
+            `${beat.editNote || ""} Keep app hook useful and subtle, never ad-like.`
+          ),
+        };
+      });
+    }
+  }
 
   const modelSegmentsRaw = Array.isArray(row.motionControlSegments) ? row.motionControlSegments : [];
   const modelSegments: MotionControlSegment[] = modelSegmentsRaw
@@ -2914,11 +3077,15 @@ Return strict JSON only:
         ? enforceWidgetShockHookSeriesPattern(transitionReadySegments, appName)
       : resolvedCampaignMode === "widget_late_period_reaction_hook_ugc"
         ? enforceWidgetLatePeriodReactionHookPattern(transitionReadySegments)
+      : resolvedCampaignMode === "ai_objects_educational_explainer"
+        ? enforceAiObjectsEducationalExplainerPattern(transitionReadySegments, appName)
       : resolvedCampaignMode === "daily_ugc_quran_journey"
         ? enforceDailyUgcQuranJourneyPattern(transitionReadySegments, appName)
       : transitionReadySegments;
   const scriptAgentStyleHint =
-    resolvedVideoType === "ugc"
+    resolvedCampaignMode === "ai_objects_educational_explainer"
+      ? "premium stylized 3D educational explainer with cute anthropomorphic everyday objects"
+      : resolvedVideoType === "ugc"
       ? "ugc creator-style live-action"
       : resolvedVideoType === "ai_animation"
         ? "animated explainer with realistic motion and texture"
