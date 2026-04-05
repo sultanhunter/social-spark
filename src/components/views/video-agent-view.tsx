@@ -189,8 +189,13 @@ type ScriptAgentCampaignMode =
   | "standard"
   | "widget_reaction_ugc"
   | "widget_shock_hook_ugc"
+  | "widget_late_period_reaction_hook_ugc"
   | "daily_ugc_quran_journey";
-type ScriptAgentSelectableCampaignMode = "standard" | "widget_reaction_ugc" | "widget_shock_hook_ugc";
+type ScriptAgentSelectableCampaignMode =
+  | "standard"
+  | "widget_reaction_ugc"
+  | "widget_shock_hook_ugc"
+  | "widget_late_period_reaction_hook_ugc";
 
 type ScriptAgentPlan = {
   title: string;
@@ -1759,12 +1764,29 @@ export function VideoAgentView({ collectionId }: { collectionId: string }) {
 
   useEffect(() => {
     if (
-      (scriptAgentCampaignMode === "widget_reaction_ugc" || scriptAgentCampaignMode === "widget_shock_hook_ugc") &&
+      (
+        scriptAgentCampaignMode === "widget_reaction_ugc" ||
+        scriptAgentCampaignMode === "widget_shock_hook_ugc" ||
+        scriptAgentCampaignMode === "widget_late_period_reaction_hook_ugc"
+      ) &&
       scriptAgentVideoType !== "ugc"
     ) {
       setScriptAgentVideoType("ugc");
     }
   }, [scriptAgentCampaignMode, scriptAgentVideoType]);
+
+  useEffect(() => {
+    if (scriptAgentCampaignMode === "widget_late_period_reaction_hook_ugc") {
+      if (scriptAgentDurationSeconds !== 8) {
+        setScriptAgentDurationSeconds(8);
+      }
+      return;
+    }
+
+    if (scriptAgentDurationSeconds < 30) {
+      setScriptAgentDurationSeconds(30);
+    }
+  }, [scriptAgentCampaignMode, scriptAgentDurationSeconds]);
 
   useEffect(() => {
     if (selectedCycleDayOptions.length === 0) {
@@ -2845,6 +2867,7 @@ export function VideoAgentView({ collectionId }: { collectionId: string }) {
                       <option value="standard">Standard educational</option>
                       <option value="widget_reaction_ugc">Widget reaction UGC</option>
                       <option value="widget_shock_hook_ugc">Widget shock-hook UGC</option>
+                      <option value="widget_late_period_reaction_hook_ugc">Late-period reaction hook UGC (8s)</option>
                     </select>
                   </div>
 
@@ -2868,13 +2891,16 @@ export function VideoAgentView({ collectionId }: { collectionId: string }) {
                     <p className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-slate-500">Target Duration (seconds)</p>
                     <input
                       type="number"
-                      min={30}
-                      max={180}
+                      min={scriptAgentCampaignMode === "widget_late_period_reaction_hook_ugc" ? 8 : 30}
+                      max={scriptAgentCampaignMode === "widget_late_period_reaction_hook_ugc" ? 8 : 180}
+                      disabled={scriptAgentCampaignMode === "widget_late_period_reaction_hook_ugc"}
                       value={scriptAgentDurationSeconds}
                       onChange={(event) => {
                         const value = Number(event.target.value);
                         if (!Number.isFinite(value)) return;
-                        setScriptAgentDurationSeconds(Math.max(30, Math.min(180, Math.round(value))));
+                        const min = scriptAgentCampaignMode === "widget_late_period_reaction_hook_ugc" ? 8 : 30;
+                        const max = scriptAgentCampaignMode === "widget_late_period_reaction_hook_ugc" ? 8 : 180;
+                        setScriptAgentDurationSeconds(Math.max(min, Math.min(max, Math.round(value))));
                       }}
                       className="w-full rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-xs text-slate-800 outline-none transition focus:border-rose-400 focus:ring-2 focus:ring-rose-200"
                     />
@@ -2893,7 +2919,8 @@ export function VideoAgentView({ collectionId }: { collectionId: string }) {
                           const type = character.characterType || "ugc";
                           if (
                             scriptAgentCampaignMode === "widget_reaction_ugc" ||
-                            scriptAgentCampaignMode === "widget_shock_hook_ugc"
+                            scriptAgentCampaignMode === "widget_shock_hook_ugc" ||
+                            scriptAgentCampaignMode === "widget_late_period_reaction_hook_ugc"
                           ) {
                             return type === "ugc";
                           }

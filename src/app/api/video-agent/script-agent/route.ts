@@ -105,6 +105,16 @@ function normalizeCampaignMode(value: unknown): ScriptAgentCampaignMode {
     return "widget_shock_hook_ugc";
   }
   if (
+    cleaned === "widget_late_period_reaction_hook_ugc" ||
+    cleaned === "widget-late-period-reaction-hook-ugc" ||
+    cleaned === "late_period_reaction_hook_ugc" ||
+    cleaned === "late-period-reaction-hook-ugc" ||
+    cleaned === "late_period_reaction_ugc" ||
+    cleaned === "late-period-reaction-ugc"
+  ) {
+    return "widget_late_period_reaction_hook_ugc";
+  }
+  if (
     cleaned === "daily_ugc_quran_journey" ||
     cleaned === "daily-ugc-quran-journey" ||
     cleaned === "daily_ugc_quran" ||
@@ -195,6 +205,7 @@ export async function POST(request: NextRequest) {
     const campaignNeedsUgcCharacter =
       campaignMode === "widget_reaction_ugc" ||
       campaignMode === "widget_shock_hook_ugc" ||
+      campaignMode === "widget_late_period_reaction_hook_ugc" ||
       campaignMode === "daily_ugc_quran_journey";
     const shouldResolveCharacter =
       Boolean(selectedCharacterId) ||

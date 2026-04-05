@@ -184,6 +184,7 @@ export type ScriptAgentCampaignMode =
   | "standard"
   | "widget_reaction_ugc"
   | "widget_shock_hook_ugc"
+  | "widget_late_period_reaction_hook_ugc"
   | "daily_ugc_quran_journey";
 
 export interface VideoScriptIdeationPlan {
@@ -539,6 +540,82 @@ function enforceWidgetShockHookSeriesPattern(segments: MotionControlSegment[], a
   });
 }
 
+function enforceWidgetLatePeriodReactionHookPattern(segments: MotionControlSegment[]): MotionControlSegment[] {
+  const firstSegment = segments[0];
+  const firstShot = firstSegment?.script?.shots?.[0];
+  const secondShot = firstSegment?.script?.shots?.[1];
+
+  const hookTextOne = closeOpenEndedLine(
+    cleanText(firstShot?.onScreenText) || "is everyone's period late in march?"
+  );
+  const hookTextTwo = closeOpenEndedLine(
+    cleanText(secondShot?.onScreenText) ||
+    "raise your hand if it's march and your period still hasn't shown up"
+  );
+
+  const reactionVisualBase = cleanText(
+    firstShot?.visual ||
+    firstSegment?.startFramePrompt ||
+    "Medium close-up of a young woman indoors. She stares at the camera with an exhausted, frustrated expression, lets out a heavy sigh, and shakes her head in exasperation."
+  );
+
+  const reactionShotOneVisual = cleanText(
+    `${reactionVisualBase} Keep framing medium close-up, direct eye contact, visible fatigue, and one heavy sigh.`
+  );
+  const reactionShotTwoVisual = cleanText(
+    `${secondShot?.visual || reactionVisualBase} Continue same framing and lighting with frustrated exhale and subtle head shake of disbelief.`
+  );
+
+  return [
+    {
+      segmentId: 1,
+      timecode: "0:00-0:08",
+      durationSeconds: 8,
+      startFramePrompt: reactionVisualBase,
+      script: {
+        hook: hookTextOne,
+        shots: [
+          {
+            shotId: "shot1",
+            visual: reactionShotOneVisual,
+            narration: "",
+            onScreenText: hookTextOne,
+            editNote:
+              "0-4 seconds only. Pure reaction hook. No dialogue. Overlay text is added in post.",
+          },
+          {
+            shotId: "shot2",
+            visual: reactionShotTwoVisual,
+            narration: "",
+            onScreenText: hookTextTwo,
+            editNote:
+              "4-8 seconds only. Continue reaction with sigh + head shake. No dialogue. Overlay text is added in post.",
+          },
+        ],
+        cta: "",
+      },
+      multiShotPrompts: [
+        {
+          shotId: "group1_shot1",
+          generationType: "ugc_video",
+          scene: "Exhausted late-period reaction hook",
+          prompt:
+            "Medium close-up indoors, young woman stares into camera with exhausted frustration, one heavy sigh, subtle shoulder drop, realistic UGC smartphone framing, natural room lighting. No dialogue: emotion only.",
+          shotDuration: "4s",
+        },
+        {
+          shotId: "group1_shot2",
+          generationType: "ugc_video",
+          scene: "Frustrated disbelief continuation",
+          prompt:
+            "Same medium close-up and lighting, she shakes her head in exasperation with tired eyes and slight grimace, natural breathing and micro-expressions, authentic UGC realism. No dialogue: frustrated disbelief reaction only.",
+          shotDuration: "4s",
+        },
+      ],
+    },
+  ];
+}
+
 function enforceDailyUgcQuranJourneyPattern(segments: MotionControlSegment[], appName: string): MotionControlSegment[] {
   const totalSegments = segments.length;
   const quranDeepDiveStartIndex = Math.max(1, totalSegments - 3);
@@ -822,6 +899,31 @@ function buildWidgetShockHookCompactVeoPrompt(args: {
       "Include quick app showcase beats (widget + one app dashboard glance) while keeping pacing concise.",
       "Natural UGC realism, clear facial performance, clean audio focus.",
       `Do not render text overlays, captions, subtitles, logos, or watermarks in the generated video.`,
+    ].join(" ")
+  );
+}
+
+function buildWidgetLatePeriodReactionHookVeoPrompt(args: {
+  segment: MotionControlSegment;
+}): string {
+  const { segment } = args;
+  const durationSeconds = Math.max(2, Math.round(segment.durationSeconds || MAX_SINGLE_VIDEO_CLIP_SECONDS));
+  const shots = segment.script?.shots || [];
+  const hookTextOne = closeOpenEndedLine(cleanText(shots[0]?.onScreenText) || "is everyone's period late in march?");
+  const hookTextTwo = closeOpenEndedLine(
+    cleanText(shots[1]?.onScreenText) ||
+    "raise your hand if it's march and your period still hasn't shown up"
+  );
+
+  return cleanText(
+    [
+      `Veo 3.1 prompt for segment ${segment.segmentId}. Generate one continuous ${durationSeconds}-second vertical 9:16 UGC reaction clip.`,
+      "No spoken dialogue. No app explanation. No lip-sync.",
+      "Core performance: medium close-up of a young woman indoors with exhausted, frustrated expression, heavy sigh, then head shake in exasperation.",
+      `0-4 seconds: direct camera stare + heavy sigh. Overlay reference for post edit: \"${hookTextOne}\".`,
+      `4-8 seconds: continue same framing, subtle head shake of disbelief. Overlay reference for post edit: \"${hookTextTwo}\".`,
+      "Natural smartphone UGC realism, stable indoor lighting, believable micro-expressions.",
+      "Do not render text overlays, captions, subtitles, logos, or watermarks in generated video.",
     ].join(" ")
   );
 }
@@ -1289,6 +1391,16 @@ function sanitizeScriptAgentCampaignMode(value: unknown): ScriptAgentCampaignMod
     cleaned === "shock-widget-reaction-ugc"
   ) {
     return "widget_shock_hook_ugc";
+  }
+  if (
+    cleaned === "widget_late_period_reaction_hook_ugc" ||
+    cleaned === "widget-late-period-reaction-hook-ugc" ||
+    cleaned === "late_period_reaction_hook_ugc" ||
+    cleaned === "late-period-reaction-hook-ugc" ||
+    cleaned === "late_period_reaction_ugc" ||
+    cleaned === "late-period-reaction-ugc"
+  ) {
+    return "widget_late_period_reaction_hook_ugc";
   }
   if (
     cleaned === "daily_ugc_quran_journey" ||
@@ -2401,14 +2513,21 @@ export async function buildVideoScriptIdeationPlan({
   const safeDurationSeconds =
     resolvedCampaignMode === "daily_ugc_quran_journey"
       ? Math.max(30, Math.round(targetDurationSeconds))
+      : resolvedCampaignMode === "widget_late_period_reaction_hook_ugc"
+        ? 8
       : resolvedCampaignMode === "widget_shock_hook_ugc"
         ? clamp(Math.round(targetDurationSeconds), 30, 90)
       : clamp(Math.round(targetDurationSeconds), 30, 180);
-  const minBeatCount = Math.min(64, Math.max(8, Math.ceil(safeDurationSeconds / 4)));
+  const minBeatCount =
+    resolvedCampaignMode === "widget_late_period_reaction_hook_ugc"
+      ? 2
+      : Math.min(64, Math.max(8, Math.ceil(safeDurationSeconds / 4)));
   const normalizedTopicBrief = cleanText(topicBrief);
   const hasTopicBrief = normalizedTopicBrief.length > 0;
   const forcedVideoType: ScriptAgentVideoType | null =
-    resolvedCampaignMode === "widget_reaction_ugc" || resolvedCampaignMode === "widget_shock_hook_ugc"
+    resolvedCampaignMode === "widget_reaction_ugc" ||
+    resolvedCampaignMode === "widget_shock_hook_ugc" ||
+    resolvedCampaignMode === "widget_late_period_reaction_hook_ugc"
       ? "ugc"
       : resolvedCampaignMode === "daily_ugc_quran_journey"
         ? "ai_animation"
@@ -2447,6 +2566,22 @@ CAMPAIGN MODE: widget_shock_hook_ugc
   * "I just found..."
 - After hook, include a brief app quick showcase (widget + one app glance), then close.
 - Ensure message highlights cycle phase + worship status clarity.
+- Keep this mode strictly UGC (not animation).
+`
+      : resolvedCampaignMode === "widget_late_period_reaction_hook_ugc"
+        ? `
+CAMPAIGN MODE: widget_late_period_reaction_hook_ugc
+- Build one hook-only UGC reaction clip for late-period social conversation prompts.
+- Duration is fixed at exactly 8 seconds.
+- Entire clip is reaction-only (no app explanation, no CTA dialogue, no educational body beats).
+- Performance direction is mandatory:
+  * Medium close-up of a young woman indoors.
+  * She stares at camera with exhausted, frustrated expression.
+  * She lets out a heavy sigh and shakes her head in exasperation.
+- Keep spoken dialogue empty; this is text-overlay-driven.
+- Provide two short hook-style on-screen text lines (style examples):
+  * "is everyone's period late in x month"
+  * "raise your hand if it's x month and your period still hasn't shown up"
 - Keep this mode strictly UGC (not animation).
 `
     : resolvedCampaignMode === "daily_ugc_quran_journey"
@@ -2636,6 +2771,33 @@ Return strict JSON only:
     mentionState
   );
 
+  const isLatePeriodReactionHookMode = resolvedCampaignMode === "widget_late_period_reaction_hook_ugc";
+  const forcedLatePeriodHookOne = "is everyone's period late in march?";
+  const forcedLatePeriodHookTwo = "raise your hand if it's march and your period still hasn't shown up";
+  const forcedLatePeriodVisual =
+    "Medium close-up of a young woman indoors. She stares at the camera with an exhausted, frustrated expression, lets out a heavy sigh, and shakes her head in exasperation.";
+
+  const hookForPlan = isLatePeriodReactionHookMode ? forcedLatePeriodHookOne : hook;
+  const beatsForPlan = isLatePeriodReactionHookMode
+    ? [
+      {
+        timecode: "0:00-0:04",
+        visual: forcedLatePeriodVisual,
+        narration: "",
+        onScreenText: forcedLatePeriodHookOne,
+        editNote: "Reaction-only hook. No dialogue. Overlay text added in post.",
+      },
+      {
+        timecode: "0:04-0:08",
+        visual: "Same framing and lighting, continued frustrated reaction with subtle head shake.",
+        narration: "",
+        onScreenText: forcedLatePeriodHookTwo,
+        editNote: "Reaction-only continuation. No dialogue. Overlay text added in post.",
+      },
+    ]
+    : beats;
+  const ctaForPlan = isLatePeriodReactionHookMode ? "" : cta;
+
   const modelSegmentsRaw = Array.isArray(row.motionControlSegments) ? row.motionControlSegments : [];
   const modelSegments: MotionControlSegment[] = modelSegmentsRaw
     .map((seg, index): MotionControlSegment | null => {
@@ -2669,11 +2831,11 @@ Return strict JSON only:
     .filter((seg): seg is MotionControlSegment => seg !== null);
 
   const fallbackSegments = splitBeatsIntoShotGroups({
-    beats,
+    beats: beatsForPlan,
     totalDurationSeconds: safeDurationSeconds,
     maxSegmentSeconds: MAX_SINGLE_VIDEO_CLIP_SECONDS,
-    hook,
-    cta,
+    hook: hookForPlan,
+    cta: ctaForPlan,
   });
 
   const selectedVideoType = sanitizeScriptAgentVideoType(row.selectedVideoType);
@@ -2737,9 +2899,9 @@ Return strict JSON only:
         cleanText(fallbackSegment?.startFramePrompt) ||
         `Opening frame for segment ${segment.segmentId}.`,
       script: {
-        hook: closeOpenEndedLine(sanitizeString(nextScript?.hook, index === 0 ? hook : "")),
+        hook: closeOpenEndedLine(sanitizeString(nextScript?.hook, index === 0 ? hookForPlan : "")),
         shots: sanitizeSegmentScriptShots(nextScript?.shots, Math.max(1, Math.ceil(minBeatCount / 2))),
-        cta: closeOpenEndedLine(sanitizeString(nextScript?.cta, index === segmentSource.length - 1 ? cta : "")),
+        cta: closeOpenEndedLine(sanitizeString(nextScript?.cta, index === segmentSource.length - 1 ? ctaForPlan : "")),
       },
       multiShotPrompts: prompts,
     };
@@ -2750,6 +2912,8 @@ Return strict JSON only:
       ? enforceWidgetReactionSeriesPattern(transitionReadySegments, appName)
       : resolvedCampaignMode === "widget_shock_hook_ugc"
         ? enforceWidgetShockHookSeriesPattern(transitionReadySegments, appName)
+      : resolvedCampaignMode === "widget_late_period_reaction_hook_ugc"
+        ? enforceWidgetLatePeriodReactionHookPattern(transitionReadySegments)
       : resolvedCampaignMode === "daily_ugc_quran_journey"
         ? enforceDailyUgcQuranJourneyPattern(transitionReadySegments, appName)
       : transitionReadySegments;
@@ -2770,6 +2934,10 @@ Return strict JSON only:
           segmentIndex: index,
           appName,
         })
+        : resolvedCampaignMode === "widget_late_period_reaction_hook_ugc"
+          ? buildWidgetLatePeriodReactionHookVeoPrompt({
+            segment,
+          })
         : buildVeo31SegmentPrompt({
           segment,
           nextSegment: all[index + 1],
@@ -2804,9 +2972,9 @@ Return strict JSON only:
     targetDurationSeconds: safeDurationSeconds,
     maxSingleClipDurationSeconds: MAX_SINGLE_VIDEO_CLIP_SECONDS,
     script: {
-      hook,
-      beats,
-      cta,
+      hook: hookForPlan,
+      beats: beatsForPlan,
+      cta: ctaForPlan,
     },
     motionControlSegments: veoReadySegments,
     socialCaption: {
