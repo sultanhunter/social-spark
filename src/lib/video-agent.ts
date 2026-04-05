@@ -643,7 +643,7 @@ function enforceAiObjectsEducationalExplainerPattern(
     if (shots.length === 0) {
       shots.push({
         shotId: "shot1",
-        visual: "High-quality animated living objects explain a practical cycle-health concept with warm and cute expressions.",
+        visual: "High-quality animated living objects with feminine styling explain a practical cycle-health concept with warm and cute expressions.",
         narration: "Let us break this down in a simple way.",
         onScreenText: "Simple object explainer",
         editNote: "Keep educational pacing with expressive object acting.",
@@ -654,10 +654,10 @@ function enforceAiObjectsEducationalExplainerPattern(
     shots[0] = {
       ...firstShot,
       visual: cleanText(
-        `${firstShot.visual} Premium stylized 3D animation: cute anthropomorphic everyday objects with expressive faces explain the concept clearly.`
+        `${firstShot.visual} Premium stylized 3D animation: cute anthropomorphic everyday objects with feminine-coded design cues (soft silhouettes, gentle expressions, graceful gestures) explain the concept clearly.`
       ),
       editNote: cleanText(
-        `${firstShot.editNote || ""} Keep the look polished, cinematic, and educational with gentle humor.`
+        `${firstShot.editNote || ""} Keep the look polished, cinematic, educational, and feminine-friendly with gentle humor.`
       ),
     };
 
@@ -688,7 +688,7 @@ function enforceAiObjectsEducationalExplainerPattern(
         ...promptItem,
         generationType: shouldPreserveType ? promptItem.generationType : "base_ai_video",
         prompt: cleanText(
-          `${promptItem.prompt} Premium stylized 3D CGI, cute anthropomorphic everyday objects, expressive faces and limbs, educational storytelling clarity.`
+          `${promptItem.prompt} Premium stylized 3D CGI, cute anthropomorphic everyday objects with feminine styling, expressive faces and limbs, educational storytelling clarity.`
         ),
       };
     });
@@ -699,7 +699,7 @@ function enforceAiObjectsEducationalExplainerPattern(
       ...segment,
       startFramePrompt: cleanText(
         segment.startFramePrompt ||
-          "Premium stylized 3D animated scene: cute living objects begin explaining a practical health concept in a warm educational tone."
+          "Premium stylized 3D animated scene: cute feminine-styled living objects begin explaining a practical health concept in a warm educational tone."
       ),
       script: {
         hook: segment.script?.hook || "",
@@ -2705,6 +2705,7 @@ CAMPAIGN MODE: ai_objects_educational_explainer
 - Build a high-quality AI animation educational explainer around 90 seconds.
 - Visual language: cute anthropomorphic everyday objects (living objects) that explain concepts clearly.
 - Keep look premium and cinematic: polished stylized 3D CGI, expressive faces, smooth motion, clean lighting.
+- Object casting direction: keep characters feminine-coded and women-audience friendly (soft shapes, warm expressions, graceful motion, tasteful feminine styling).
 - Narrative style: object characters teach one practical period/pregnancy or worship-support concept in simple, memorable metaphors.
 - Keep education first: clear facts, practical steps, warm and friendly tone.
 - Include one natural app hook moment (subtle, useful, non-ad) where the explainer references checking app status for practical decision support.
@@ -3087,7 +3088,7 @@ Return strict JSON only:
       : transitionReadySegments;
   const scriptAgentStyleHint =
     resolvedCampaignMode === "ai_objects_educational_explainer"
-      ? "premium stylized 3D educational explainer with cute anthropomorphic everyday objects"
+      ? "premium stylized 3D educational explainer with cute feminine-styled anthropomorphic everyday objects"
       : resolvedVideoType === "ugc"
       ? "ugc creator-style live-action"
       : resolvedVideoType === "ai_animation"
