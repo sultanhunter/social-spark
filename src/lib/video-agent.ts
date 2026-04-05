@@ -556,14 +556,14 @@ function enforceWidgetLatePeriodReactionHookPattern(segments: MotionControlSegme
   const reactionVisualBase = cleanText(
     firstShot?.visual ||
     firstSegment?.startFramePrompt ||
-    "Medium close-up of a young woman indoors. She gives a playful, dramatic 'are you serious?' look to camera, lets out a theatrical sigh, then does a light head shake with a half-smile."
+    "Medium close-up of a young woman indoors, thinking pose, then gentle head shake with slight disappointment."
   );
 
   const reactionShotOneVisual = cleanText(
-    `${reactionVisualBase} Keep framing medium close-up, direct eye contact, and playful meme-like energy with one dramatic sigh.`
+    `${reactionVisualBase} Keep it simple and light, with a relatable expression.`
   );
   const reactionShotTwoVisual = cleanText(
-    `${secondShot?.visual || reactionVisualBase} Continue same framing and lighting with light comedic disbelief, tiny eyebrow raise, and gentle head shake.`
+    `${secondShot?.visual || reactionVisualBase} Continue same framing and lighting with another gentle head shake and slight disappointed look.`
   );
 
   return [
@@ -589,7 +589,7 @@ function enforceWidgetLatePeriodReactionHookPattern(segments: MotionControlSegme
             narration: "",
             onScreenText: hookTextTwo,
             editNote:
-              "4-8 seconds only. Continue playful disbelief reaction with a light head shake. No dialogue. Overlay text is added in post.",
+              "4-8 seconds only. Continue simple reaction with gentle head shake. No dialogue. Overlay text is added in post.",
           },
         ],
         cta: "",
@@ -598,17 +598,17 @@ function enforceWidgetLatePeriodReactionHookPattern(segments: MotionControlSegme
         {
           shotId: "group1_shot1",
           generationType: "ugc_video",
-          scene: "Playful late-period reaction hook",
+          scene: "Simple late-period reaction hook",
           prompt:
-            "Medium close-up indoors, young woman gives playful dramatic disbelief look, one theatrical sigh, slight shoulder drop, meme-like relatable energy, realistic UGC smartphone framing, natural room lighting. No dialogue: reaction only.",
+            "Medium close-up indoors, young woman in a thinking pose, then gentle head shake with slight disappointment, light and relatable mood, realistic UGC smartphone framing, natural room lighting. No dialogue: reaction only.",
           shotDuration: "4s",
         },
         {
           shotId: "group1_shot2",
           generationType: "ugc_video",
-          scene: "Playful disbelief continuation",
+          scene: "Simple reaction continuation",
           prompt:
-            "Same medium close-up and lighting, she does a gentle head shake with raised brows and half-smile like a funny 'not again' moment, natural breathing and micro-expressions, authentic UGC realism. No dialogue: playful disbelief reaction only.",
+            "Same medium close-up and lighting, she stays in thinking pose and gives one more gentle head shake with slight disappointed expression, natural breathing and micro-expressions, authentic UGC realism. No dialogue: reaction only.",
           shotDuration: "4s",
         },
       ],
@@ -919,9 +919,9 @@ function buildWidgetLatePeriodReactionHookVeoPrompt(args: {
     [
       `Veo 3.1 prompt for segment ${segment.segmentId}. Generate one continuous ${durationSeconds}-second vertical 9:16 UGC reaction clip.`,
       "No spoken dialogue. No app explanation. No lip-sync.",
-      "Core performance: medium close-up of a young woman indoors with playful dramatic disbelief, theatrical sigh, then a light humorous head shake.",
-      `0-4 seconds: direct camera stare + theatrical sigh with fun meme-like energy. Overlay reference for post edit: \"${hookTextOne}\".`,
-      `4-8 seconds: continue same framing, light comedic disbelief and gentle head shake. Overlay reference for post edit: \"${hookTextTwo}\".`,
+      "Core performance: medium close-up of a young woman indoors, thinking pose, then gentle head shake with slight disappointment. Keep it light and relatable.",
+      `0-4 seconds: simple thinking pose + gentle head shake start. Overlay reference for post edit: \"${hookTextOne}\".`,
+      `4-8 seconds: continue same framing with another gentle head shake and slight disappointed expression. Overlay reference for post edit: \"${hookTextTwo}\".`,
       "Natural smartphone UGC realism, stable indoor lighting, believable micro-expressions.",
       "Do not render text overlays, captions, subtitles, logos, or watermarks in generated video.",
     ].join(" ")
@@ -2574,11 +2574,10 @@ CAMPAIGN MODE: widget_late_period_reaction_hook_ugc
 - Build one hook-only UGC reaction clip for late-period social conversation prompts.
 - Duration is fixed at exactly 8 seconds.
 - Entire clip is reaction-only (no app explanation, no CTA dialogue, no educational body beats).
-- Tone must feel fun, relatable, and meme-like (not heavy or serious).
+- Tone must feel fun and relatable (not heavy or serious).
 - Performance direction is mandatory:
   * Medium close-up of a young woman indoors.
-  * She stares at camera with playful dramatic disbelief.
-  * She lets out a theatrical sigh and gives a light head shake with half-smile energy.
+  * Thinking pose first, then a gentle head shake with slight disappointment.
 - Keep spoken dialogue empty; this is text-overlay-driven.
 - Provide two short hook-style on-screen text lines (style examples):
   * "is everyone's period late in x month"
@@ -2776,7 +2775,7 @@ Return strict JSON only:
   const forcedLatePeriodHookOne = "is everyone's period late in march?";
   const forcedLatePeriodHookTwo = "raise your hand if it's march and your period still hasn't shown up";
   const forcedLatePeriodVisual =
-    "Medium close-up of a young woman indoors. She stares at the camera with playful dramatic disbelief, lets out a theatrical sigh, and gives a light head shake with a half-smile.";
+    "Medium close-up of a young woman indoors, thinking pose, then gentle head shake with slight disappointment.";
 
   const hookForPlan = isLatePeriodReactionHookMode ? forcedLatePeriodHookOne : hook;
   const beatsForPlan = isLatePeriodReactionHookMode
@@ -2790,7 +2789,7 @@ Return strict JSON only:
       },
       {
         timecode: "0:04-0:08",
-        visual: "Same framing and lighting, continued playful disbelief reaction with subtle head shake and raised brows.",
+        visual: "Same framing and lighting, continued thinking pose with gentle head shake and slight disappointment.",
         narration: "",
         onScreenText: forcedLatePeriodHookTwo,
         editNote: "Reaction-only continuation. No dialogue. Overlay text added in post.",
