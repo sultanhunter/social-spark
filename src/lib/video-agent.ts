@@ -2774,6 +2774,9 @@ RULES:
 - Duration must closely match target.
 - Use enough beats to fill full duration (minimum ${minBeatCount} beats).
 - Beat timecodes should span almost full duration.
+- Dialogue pacing: for segments around 8 seconds (roughly 7-9s), include one complete spoken line that is typically 10-16 words (max 16) when narration is present.
+- Avoid under-filled ultra-short spoken lines (2-5 words) unless the campaign explicitly requires reaction-only silent shots.
+- Keep generated narration wording intact; do not truncate or compress lines solely to reduce word count.
 - Split into shot groups of max ${MAX_SINGLE_VIDEO_CLIP_SECONDS}s each.
 - Each shot group must include startFramePrompt, segment script (hook/shots/cta), and multiShotPrompts.
 - Each shot group must include startFramePrompt, segment script (hook/shots/cta), and one copy-paste-ready veoPrompt for Veo 3.1.
