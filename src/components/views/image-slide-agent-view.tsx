@@ -20,7 +20,20 @@ import {
   type ImageGenerationModel,
 } from "@/lib/image-generation-model";
 
-type ImageSlideCampaignType = "widget_shock_hook_ugc";
+type ImageSlideCampaignType = "widget_shock_hook_ugc" | "widget_stop_using_flo_ugc";
+
+const FALLBACK_CAMPAIGNS: ImageSlideCampaignOption[] = [
+  {
+    id: "widget_shock_hook_ugc",
+    label: "UGC Shock Hook (Halal Flo Alternative)",
+    description: "",
+  },
+  {
+    id: "widget_stop_using_flo_ugc",
+    label: "UGC Stop Using Flo (Faith-first)",
+    description: "",
+  },
+];
 
 type ImageSlideCampaignOption = {
   id: ImageSlideCampaignType;
@@ -145,7 +158,7 @@ export function ImageSlideAgentView({ collectionId }: { collectionId: string }) 
 
       setCampaignType((current) => {
         if (nextCampaigns.some((item) => item.id === current)) return current;
-        return nextCampaigns[0]?.id || "widget_shock_hook_ugc";
+        return nextCampaigns[0]?.id || FALLBACK_CAMPAIGNS[0].id;
       });
 
       if (data.warning) {
@@ -251,7 +264,7 @@ export function ImageSlideAgentView({ collectionId }: { collectionId: string }) 
           <CardHeader>
             <CardTitle className="text-lg">Image Slides Agent</CardTitle>
             <CardDescription>
-              UGC TikTok slide scripts + Figma recreation plan. Campaign-first flow for shocked reaction halal alternative positioning.
+              UGC TikTok slide scripts + Figma recreation plan. Campaign-first flow for faith-sensitive app positioning.
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
@@ -263,10 +276,7 @@ export function ImageSlideAgentView({ collectionId }: { collectionId: string }) 
                   onChange={(event) => setCampaignType(event.target.value as ImageSlideCampaignType)}
                   className="w-full rounded-lg border border-slate-300 bg-white px-2.5 py-2 text-sm text-slate-800 outline-none transition focus:border-rose-400 focus:ring-2 focus:ring-rose-200"
                 >
-                  {(campaigns.length > 0
-                    ? campaigns
-                    : [{ id: "widget_shock_hook_ugc", label: "UGC Shock Hook (Halal Flo Alternative)", description: "" }]
-                  ).map((item) => (
+                  {(campaigns.length > 0 ? campaigns : FALLBACK_CAMPAIGNS).map((item) => (
                     <option key={item.id} value={item.id}>{item.label}</option>
                   ))}
                 </select>

@@ -12,7 +12,26 @@ const genAI = new GoogleGenerativeAI(process.env.GOOGLE_GEMINI_API_KEY!);
 const APP_BRAND_PRIMARY_COLOR = "#F36F97";
 const APP_BRAND_GRADIENT = ["#F36F97", "#EEB4C3", "#F7DFD6"];
 
-type ImageSlideCampaignType = "widget_shock_hook_ugc";
+type ImageSlideCampaignType = "widget_shock_hook_ugc" | "widget_stop_using_flo_ugc";
+
+const IMAGE_SLIDE_CAMPAIGNS: Array<{
+  id: ImageSlideCampaignType;
+  label: string;
+  description: string;
+}> = [
+  {
+    id: "widget_shock_hook_ugc",
+    label: "UGC Shock Hook (Halal Flo Alternative)",
+    description:
+      "Shocked-reaction TikTok image slides around halal alternative to Flo + Muslim women period/pregnancy tracking.",
+  },
+  {
+    id: "widget_stop_using_flo_ugc",
+    label: "UGC Stop Using Flo (Faith-first)",
+    description:
+      "6-slide UGC sequence: stop using Flo, faith-value concerns, prayer-status gap, then switch to Muslimah Pro with madhab-aware worship updates.",
+  },
+];
 
 type CollectionRow = {
   id: string;
@@ -111,6 +130,15 @@ function normalizeCampaignType(value: unknown): ImageSlideCampaignType {
   ) {
     return "widget_shock_hook_ugc";
   }
+  if (
+    cleaned === "widget_stop_using_flo_ugc" ||
+    cleaned === "widget-stop-using-flo-ugc" ||
+    cleaned === "stop_using_flo_ugc" ||
+    cleaned === "stop-using-flo-ugc" ||
+    cleaned === "ugc_stop_using_flo"
+  ) {
+    return "widget_stop_using_flo_ugc";
+  }
   return "widget_shock_hook_ugc";
 }
 
@@ -201,12 +229,14 @@ function parseGeneratedAssets(value: unknown): GeneratedImageAssetEntry[] {
 
 function buildFallbackScript({
   appName,
+  campaignType,
   slideCount,
 }: {
   appName: string;
+  campaignType: ImageSlideCampaignType;
   slideCount: number;
 }): string {
-  const fallbackSlides = [
+  const shockHookFallbackSlides = [
     {
       headline: "wait... there is a halal alternative to flo?",
       supporting: "i just found this today",
@@ -239,6 +269,44 @@ function buildFallbackScript({
     },
   ];
 
+  const stopUsingFloFallbackSlides = [
+    {
+      headline: "muslimah to muslimah: stop using flo",
+      supporting: "seriously, i had to switch",
+      body: "some of its guidance and lifestyle framing did not sit right with my deen",
+    },
+    {
+      headline: "the content felt off for me",
+      supporting: "not faith-sensitive at all",
+      body: "i kept seeing themes that can conflict with islamic values, so i stopped trusting it",
+    },
+    {
+      headline: "also... no real prayer-status help",
+      supporting: "this part matters every single month",
+      body: "it did not clearly guide my worship status through period, purity, and istihada moments",
+    },
+    {
+      headline: "use muslimah pro instead",
+      supporting: "built specifically for muslim women",
+      body: `${appName} is made for period + pregnancy tracking with a faith-first experience`,
+    },
+    {
+      headline: "the workflow is actually simple",
+      supporting: "just log what you observe",
+      body: "the app auto-updates worship statuses according to your madhab so you are not guessing",
+    },
+    {
+      headline: "save this and switch today",
+      supporting: "share with another muslim sister",
+      body: `if you need a flo replacement that respects your deen, try ${appName}`,
+    },
+  ];
+
+  const fallbackSlides =
+    campaignType === "widget_stop_using_flo_ugc"
+      ? stopUsingFloFallbackSlides
+      : shockHookFallbackSlides;
+
   const total = clamp(slideCount, 5, 6);
   const selected = fallbackSlides.slice(0, total);
 
@@ -270,6 +338,14 @@ function buildDesignPlannerContext({
           `App mention requirement: explicitly position ${appName} as a period and pregnancy tracking app for Muslim women.`,
           "Visual rhythm: first 1-2 slides are genuine shocked reaction hooks; then app showcase and practical explanation.",
         ].join("\n")
+      : campaignType === "widget_stop_using_flo_ugc"
+        ? [
+            "Campaign requirement: UGC 'stop using Flo' TikTok image-slide flow.",
+            "Core hook angle: stop using Flo as a Muslim woman, then explain why in a respectful faith-values framing.",
+            `App mention requirement: explicitly position ${appName} as built specifically for Muslim women.`,
+            "Narrative sequence requirement: Slide 1 hook, Slide 2 value-conflict concern, Slide 3 prayer-status gap, Slide 4 app intro, Slide 5 'log observations -> madhab-based worship auto-updates', Slide 6 save/share CTA.",
+            "Visual rhythm: first 2 slides should feel personal and urgent; middle slides show practical app proof; final slide closes with a soft CTA.",
+          ].join("\n")
       : "Campaign requirement: UGC image-slide flow.";
 
   const characterDirective = character
@@ -429,7 +505,23 @@ async function generateCampaignScript({
           "- Slide 2: second hook that stands alone and deepens curiosity.",
           "- Remaining slides: app showcase + practical proof + soft CTA.",
         ].join("\n")
+      : campaignType === "widget_stop_using_flo_ugc"
+        ? [
+            "Campaign mode: around 6-slide UGC 'stop using Flo' TikTok image slides for Muslim women.",
+            "Mandatory narrative points to include naturally and respectfully:",
+            "- Slide 1 hook: stop using Flo as a Muslim woman.",
+            "- Slide 2 concern: mention faith-value conflicts (haram-leaning content, normalization of relationships or actions that may not align with Islamic guidance).",
+            "- Slide 3 concern: Flo does not clearly guide prayer/worship status transitions for Muslim women.",
+            "- Slide 4 shift: recommend Muslimah Pro and state it is built specifically for Muslim women.",
+            "- Slide 5 practical proof: user only logs observations and app auto-updates worship statuses according to her madhab.",
+            "- Slide 6: soft CTA to save/share/try.",
+          ].join("\n")
       : "Campaign mode: UGC image slides.";
+
+  const topicBriefFallback =
+    campaignType === "widget_stop_using_flo_ugc"
+      ? "Use the 'stop using Flo' hook with faith-value concerns, prayer-status gap, then Muslimah Pro + madhab-aware worship update workflow."
+      : "Use the core shocked-reaction halal alternative to Flo angle.";
 
   const prompt = `You are a TikTok image-slide scriptwriter for ${appName}.
 
@@ -441,7 +533,7 @@ ${campaignBlock}
 ${characterBlock}
 
 Optional user topic/focus:
-${topicBrief || "Use the core shocked-reaction halal alternative to Flo angle."}
+${topicBrief || topicBriefFallback}
 
 Task:
 - Generate exactly ${slideCount} slides.
@@ -468,6 +560,7 @@ Rules:
 - Keep language English only.
 - Keep content faith-sensitive and respectful.
 - Include at least one explicit mention of ${appName}.
+- Avoid insults, slurs, or hateful framing. Keep criticism focused on product-fit and faith-alignment concerns.
 - Do not include markdown, bullet lists, or JSON. Just the script text block.`;
 
   const result = await model.generateContent({
@@ -479,12 +572,12 @@ Rules:
 
   const rawText = cleanScriptText(result.response.text());
   if (!rawText) {
-    return buildFallbackScript({ appName, slideCount });
+    return buildFallbackScript({ appName, campaignType, slideCount });
   }
 
   const detectedSlides = extractSlideCountFromScript(rawText);
   if (detectedSlides === 0) {
-    return buildFallbackScript({ appName, slideCount });
+    return buildFallbackScript({ appName, campaignType, slideCount });
   }
 
   return rawText;
@@ -499,14 +592,7 @@ export async function GET(request: NextRequest) {
 
     if (!collectionId) {
       return NextResponse.json({
-        campaigns: [
-          {
-            id: "widget_shock_hook_ugc",
-            label: "UGC Shock Hook (Halal Flo Alternative)",
-            description:
-              "Shocked-reaction TikTok image slides around halal alternative to Flo + Muslim women period/pregnancy tracking.",
-          },
-        ],
+        campaigns: IMAGE_SLIDE_CAMPAIGNS,
         savedPlans: [],
       });
     }
@@ -570,14 +656,7 @@ export async function GET(request: NextRequest) {
     if (result.error) {
       if (isMissingTableError(result.error)) {
         return NextResponse.json({
-          campaigns: [
-            {
-              id: "widget_shock_hook_ugc",
-              label: "UGC Shock Hook (Halal Flo Alternative)",
-              description:
-                "Shocked-reaction TikTok image slides around halal alternative to Flo + Muslim women period/pregnancy tracking.",
-            },
-          ],
+          campaigns: IMAGE_SLIDE_CAMPAIGNS,
           savedPlans: [],
           warning: "Table video_image_slide_plans is missing. Run latest Supabase migration.",
         });
@@ -611,14 +690,7 @@ export async function GET(request: NextRequest) {
     });
 
     return NextResponse.json({
-      campaigns: [
-        {
-          id: "widget_shock_hook_ugc",
-          label: "UGC Shock Hook (Halal Flo Alternative)",
-          description:
-            "Shocked-reaction TikTok image slides around halal alternative to Flo + Muslim women period/pregnancy tracking.",
-        },
-      ],
+      campaigns: IMAGE_SLIDE_CAMPAIGNS,
       savedPlans,
     });
   } catch (err) {
