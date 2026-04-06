@@ -85,6 +85,7 @@ type PlanShape = {
     timecode: string;
     durationSeconds: number;
     startFramePrompt: string;
+    characterReferenceIds?: string[];
     veoPrompt?: string;
     script?: {
       hook?: string;
@@ -112,6 +113,20 @@ type PlanShape = {
       imageModel?: string;
     };
   }>;
+  scriptCharacters?: {
+    generatedAt?: string;
+    imageModel?: string;
+    characters?: Array<{
+      id?: string;
+      name?: string;
+      imageUrl?: string;
+      segmentIds?: number[];
+    }>;
+    segmentCharacterMap?: Array<{
+      segmentId?: number;
+      characterIds?: string[];
+    }>;
+  };
   startFrame?: {
     imageUrl?: string;
     prompt?: string;
@@ -130,6 +145,59 @@ function getPreviousSegmentStartFrameUrl(plan: PlanShape, segmentIndex?: number)
 
   const sharedPlanFrameUrl = cleanText(plan.startFrame?.imageUrl);
   return sharedPlanFrameUrl || null;
+}
+
+function getSegmentScriptCharacterReferences(
+  plan: PlanShape,
+  segmentIndex?: number
+): { urls: string[]; names: string[] } {
+  if (typeof segmentIndex !== "number") {
+    return { urls: [], names: [] };
+  }
+  if (!Array.isArray(plan.motionControlSegments) || !plan.motionControlSegments[segmentIndex]) {
+    return { urls: [], names: [] };
+  }
+
+  const segment = plan.motionControlSegments[segmentIndex];
+  const segmentId = typeof segment.segmentId === "number" ? segment.segmentId : segmentIndex + 1;
+  const scriptCharacters = plan.scriptCharacters;
+  const characters = Array.isArray(scriptCharacters?.characters) ? scriptCharacters?.characters : [];
+
+  const idsFromSegment = Array.isArray(segment.characterReferenceIds)
+    ? segment.characterReferenceIds.map((id) => cleanText(id)).filter(Boolean)
+    : [];
+  const idsFromMap = Array.isArray(scriptCharacters?.segmentCharacterMap)
+    ? scriptCharacters.segmentCharacterMap
+      .find((item) => Number(item?.segmentId) === segmentId)
+      ?.characterIds
+      ?.map((id) => cleanText(id))
+      .filter(Boolean) || []
+    : [];
+  const idsFromCharacterSegments = characters
+    .filter((character) =>
+      Array.isArray(character.segmentIds)
+        ? character.segmentIds.some((id) => Number(id) === segmentId)
+        : false
+    )
+    .map((character) => cleanText(character.id))
+    .filter(Boolean);
+
+  const resolvedIds = Array.from(new Set([...idsFromSegment, ...idsFromMap, ...idsFromCharacterSegments]));
+
+  const refs = resolvedIds
+    .map((id) => characters.find((character) => cleanText(character.id) === id))
+    .filter((row): row is NonNullable<typeof row> => Boolean(row));
+
+  const urls = refs
+    .map((ref) => cleanText(ref.imageUrl))
+    .filter(Boolean)
+    .slice(0, 4);
+  const names = refs
+    .map((ref) => cleanText(ref.name) || cleanText(ref.id) || "Character")
+    .filter(Boolean)
+    .slice(0, 6);
+
+  return { urls, names };
 }
 
 function asText(value: unknown): string {
@@ -274,6 +342,7 @@ function buildStartFramePrompt(args: {
   character: CharacterRow | null;
   segmentIndex?: number;
   previousSegmentStartFrameUrl?: string | null;
+  segmentCharacterNames?: string[];
 }): string {
   const {
     appName,
@@ -283,6 +352,7 @@ function buildStartFramePrompt(args: {
     character,
     segmentIndex,
     previousSegmentStartFrameUrl,
+    segmentCharacterNames,
   } = args;
   const globalWorshipPoseInstruction = worshipGestureInstruction(
     hasWorshipGestureCue(
@@ -465,6 +535,10 @@ function buildStartFramePrompt(args: {
     const continuityReferenceInstruction = previousSegmentStartFrameUrl
       ? "Exactly one continuity reference image is attached from segment N-1. Match that environment and character identity first, then apply only minimal progression into this segment."
       : "";
+    const scriptCharacterReferenceInstruction =
+      Array.isArray(segmentCharacterNames) && segmentCharacterNames.length > 0
+        ? `Segment cast references: ${segmentCharacterNames.join(", ")}. Use attached segment-specific character reference image(s) as identity anchors for whoever appears in frame zero.`
+        : "";
     const characterInstruction = character
       ? `Use the selected recurring character identity (${character.character_name}). Character lock descriptor: ${cleanText(character.prompt_template) || "Keep same face, styling, and wardrobe family in every segment."}`
       : "No fixed character lock required unless script clearly needs a person.";
@@ -486,6 +560,7 @@ function buildStartFramePrompt(args: {
       strictIdentityRule,
       previousFrameInstruction,
       continuityReferenceInstruction,
+      scriptCharacterReferenceInstruction,
       conflictResolutionInstruction,
       characterInstruction,
       `Vertical 9:16 composition at 1080x1920 output framing.`,
@@ -666,6 +741,7 @@ export async function POST(request: NextRequest) {
     }
 
     const previousSegmentStartFrameUrl = getPreviousSegmentStartFrameUrl(plan, effectiveSegmentIndex);
+    const segmentScriptCharacterReferences = getSegmentScriptCharacterReferences(plan, effectiveSegmentIndex);
 
     const prompt = buildStartFramePrompt({
       appName: asText(planRow.app_name) || "Muslimah Pro",
@@ -675,6 +751,7 @@ export async function POST(request: NextRequest) {
       character,
       segmentIndex: effectiveSegmentIndex,
       previousSegmentStartFrameUrl,
+      segmentCharacterNames: segmentScriptCharacterReferences.names,
     });
 
     let extractedFrameDataUrl: string | null = null;
@@ -739,13 +816,19 @@ export async function POST(request: NextRequest) {
       uiGenerationMode: "ai_creative",
       visualVariant: format.format_type === "ugc" ? "ugc_real" : "brand_optimized",
       referenceImageUrls,
-      characterReferenceImageUrls:
-        character?.reference_image_url && character.reference_image_url.trim().length > 0
-          ? [character.reference_image_url]
-          : [],
+      characterReferenceImageUrls: Array.from(
+        new Set([
+          ...segmentScriptCharacterReferences.urls,
+          ...(character?.reference_image_url && character.reference_image_url.trim().length > 0
+            ? [character.reference_image_url]
+            : []),
+        ])
+      ).slice(0, 4),
       characterLockDescriptor:
         character && character.prompt_template
           ? `${character.character_name}. ${character.prompt_template}`
+          : segmentScriptCharacterReferences.names.length > 0
+            ? `Maintain consistent identity for segment cast: ${segmentScriptCharacterReferences.names.join(", ")}.`
           : undefined,
       imageModel: imageGenerationModel,
     });

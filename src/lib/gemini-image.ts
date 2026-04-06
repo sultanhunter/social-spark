@@ -274,10 +274,16 @@ export async function generateImage(
     supportsInlineImageContext && uiGenerationMode === "reference_exact" && referenceImageUrls.length > 0
       ? await loadRemoteImagePart(referenceImageUrls[0])
       : null;
-  const characterReferencePart =
+  const characterReferenceParts =
     supportsInlineImageContext && characterReferenceImageUrls.length > 0
-      ? await loadRemoteImagePart(characterReferenceImageUrls[0])
-      : null;
+      ? (
+        await Promise.all(
+          Array.from(new Set(characterReferenceImageUrls))
+            .slice(0, 4)
+            .map((url) => loadRemoteImagePart(url))
+        )
+      ).filter((part): part is GeminiInlineImagePart => Boolean(part))
+      : [];
 
   const gradientStr = brandAssets?.gradientHexColors?.length
     ? brandAssets.gradientHexColors.join(" → ")
@@ -366,7 +372,7 @@ CRITICAL OUTPUT RULES:
 - Target size: ${imageSpec.width}x${imageSpec.height} (${imageSpec.aspectRatio}).`;
 
   const promptParts: Array<{ text: string } | GeminiInlineImagePart> = [{ text: prompt }];
-  if (characterReferencePart) promptParts.push(characterReferencePart);
+  promptParts.push(...characterReferenceParts);
   if (exactUiReferencePart) promptParts.push(exactUiReferencePart);
   if (attachBrandVisualRefs && logoPart) promptParts.push(logoPart);
   if (attachBrandVisualRefs && featureMockupPart) promptParts.push(featureMockupPart);

@@ -119,6 +119,27 @@ type VideoStartFrame = {
   imageModel?: string;
 };
 
+type PlanScriptCharacter = {
+  id: string;
+  key?: string;
+  name: string;
+  role?: string;
+  visualIdentityPrompt?: string;
+  styleNotes?: string;
+  imageUrl: string;
+  segmentIds?: number[];
+};
+
+type PlanScriptCharacters = {
+  generatedAt?: string;
+  imageModel?: string;
+  characters?: PlanScriptCharacter[];
+  segmentCharacterMap?: Array<{
+    segmentId: number;
+    characterIds: string[];
+  }>;
+};
+
 type VideoPlan = {
   title: string;
   strategy: string;
@@ -151,11 +172,13 @@ type VideoPlan = {
     targetDuration?: string;
   };
   startFrame?: VideoStartFrame;
+  scriptCharacters?: PlanScriptCharacters;
   motionControlSegments?: {
     segmentId: number;
     timecode: string;
     durationSeconds: number;
     startFramePrompt: string;
+    characterReferenceIds?: string[];
     script?: {
       hook?: string;
       shots?: SegmentScriptShot[];
@@ -181,6 +204,14 @@ type RecreateResponse = {
 type StartFrameResponse = {
   startFrame?: VideoStartFrame;
   plan?: VideoPlan;
+  error?: string;
+};
+
+type ScriptCharactersResponse = {
+  plan?: VideoPlan;
+  scriptCharacters?: PlanScriptCharacters;
+  generatedCount?: number;
+  warnings?: string[];
   error?: string;
 };
 
@@ -430,7 +461,9 @@ type VideoNodeData = {
   isDeletingVideo: boolean;
   onGenerateStartFrame: (formatId: string, videoId: string, segmentIndex?: number) => void;
   onGenerateAllSegmentStartFrames: (formatId: string, videoId: string) => void;
+  onGenerateScriptCharacters: (formatId: string, videoId: string) => void;
   isGeneratingStartFrame: boolean;
+  isGeneratingScriptCharacters: boolean;
   generatingSegmentIndex?: number;
   onUploadPreviousSegmentVideo: (
     formatId: string,
@@ -950,6 +983,23 @@ function VideoCanvasNode({ data }: NodeProps<Node<VideoNodeData>>) {
             </Button>
           ) : null}
 
+          {plan?.motionControlSegments?.length ? (
+            <Button
+              variant="outline"
+              size="sm"
+              className="nodrag w-full"
+              onClick={() => data.onGenerateScriptCharacters(data.formatId, data.video.id)}
+              isLoading={data.isGeneratingScriptCharacters}
+            >
+              <Users className="mr-1.5 h-3.5 w-3.5" />
+              {data.isGeneratingScriptCharacters
+                ? "Generating Script Characters..."
+                : plan.scriptCharacters?.characters?.length
+                  ? "Regenerate Script Characters"
+                  : "Generate Script Characters"}
+            </Button>
+          ) : null}
+
           {data.error ? (
             <div className="rounded-md border border-rose-200 bg-rose-50 px-2 py-1.5 text-[11px] text-rose-700">{data.error}</div>
           ) : null}
@@ -1093,6 +1143,16 @@ function VideoCanvasNode({ data }: NodeProps<Node<VideoNodeData>>) {
                         </Button>
                       </div>
                       <div className="mt-1.5 space-y-3">
+                        {plan.scriptCharacters?.characters?.length ? (
+                          <div className="rounded border border-fuchsia-200 bg-fuchsia-50/60 px-2 py-1.5">
+                            <p className="text-[10px] font-semibold uppercase tracking-wide text-fuchsia-700">
+                              Script Character References ({plan.scriptCharacters.characters.length})
+                            </p>
+                            <p className="mt-0.5 text-[11px] text-slate-600">
+                              {plan.scriptCharacters.characters.map((item) => item.name).join(", ")}
+                            </p>
+                          </div>
+                        ) : null}
                         {plan.motionControlSegments.map((segment, idx) => (
                           <div key={`mc-seg-${idx}`} className="rounded border border-indigo-200 bg-indigo-50/50 p-2.5">
                             <div className="flex items-center justify-between mb-2">
@@ -1142,6 +1202,14 @@ function VideoCanvasNode({ data }: NodeProps<Node<VideoNodeData>>) {
                             <p className="text-[11px] leading-relaxed text-slate-600">
                               <span className="font-semibold text-slate-500">Visual Intent:</span> {segment.startFramePrompt}
                             </p>
+                            {segment.characterReferenceIds?.length ? (
+                              <p className="mt-1 text-[11px] leading-relaxed text-slate-600">
+                                <span className="font-semibold text-slate-500">Character Refs:</span>{" "}
+                                {segment.characterReferenceIds
+                                  .map((id) => plan.scriptCharacters?.characters?.find((item) => item.id === id)?.name || id)
+                                  .join(", ")}
+                              </p>
+                            ) : null}
 
                             {segment.script?.hook || segment.script?.shots?.length || segment.script?.cta ? (
                               <div className="mt-2 rounded border border-indigo-200 bg-white/80 px-2 py-1.5">
@@ -1365,6 +1433,7 @@ export function VideoAgentView({ collectionId }: { collectionId: string }) {
   const [deletingVideoId, setDeletingVideoId] = useState<string | null>(null);
   const [generatingStartFrameVideoId, setGeneratingStartFrameVideoId] = useState<string | null>(null);
   const [generatingSegmentIndex, setGeneratingSegmentIndex] = useState<number | undefined>(undefined);
+  const [generatingScriptCharactersVideoId, setGeneratingScriptCharactersVideoId] = useState<string | null>(null);
   const [uploadingPreviousSegmentVideoId, setUploadingPreviousSegmentVideoId] = useState<string | null>(null);
   const [uploadingPreviousSegmentIndex, setUploadingPreviousSegmentIndex] = useState<number | undefined>(undefined);
   const [refreshingR2VideoId, setRefreshingR2VideoId] = useState<string | null>(null);
@@ -2132,6 +2201,84 @@ export function VideoAgentView({ collectionId }: { collectionId: string }) {
     handleGenerateStartFrame,
   ]);
 
+  const handleGenerateScriptCharacters = useCallback(async (formatIdArg?: string, videoIdArg?: string) => {
+    const targetFormat =
+      (formatIdArg ? library.find((item) => item.id === formatIdArg) : null) || selectedFormat;
+    const targetVideo =
+      (targetFormat && videoIdArg ? targetFormat.videos.find((item) => item.id === videoIdArg) : null) || selectedVideo;
+
+    if (!targetFormat || !targetVideo) {
+      setError("Select a format and video first.");
+      return;
+    }
+
+    const existingPlan = videoPlans[targetVideo.id] || null;
+    if (!existingPlan) {
+      setError("Generate a script/recreation plan first, then create script characters.");
+      return;
+    }
+
+    const segments = Array.isArray(existingPlan.motionControlSegments) ? existingPlan.motionControlSegments : [];
+    if (segments.length === 0) {
+      setError("This plan has no segment groups to assign script characters.");
+      return;
+    }
+
+    setGeneratingScriptCharactersVideoId(targetVideo.id);
+    setError("");
+    setSuccess("");
+
+    try {
+      const response = await fetch("/api/video-agent/script-characters", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          collectionId,
+          videoId: targetVideo.id,
+          imageGenerationModel: startFrameImageModel,
+        }),
+      });
+
+      const data = (await response.json()) as ScriptCharactersResponse;
+      if (!response.ok) {
+        throw new Error(data.error || "Failed to generate script characters.");
+      }
+
+      if (!data.plan) {
+        throw new Error("No updated plan returned after script character generation.");
+      }
+
+      setVideoPlans((prev) => ({
+        ...prev,
+        [targetVideo.id]: data.plan as VideoPlan,
+      }));
+
+      const generatedCount =
+        typeof data.generatedCount === "number"
+          ? data.generatedCount
+          : Array.isArray(data.scriptCharacters?.characters)
+            ? data.scriptCharacters?.characters.length
+            : Array.isArray(data.plan.scriptCharacters?.characters)
+              ? data.plan.scriptCharacters.characters.length
+              : 0;
+      const warningSuffix = data.warnings?.length ? ` (${data.warnings.length} warning${data.warnings.length > 1 ? "s" : ""})` : "";
+      setSuccess(`Generated ${generatedCount} script character reference${generatedCount === 1 ? "" : "s"}${warningSuffix}.`);
+      void loadPlans();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to generate script characters.");
+    } finally {
+      setGeneratingScriptCharactersVideoId(null);
+    }
+  }, [
+    collectionId,
+    library,
+    selectedFormat,
+    selectedVideo,
+    startFrameImageModel,
+    videoPlans,
+    loadPlans,
+  ]);
+
   const handleUploadPreviousSegmentVideo = useCallback(async (
     formatIdArg?: string,
     videoIdArg?: string,
@@ -2633,7 +2780,11 @@ export function VideoAgentView({ collectionId }: { collectionId: string }) {
               onGenerateAllSegmentStartFrames: (formatId: string, videoId: string) => {
                 void handleGenerateAllSegmentStartFrames(formatId, videoId);
               },
+              onGenerateScriptCharacters: (formatId: string, videoId: string) => {
+                void handleGenerateScriptCharacters(formatId, videoId);
+              },
               isGeneratingStartFrame: generatingStartFrameVideoId === video.id,
+              isGeneratingScriptCharacters: generatingScriptCharactersVideoId === video.id,
               generatingSegmentIndex,
               onUploadPreviousSegmentVideo: (
                 formatId: string,
@@ -2705,6 +2856,7 @@ export function VideoAgentView({ collectionId }: { collectionId: string }) {
     isGeneratingPlan,
     deletingVideoId,
     generatingStartFrameVideoId,
+    generatingScriptCharactersVideoId,
     generatingSegmentIndex,
     uploadingPreviousSegmentVideoId,
     uploadingPreviousSegmentIndex,
@@ -2724,6 +2876,7 @@ export function VideoAgentView({ collectionId }: { collectionId: string }) {
     handleDeleteVideo,
     handleGenerateStartFrame,
     handleGenerateAllSegmentStartFrames,
+    handleGenerateScriptCharacters,
     handleUploadPreviousSegmentVideo,
     nodePositions,
   ]);
