@@ -12,7 +12,10 @@ const genAI = new GoogleGenerativeAI(process.env.GOOGLE_GEMINI_API_KEY!);
 const APP_BRAND_PRIMARY_COLOR = "#F36F97";
 const APP_BRAND_GRADIENT = ["#F36F97", "#EEB4C3", "#F7DFD6"];
 
-type ImageSlideCampaignType = "widget_shock_hook_ugc" | "widget_stop_using_flo_ugc";
+type ImageSlideCampaignType =
+  | "widget_shock_hook_ugc"
+  | "widget_stop_using_flo_ugc"
+  | "widget_wait_muslim_women_tracking_app_ugc";
 
 const IMAGE_SLIDE_CAMPAIGNS: Array<{
   id: ImageSlideCampaignType;
@@ -30,6 +33,12 @@ const IMAGE_SLIDE_CAMPAIGNS: Array<{
     label: "UGC Stop Using Flo (Faith-first)",
     description:
       "6-slide UGC sequence: stop using Flo, faith-value concerns, prayer-status gap, then switch to Muslimah Pro with madhab-aware worship updates.",
+  },
+  {
+    id: "widget_wait_muslim_women_tracking_app_ugc",
+    label: "UGC Wait App For Muslim Women",
+    description:
+      "Hook-led UGC slides: 'wait, a period + pregnancy tracking app for Muslim women?', then faith-fit gap in other apps and how Muslimah Pro solves it.",
   },
 ];
 
@@ -138,6 +147,16 @@ function normalizeCampaignType(value: unknown): ImageSlideCampaignType {
     cleaned === "ugc_stop_using_flo"
   ) {
     return "widget_stop_using_flo_ugc";
+  }
+  if (
+    cleaned === "widget_wait_muslim_women_tracking_app_ugc" ||
+    cleaned === "widget-wait-muslim-women-tracking-app-ugc" ||
+    cleaned === "wait_muslim_women_tracking_app_ugc" ||
+    cleaned === "wait-muslim-women-tracking-app-ugc" ||
+    cleaned === "wait_period_pregnancy_muslim_women_ugc" ||
+    cleaned === "wait-period-pregnancy-muslim-women-ugc"
+  ) {
+    return "widget_wait_muslim_women_tracking_app_ugc";
   }
   return "widget_shock_hook_ugc";
 }
@@ -302,9 +321,44 @@ function buildFallbackScript({
     },
   ];
 
+  const waitTrackingAppFallbackSlides = [
+    {
+      headline: "wait... a period + pregnancy app for muslim women?",
+      supporting: "i did not know this existed",
+      body: `${appName} is built specifically for muslim women who need faith-sensitive tracking`,
+    },
+    {
+      headline: "most tracking apps were not made for us",
+      supporting: "that is the real issue",
+      body: "some include content and guidance that can feel misaligned with islamic values",
+    },
+    {
+      headline: "and they miss worship-status clarity",
+      supporting: "this part is essential",
+      body: "many apps do not clearly help with prayer and fasting status through cycle changes",
+    },
+    {
+      headline: "muslimah pro solves both",
+      supporting: "faith-fit + practical tracking",
+      body: `${appName} combines period and pregnancy tracking with worship-status support in one flow`,
+    },
+    {
+      headline: "you log what you observe",
+      supporting: "the app handles the status logic",
+      body: "it updates cycle insights and worship guidance clearly, so you are not second-guessing",
+    },
+    {
+      headline: "save this and share with a sister",
+      supporting: "everyone should know this exists",
+      body: `if you wanted a muslim-women-first tracking app, try ${appName}`,
+    },
+  ];
+
   const fallbackSlides =
     campaignType === "widget_stop_using_flo_ugc"
       ? stopUsingFloFallbackSlides
+      : campaignType === "widget_wait_muslim_women_tracking_app_ugc"
+        ? waitTrackingAppFallbackSlides
       : shockHookFallbackSlides;
 
   const total = clamp(slideCount, 5, 6);
@@ -345,6 +399,14 @@ function buildDesignPlannerContext({
             `App mention requirement: explicitly position ${appName} as built specifically for Muslim women.`,
             "Narrative sequence requirement: Slide 1 hook, Slide 2 value-conflict concern, Slide 3 prayer-status gap, Slide 4 app intro, Slide 5 'log observations -> madhab-based worship auto-updates', Slide 6 save/share CTA.",
             "Visual rhythm: first 2 slides should feel personal and urgent; middle slides show practical app proof; final slide closes with a soft CTA.",
+          ].join("\n")
+      : campaignType === "widget_wait_muslim_women_tracking_app_ugc"
+        ? [
+            "Campaign requirement: UGC 'wait, a period + pregnancy tracking app for Muslim women?' TikTok image-slide flow.",
+            "Core hook angle: surprised discovery that a Muslim-women-first tracking app exists.",
+            `App mention requirement: position ${appName} as built for Muslim women with faith-sensitive support.`,
+            "Narrative sequence requirement: Slide 1 surprise hook, Slide 2-3 explain other-app fit gaps (haram-leaning content + missing worship-status guidance), Slide 4-5 show how Muslimah Pro solves both, Slide 6 soft save/share CTA.",
+            "Tone requirement: educational and respectful, not insulting toward competitors.",
           ].join("\n")
       : "Campaign requirement: UGC image-slide flow.";
 
@@ -516,11 +578,24 @@ async function generateCampaignScript({
             "- Slide 5 practical proof: user only logs observations and app auto-updates worship statuses according to her madhab.",
             "- Slide 6: soft CTA to save/share/try.",
           ].join("\n")
+      : campaignType === "widget_wait_muslim_women_tracking_app_ugc"
+        ? [
+            "Campaign mode: around 6-slide UGC 'wait, period + pregnancy tracking app for Muslim women?' image slides.",
+            "Mandatory narrative points to include naturally:",
+            "- Slide 1 hook: surprised discovery that a Muslim-women-focused period and pregnancy tracking app exists.",
+            "- Slide 2 concern: other apps can include content/guidance that may not align with Islamic values.",
+            "- Slide 3 concern: other apps often miss clear worship-status tracking guidance for Muslim women.",
+            "- Slide 4 shift: introduce Muslimah Pro as built specifically for Muslim women.",
+            "- Slide 5 practical proof: explain how Muslimah Pro solves both faith-fit content concerns and worship-status clarity.",
+            "- Slide 6: soft CTA to save/share/try.",
+          ].join("\n")
       : "Campaign mode: UGC image slides.";
 
   const topicBriefFallback =
     campaignType === "widget_stop_using_flo_ugc"
       ? "Use the 'stop using Flo' hook with faith-value concerns, prayer-status gap, then Muslimah Pro + madhab-aware worship update workflow."
+      : campaignType === "widget_wait_muslim_women_tracking_app_ugc"
+        ? "Use a surprise hook about a period and pregnancy tracking app built for Muslim women, then show other-app faith-fit gaps and how Muslimah Pro solves both."
       : "Use the core shocked-reaction halal alternative to Flo angle.";
 
   const prompt = `You are a TikTok image-slide scriptwriter for ${appName}.

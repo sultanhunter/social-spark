@@ -20,7 +20,10 @@ import {
   type ImageGenerationModel,
 } from "@/lib/image-generation-model";
 
-type ImageSlideCampaignType = "widget_shock_hook_ugc" | "widget_stop_using_flo_ugc";
+type ImageSlideCampaignType =
+  | "widget_shock_hook_ugc"
+  | "widget_stop_using_flo_ugc"
+  | "widget_wait_muslim_women_tracking_app_ugc";
 
 const FALLBACK_CAMPAIGNS: ImageSlideCampaignOption[] = [
   {
@@ -31,6 +34,11 @@ const FALLBACK_CAMPAIGNS: ImageSlideCampaignOption[] = [
   {
     id: "widget_stop_using_flo_ugc",
     label: "UGC Stop Using Flo (Faith-first)",
+    description: "",
+  },
+  {
+    id: "widget_wait_muslim_women_tracking_app_ugc",
+    label: "UGC Wait App For Muslim Women",
     description: "",
   },
 ];
