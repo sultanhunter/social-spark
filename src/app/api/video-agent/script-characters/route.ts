@@ -149,6 +149,7 @@ function coerceSegmentIds(value: unknown, validSegmentIds: number[]): number[] {
 function buildFallbackCharacterDrafts(segments: MotionControlSegment[], campaignMode: string): ModelCharacterDraft[] {
   const segmentIds = segments.map((segment) => segment.segmentId);
   const isAiObjectsMode = campaignMode === "ai_objects_educational_explainer";
+  const isMixedMediaRelatableMode = campaignMode === "mixed_media_relatable_pov";
 
   if (isAiObjectsMode) {
     return [
@@ -159,6 +160,21 @@ function buildFallbackCharacterDrafts(segments: MotionControlSegment[], campaign
         visualIdentityPrompt:
           "Cute feminine-coded anthropomorphic household object with expressive eyes, soft silhouette, and educational-friendly design language.",
         styleNotes: "Premium stylized 3D CGI look, warm pastel palette, gentle gestures, clear readable face at medium-close framing.",
+        segmentIds,
+      },
+    ];
+  }
+
+  if (isMixedMediaRelatableMode) {
+    return [
+      {
+        key: "mixed_media_avatar",
+        name: "Relatable Avatar Host",
+        role: "Recurring mixed-media POV lead",
+        visualIdentityPrompt:
+          "Stylized feminine-coded chibi-like 3D avatar with expressive eyes, soft facial features, and continuity-safe silhouette for relatable short-form scenes.",
+        styleNotes:
+          "Keep avatar identity consistent across all segments; optimize for compositing into photoreal backgrounds with matching light direction and contact shadows.",
         segmentIds,
       },
     ];
@@ -341,7 +357,10 @@ export async function POST(request: NextRequest) {
     });
 
     const segmentIds = segments.map((segment) => segment.segmentId);
-    const isAnimatedVisual = selectedVideoType === "ai_animation" || campaignMode === "ai_objects_educational_explainer";
+    const isAnimatedVisual =
+      selectedVideoType === "ai_animation" ||
+      campaignMode === "ai_objects_educational_explainer" ||
+      campaignMode === "mixed_media_relatable_pov";
     const existingCharacters = Array.isArray(plan.scriptCharacters?.characters)
       ? plan.scriptCharacters?.characters
       : [];

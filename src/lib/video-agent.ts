@@ -186,6 +186,7 @@ export type ScriptAgentCampaignMode =
   | "widget_shock_hook_ugc"
   | "widget_late_period_reaction_hook_ugc"
   | "ai_objects_educational_explainer"
+  | "mixed_media_relatable_pov"
   | "daily_ugc_quran_journey";
 
 export interface VideoScriptIdeationPlan {
@@ -715,6 +716,108 @@ function enforceAiObjectsEducationalExplainerPattern(
   });
 }
 
+function enforceMixedMediaRelatablePovPattern(
+  segments: MotionControlSegment[],
+  appName: string
+): MotionControlSegment[] {
+  const phaseLabels = [
+    "the week before my period",
+    "the week of my period",
+    "the week after my period",
+  ];
+  const heroSegmentIndex = Math.min(
+    Math.max(0, segments.length - 1),
+    Math.max(1, Math.floor(segments.length * 0.55))
+  );
+
+  return segments.map((segment, index, all) => {
+    const shots = [...(segment.script?.shots || [])];
+    if (shots.length === 0) {
+      shots.push({
+        shotId: "shot1",
+        visual:
+          "Stylized 3D animated woman avatar in a real-world home environment, expressive and relatable body language.",
+        narration: "Some weeks I feel like a different person every few days.",
+        onScreenText: phaseLabels[Math.min(index, phaseLabels.length - 1)],
+        editNote: "Keep acting subtle but relatable with a hint of comedic exaggeration.",
+      });
+    }
+
+    const phaseLabel = phaseLabels[Math.min(index, phaseLabels.length - 1)];
+    const firstShot = shots[0];
+    shots[0] = {
+      ...firstShot,
+      visual: cleanText(
+        `${firstShot.visual} Mixed-media direction: stylized chibi-like 3D female avatar composited into a photoreal real-world environment with matched perspective, contact shadows, and scene-consistent lighting.`
+      ),
+      onScreenText: cleanText(firstShot.onScreenText) || phaseLabel,
+      editNote: cleanText(
+        `${firstShot.editNote || ""} Keep overlays minimal and lowercase in post: white rounded text label with soft shadow near upper-middle frame.`
+      ),
+    };
+
+    if (index === heroSegmentIndex) {
+      if (shots.length < 2) {
+        shots.push({
+          shotId: `shot${shots.length + 1}`,
+          visual: "Phone hero moment in the avatar's hand.",
+          narration: "",
+          onScreenText: "quick app check",
+          editNote: "",
+        });
+      }
+
+      const appShotIndex = Math.min(1, shots.length - 1);
+      const appShot = shots[appShotIndex];
+      shots[appShotIndex] = {
+        ...appShot,
+        visual: cleanText(
+          `${appShot.visual || "Phone close-up"} Hero app shot: avatar checks ${appName} on phone in-frame with a realistic 2D UI treatment and subtle screen reflections.`
+        ),
+        onScreenText: cleanText(appShot.onScreenText) || "quick app check",
+        editNote: cleanText(
+          `${appShot.editNote || ""} Keep this beat utility-first and tangible. Add real app UI in post/composite, not baked into generated render.`
+        ),
+      };
+    }
+
+    const prompts = (segment.multiShotPrompts || []).map((promptItem) => {
+      const isUiOrFx =
+        promptItem.generationType === "product_ui_overlay" ||
+        promptItem.generationType === "transition_fx";
+
+      return {
+        ...promptItem,
+        generationType: isUiOrFx ? promptItem.generationType : "base_ai_video",
+        prompt: cleanText(
+          `${promptItem.prompt} Mixed-media look: stylized chibi-like 3D avatar integrated into photoreal real-world background with matched lighting and perspective. Keep performance relatable and slightly exaggerated for short-form comedy.`
+        ),
+      };
+    });
+
+    const isLastSegment = index === all.length - 1;
+
+    return {
+      ...segment,
+      startFramePrompt: cleanText(
+        segment.startFramePrompt ||
+          "Mixed-media opening frame: stylized 3D avatar grounded in a realistic everyday scene with matching light and camera perspective."
+      ),
+      script: {
+        hook: segment.script?.hook || "",
+        shots,
+        cta: isLastSegment
+          ? closeOpenEndedLine(
+            segment.script?.cta ||
+              `If this feels too real, save this and check ${appName} for today's cycle + worship status.`
+          )
+          : closeOpenEndedLine(segment.script?.cta || ""),
+      },
+      multiShotPrompts: prompts,
+    };
+  });
+}
+
 function enforceDailyUgcQuranJourneyPattern(segments: MotionControlSegment[], appName: string): MotionControlSegment[] {
   const totalSegments = segments.length;
   const quranDeepDiveStartIndex = Math.max(1, totalSegments - 3);
@@ -1024,6 +1127,27 @@ function buildWidgetLatePeriodReactionHookVeoPrompt(args: {
       "Natural smartphone UGC realism, stable indoor lighting, believable micro-expressions.",
       "Do not render text overlays, captions, subtitles, logos, or watermarks in generated video.",
     ].join(" ")
+  );
+}
+
+function buildMixedMediaRelatablePovVeoPrompt(args: {
+  segment: MotionControlSegment;
+  nextSegment?: MotionControlSegment;
+  appName: string;
+  ugcCharacter?: UGCCharacterProfile | null;
+}): string {
+  const { segment, nextSegment, appName, ugcCharacter } = args;
+
+  const basePrompt = buildVeo31SegmentPrompt({
+    segment,
+    nextSegment,
+    styleHint: "mixed-media stylized 3D avatar in photoreal real-world environments",
+    appName,
+    ugcCharacter,
+  });
+
+  return cleanText(
+    `${basePrompt} Mixed-media directive: keep one recurring stylized chibi-like 3D female avatar composited into real-world photoreal backgrounds. Match lighting temperature, shadow direction, floor contact, camera perspective, and lens depth so the avatar feels grounded. Performance style: relatable POV micro-drama with slightly exaggerated reactions. Do not render text overlays; add lowercase white rounded labels in post.`
   );
 }
 
@@ -1510,6 +1634,16 @@ function sanitizeScriptAgentCampaignMode(value: unknown): ScriptAgentCampaignMod
     cleaned === "cute-ai-objects-explainer"
   ) {
     return "ai_objects_educational_explainer";
+  }
+  if (
+    cleaned === "mixed_media_relatable_pov" ||
+    cleaned === "mixed-media-relatable-pov" ||
+    cleaned === "mixed_media_pov" ||
+    cleaned === "mixed-media-pov" ||
+    cleaned === "mixed_media_relatable" ||
+    cleaned === "mixed-media-relatable"
+  ) {
+    return "mixed_media_relatable_pov";
   }
   if (
     cleaned === "daily_ugc_quran_journey" ||
@@ -2624,6 +2758,8 @@ export async function buildVideoScriptIdeationPlan({
       ? Math.max(30, Math.round(targetDurationSeconds))
       : resolvedCampaignMode === "widget_late_period_reaction_hook_ugc"
         ? 8
+      : resolvedCampaignMode === "mixed_media_relatable_pov"
+        ? clamp(Math.round(targetDurationSeconds), 18, 45)
       : resolvedCampaignMode === "ai_objects_educational_explainer"
         ? clamp(Math.round(targetDurationSeconds), 75, 110)
       : resolvedCampaignMode === "widget_shock_hook_ugc"
@@ -2632,6 +2768,8 @@ export async function buildVideoScriptIdeationPlan({
   const minBeatCount =
     resolvedCampaignMode === "widget_late_period_reaction_hook_ugc"
       ? 2
+      : resolvedCampaignMode === "mixed_media_relatable_pov"
+        ? Math.min(20, Math.max(6, Math.ceil(safeDurationSeconds / 5)))
       : resolvedCampaignMode === "ai_objects_educational_explainer"
         ? Math.min(64, Math.max(12, Math.ceil(safeDurationSeconds / 6)))
       : Math.min(64, Math.max(8, Math.ceil(safeDurationSeconds / 4)));
@@ -2643,6 +2781,8 @@ export async function buildVideoScriptIdeationPlan({
     resolvedCampaignMode === "widget_late_period_reaction_hook_ugc"
       ? "ugc"
       : resolvedCampaignMode === "ai_objects_educational_explainer"
+        ? "ai_animation"
+      : resolvedCampaignMode === "mixed_media_relatable_pov"
         ? "ai_animation"
       : resolvedCampaignMode === "daily_ugc_quran_journey"
         ? "ai_animation"
@@ -2711,6 +2851,20 @@ CAMPAIGN MODE: ai_objects_educational_explainer
 - Include one natural app hook moment (subtle, useful, non-ad) where the explainer references checking app status for practical decision support.
 - Do not make hard sell claims; app mention should feel like a helpful tool inside the explanation.
 - Keep this mode strictly ai_animation.
+`
+    : resolvedCampaignMode === "mixed_media_relatable_pov"
+      ? `
+CAMPAIGN MODE: mixed_media_relatable_pov
+- Build a high-retention short-form mixed-media video for TikTok/Reels/Shorts.
+- Visual core: one stylized 3D chibi-like female avatar seamlessly composited into photoreal real-world backgrounds.
+- Match avatar lighting to each environment (color temperature, shadow direction, intensity, contact shadows).
+- Keep strict 9:16 vertical framing and mobile-first composition.
+- Narrative structure: POV + episodic vignettes across temporal phases (for example: week before, week of, week after).
+- Mood style: relatable and slightly exaggerated everyday moments for comedic/emotional resonance.
+- Text style: minimal lowercase white labels with subtle shadow/rounded backing (text added in post, not rendered in generation).
+- Include one hero app beat where avatar checks phone and the app UI appears as a practical utility moment.
+- Keep app mention natural, useful, and brief. Avoid sales-heavy language.
+- Keep this mode strictly ai_animation with recurring character continuity.
 `
     : resolvedCampaignMode === "daily_ugc_quran_journey"
       ? `
@@ -3083,12 +3237,16 @@ Return strict JSON only:
         ? enforceWidgetLatePeriodReactionHookPattern(transitionReadySegments)
       : resolvedCampaignMode === "ai_objects_educational_explainer"
         ? enforceAiObjectsEducationalExplainerPattern(transitionReadySegments, appName)
+    : resolvedCampaignMode === "mixed_media_relatable_pov"
+      ? enforceMixedMediaRelatablePovPattern(transitionReadySegments, appName)
       : resolvedCampaignMode === "daily_ugc_quran_journey"
         ? enforceDailyUgcQuranJourneyPattern(transitionReadySegments, appName)
       : transitionReadySegments;
   const scriptAgentStyleHint =
     resolvedCampaignMode === "ai_objects_educational_explainer"
       ? "premium stylized 3D educational explainer with cute feminine-styled anthropomorphic everyday objects"
+      : resolvedCampaignMode === "mixed_media_relatable_pov"
+        ? "mixed-media stylized 3D chibi avatar composited into photoreal real-world scenes, relatable comedic POV pacing"
       : resolvedVideoType === "ugc"
       ? "ugc creator-style live-action"
       : resolvedVideoType === "ai_animation"
@@ -3108,6 +3266,13 @@ Return strict JSON only:
         : resolvedCampaignMode === "widget_late_period_reaction_hook_ugc"
           ? buildWidgetLatePeriodReactionHookVeoPrompt({
             segment,
+          })
+        : resolvedCampaignMode === "mixed_media_relatable_pov"
+          ? buildMixedMediaRelatablePovVeoPrompt({
+            segment,
+            nextSegment: all[index + 1],
+            appName,
+            ugcCharacter,
           })
         : buildVeo31SegmentPrompt({
           segment,

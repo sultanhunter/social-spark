@@ -125,6 +125,16 @@ function normalizeCampaignMode(value: unknown): ScriptAgentCampaignMode {
     return "ai_objects_educational_explainer";
   }
   if (
+    cleaned === "mixed_media_relatable_pov" ||
+    cleaned === "mixed-media-relatable-pov" ||
+    cleaned === "mixed_media_pov" ||
+    cleaned === "mixed-media-pov" ||
+    cleaned === "mixed_media_relatable" ||
+    cleaned === "mixed-media-relatable"
+  ) {
+    return "mixed_media_relatable_pov";
+  }
+  if (
     cleaned === "daily_ugc_quran_journey" ||
     cleaned === "daily-ugc-quran-journey" ||
     cleaned === "daily_ugc_quran" ||
