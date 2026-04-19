@@ -725,14 +725,6 @@ function enforceMixedMediaRelatablePovPattern(
     "the week of my period",
     "the week after my period",
   ];
-  const memeOverlayFallbacks = [
-    "pov: is it me or my hormones?",
-    "the week before my period",
-    "the week of my period",
-    "the week after my period",
-    "me trying to be normal",
-    "back to baseline... for now",
-  ];
   const heroSegmentIndex = Math.min(
     Math.max(0, segments.length - 1),
     Math.max(1, Math.floor(segments.length * 0.55))
@@ -745,9 +737,9 @@ function enforceMixedMediaRelatablePovPattern(
         shotId: "shot1",
         visual:
           "Stylized 3D animated woman avatar in a real-world home environment, expressive and relatable body language.",
-        narration: "",
+        narration: "Some weeks I feel like a different person every few days.",
         onScreenText: phaseLabels[Math.min(index, phaseLabels.length - 1)],
-        editNote: "No dialogue. Keep acting subtle but relatable with meme-like comedic exaggeration.",
+        editNote: "Keep acting subtle but relatable with a hint of comedic exaggeration.",
       });
     }
 
@@ -794,30 +786,11 @@ function enforceMixedMediaRelatablePovPattern(
         promptItem.generationType === "product_ui_overlay" ||
         promptItem.generationType === "transition_fx";
 
-      const noDialoguePrompt = cleanText(
-        promptItem.prompt.replace(/Dialogue\s*:\s*"[^"]*"/gi, "No dialogue: performance-only.")
-      );
-
       return {
         ...promptItem,
         generationType: isUiOrFx ? promptItem.generationType : "base_ai_video",
         prompt: cleanText(
-          `${noDialoguePrompt} No dialogue: expressive meme-style performance only. Mixed-media look: stylized chibi-like 3D avatar integrated into photoreal real-world background with matched lighting and perspective. Keep performance funny, relatable, and slightly exaggerated for short-form retention.`
-        ),
-      };
-    });
-
-    const normalizedShots = shots.map((shot, shotIndex) => {
-      const overlayText =
-        cleanText(shot.onScreenText) ||
-        memeOverlayFallbacks[Math.min(shotIndex + index, memeOverlayFallbacks.length - 1)];
-
-      return {
-        ...shot,
-        narration: "",
-        onScreenText: overlayText,
-        editNote: cleanText(
-          `${shot.editNote || ""} No spoken dialogue or lip-sync. Storytelling must come from acting + text overlays added in editing.`
+          `${promptItem.prompt} Mixed-media look: stylized chibi-like 3D avatar integrated into photoreal real-world background with matched lighting and perspective. Keep performance relatable and slightly exaggerated for short-form comedy.`
         ),
       };
     });
@@ -832,7 +805,7 @@ function enforceMixedMediaRelatablePovPattern(
       ),
       script: {
         hook: segment.script?.hook || "",
-        shots: normalizedShots,
+        shots,
         cta: isLastSegment
           ? closeOpenEndedLine(
             segment.script?.cta ||
@@ -1173,17 +1146,8 @@ function buildMixedMediaRelatablePovVeoPrompt(args: {
     ugcCharacter,
   });
 
-  const overlayRefs = (segment.script?.shots || [])
-    .map((shot, index) => {
-      const text = cleanText(shot.onScreenText);
-      if (!text) return "";
-      return `Shot ${index + 1} overlay reference for edit: "${text.replace(/"/g, "'")}".`;
-    })
-    .filter(Boolean)
-    .join(" ");
-
   return cleanText(
-    `${basePrompt} No spoken dialogue, no voiceover, and no lip-sync in any shot. This is a silent meme-style video driven by expressive acting. Mixed-media directive: keep one recurring stylized chibi-like 3D female avatar composited into real-world photoreal backgrounds. Match lighting temperature, shadow direction, floor contact, camera perspective, and lens depth so the avatar feels grounded. Performance style: funny, engaging POV micro-drama with slightly exaggerated reactions. Do not render text overlays in generation; overlays are added in edit as lowercase white rounded labels with subtle shadow. ${overlayRefs}`
+    `${basePrompt} Mixed-media directive: keep one recurring stylized chibi-like 3D female avatar composited into real-world photoreal backgrounds. Match lighting temperature, shadow direction, floor contact, camera perspective, and lens depth so the avatar feels grounded. Performance style: relatable POV micro-drama with slightly exaggerated reactions. Do not render text overlays; add lowercase white rounded labels in post.`
   );
 }
 
@@ -2930,20 +2894,6 @@ TOPIC SELECTION MODE:
 - Topic should be relevant for Muslim women and centered on period/pregnancy or islamic period/pregnancy.
 - Keep the selected topic explicit in title, hook, and objective.
 `;
-  const noDialogueOnlyMode =
-    resolvedCampaignMode === "widget_late_period_reaction_hook_ugc" ||
-    resolvedCampaignMode === "mixed_media_relatable_pov";
-  const dialogueRulesBlock = noDialogueOnlyMode
-    ? `
-- No spoken dialogue or voiceover in any segment.
-- Keep all shot narration fields as empty strings.
-- Tell the story using visual acting and short on-screen text cues only (text will be added in edit).
-`
-    : `
-- Dialogue pacing: for segments around 8 seconds (roughly 7-9s), include one complete spoken line that is typically 10-16 words (max 16) when narration is present.
-- Avoid under-filled ultra-short spoken lines (2-5 words) unless the campaign explicitly requires reaction-only silent shots.
-- Keep generated narration wording intact; do not truncate or compress lines solely to reduce word count.
-`;
 
   const prompt = `You are a senior short-form video script strategist.
 
@@ -2979,7 +2929,9 @@ RULES:
 - Duration must closely match target.
 - Use enough beats to fill full duration (minimum ${minBeatCount} beats).
 - Beat timecodes should span almost full duration.
-${dialogueRulesBlock}
+- Dialogue pacing: for segments around 8 seconds (roughly 7-9s), include one complete spoken line that is typically 10-16 words (max 16) when narration is present.
+- Avoid under-filled ultra-short spoken lines (2-5 words) unless the campaign explicitly requires reaction-only silent shots.
+- Keep generated narration wording intact; do not truncate or compress lines solely to reduce word count.
 - Split into shot groups of max ${MAX_SINGLE_VIDEO_CLIP_SECONDS}s each.
 - Each shot group must include startFramePrompt, segment script (hook/shots/cta), and multiShotPrompts.
 - Each shot group must include startFramePrompt, segment script (hook/shots/cta), and one copy-paste-ready veoPrompt for Veo 3.1.
@@ -3106,7 +3058,6 @@ Return strict JSON only:
 
   const isLatePeriodReactionHookMode = resolvedCampaignMode === "widget_late_period_reaction_hook_ugc";
   const isAiObjectsEducationalMode = resolvedCampaignMode === "ai_objects_educational_explainer";
-  const isMixedMediaRelatablePovMode = resolvedCampaignMode === "mixed_media_relatable_pov";
   const forcedLatePeriodHookOne = "is everyone's period late in march?";
   const forcedLatePeriodHookTwo = "raise your hand if it's march and your period still hasn't shown up";
   const forcedLatePeriodVisual =
@@ -3166,21 +3117,6 @@ Return strict JSON only:
         };
       });
     }
-  }
-
-  if (isMixedMediaRelatablePovMode) {
-    beatsForPlan = beatsForPlan.map((beat) => ({
-      ...beat,
-      narration: "",
-      onScreenText:
-        cleanText(beat.onScreenText) ||
-        cleanText(beat.narration) ||
-        cleanText(beat.visual) ||
-        "relatable chaos",
-      editNote: cleanText(
-        `${beat.editNote || ""} Silent meme-style beat. Overlay text is added in edit.`
-      ),
-    }));
   }
 
   const modelSegmentsRaw = Array.isArray(row.motionControlSegments) ? row.motionControlSegments : [];
