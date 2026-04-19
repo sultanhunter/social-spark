@@ -757,7 +757,7 @@ function enforceMixedMediaRelatablePovPattern(
     shots[0] = {
       ...firstShot,
       visual: cleanText(
-        `${firstShot.visual} Mixed-media direction: stylized chibi-like 3D female avatar composited into a photoreal real-world environment with matched perspective, contact shadows, and scene-consistent lighting. Scale lock: avatar is NOT miniature/toy-sized in the world; keep normal human-relative scale while framing slightly wider so she appears smaller in frame.`
+        `${firstShot.visual} Mixed-media direction: stylized chibi-like 3D female avatar composited into a photoreal real-world environment with matched perspective, contact shadows, and scene-consistent lighting. Scale lock: avatar stays intentionally small in frame (roughly 20-30% of frame height in full-body shots).`
       ),
       onScreenText: cleanText(firstShot.onScreenText) || phaseLabel,
       editNote: cleanText(
@@ -803,7 +803,7 @@ function enforceMixedMediaRelatablePovPattern(
         ...promptItem,
         generationType: isUiOrFx ? promptItem.generationType : "base_ai_video",
         prompt: cleanText(
-          `${noDialoguePrompt} No dialogue: expressive meme-style performance only. Mixed-media look: stylized chibi-like 3D avatar integrated into photoreal real-world background with matched lighting and perspective. Keep avatar normal world scale (not miniature), but use wider composition so she reads smaller in frame. Action-only performance direction: clear body actions per shot (walk, sit, head turn, hand gesture, phone check, shrug) with mouth relaxed/closed and zero speech articulation. Keep performance funny, relatable, and slightly exaggerated for short-form retention.`
+          `${noDialoguePrompt} No dialogue: expressive meme-style performance only. Mixed-media look: stylized chibi-like 3D avatar integrated into photoreal real-world background with matched lighting and perspective. Keep avatar intentionally small in frame (about 20-30% frame height in full-body shots). Keep performance funny, relatable, and slightly exaggerated for short-form retention.`
         ),
       };
     });
@@ -818,7 +818,7 @@ function enforceMixedMediaRelatablePovPattern(
         narration: "",
         onScreenText: overlayText,
         editNote: cleanText(
-          `${shot.editNote || ""} No spoken dialogue or lip-sync. Storytelling must come from explicit physical actions + text overlays added in editing. Keep mouth in non-speaking state.`
+          `${shot.editNote || ""} No spoken dialogue or lip-sync. Storytelling must come from acting + text overlays added in editing.`
         ),
       };
     });
@@ -880,7 +880,7 @@ function enforceStaticPhotorealAvatarMemePattern(
     shots[0] = {
       ...firstShot,
       visual: cleanText(
-        `${firstShot.visual} Style direction: one recurring stylized 3D cartoon-like female avatar composited into an ultra-photoreal location. Keep avatar normal world scale (not miniature/toy-sized), but compose wider so she appears modestly smaller in frame than a typical close social video. Keep background mostly static with locked camera and only subtle natural environmental movement.`
+        `${firstShot.visual} Style direction: one recurring stylized 3D cartoon-like female avatar composited into an ultra-photoreal location. Keep avatar intentionally small in frame (roughly 20-30% of frame height in full-body shots). Keep background mostly static with locked camera and only subtle natural environmental movement.`
       ),
       onScreenText: cleanText(firstShot.onScreenText) || memeOverlayFallbacks[Math.min(index, memeOverlayFallbacks.length - 1)],
       editNote: cleanText(
@@ -923,7 +923,7 @@ function enforceStaticPhotorealAvatarMemePattern(
         ...promptItem,
         generationType: isUiOrFx ? promptItem.generationType : "base_ai_video",
         prompt: cleanText(
-          `${noDialoguePrompt} No dialogue. 3D cartoon-like avatar in ultra-photoreal environment. Keep avatar normal world scale (not miniature), and make her appear smaller through wider framing only. Keep background mostly static, camera locked, lighting physically plausible, avatar grounded with contact shadows and matched perspective. Action-only performance: clear physical action in each shot (walking, turning, sitting, checking phone, hand-on-stomach, shrug, reaction pose) and no speech mouth shapes. Funny, engaging meme-style acting with subtle exaggeration.`
+          `${noDialoguePrompt} No dialogue. 3D cartoon-like avatar in ultra-photoreal environment. Keep avatar intentionally small in frame (about 20-30% frame height in full-body shots). Keep background mostly static, camera locked, lighting physically plausible, avatar grounded with contact shadows and matched perspective. Funny, engaging meme-style acting with subtle exaggeration.`
         ),
       };
     });
@@ -935,7 +935,7 @@ function enforceStaticPhotorealAvatarMemePattern(
         cleanText(shot.onScreenText) ||
         memeOverlayFallbacks[Math.min(shotIndex + index, memeOverlayFallbacks.length - 1)],
       editNote: cleanText(
-        `${shot.editNote || ""} No spoken dialogue or lip-sync. Storytelling comes from explicit body actions + text overlays added in post. Keep mouth in non-speaking state.`
+        `${shot.editNote || ""} No spoken dialogue or lip-sync. Storytelling comes from acting + text overlays added in post.`
       ),
     }));
 
@@ -945,7 +945,7 @@ function enforceStaticPhotorealAvatarMemePattern(
       ...segment,
       startFramePrompt: cleanText(
         segment.startFramePrompt ||
-          "Opening frame: stylized 3D cartoon-like avatar grounded in an ultra-photoreal everyday location, normal world scale (not miniature), with a mostly static background and locked camera."
+          "Opening frame: stylized 3D cartoon-like avatar grounded in an ultra-photoreal everyday location, intentionally small in frame, with a mostly static background and locked camera."
       ),
       script: {
         hook: segment.script?.hook || "",
@@ -1300,7 +1300,7 @@ function buildMixedMediaRelatablePovVeoPrompt(args: {
     .join(" ");
 
   return cleanText(
-    `${basePrompt} No spoken dialogue, no voiceover, and no lip-sync in any shot. This is a silent meme-style video driven by expressive acting. Mixed-media directive: keep one recurring stylized chibi-like 3D female avatar composited into real-world photoreal backgrounds. Scale lock: avatar is normal world scale (not miniature/toy-sized); use wider framing to keep her less dominant in frame. Match lighting temperature, shadow direction, floor contact, camera perspective, and lens depth so the avatar feels grounded. Action lock: every shot must include a clear physical action beat (walk, pause, turn, sit, phone check, shrug, head tilt, reaction pose) with mouth relaxed/closed and zero speech articulation. Performance style: funny, engaging POV micro-drama with slightly exaggerated reactions. Do not render text overlays in generation; overlays are added in edit as lowercase white rounded labels with subtle shadow. ${overlayRefs}`
+    `${basePrompt} No spoken dialogue, no voiceover, and no lip-sync in any shot. This is a silent meme-style video driven by expressive acting. Mixed-media directive: keep one recurring stylized chibi-like 3D female avatar composited into real-world photoreal backgrounds. Scale lock: avatar stays intentionally small in frame, usually around 20-30% of frame height in full-body shots, and should not dominate the scene. Match lighting temperature, shadow direction, floor contact, camera perspective, and lens depth so the avatar feels grounded. Performance style: funny, engaging POV micro-drama with slightly exaggerated reactions. Do not render text overlays in generation; overlays are added in edit as lowercase white rounded labels with subtle shadow. ${overlayRefs}`
   );
 }
 
@@ -1330,7 +1330,7 @@ function buildStaticPhotorealAvatarMemeVeoPrompt(args: {
     .join(" ");
 
   return cleanText(
-    `${basePrompt} No spoken dialogue, no voiceover, and no lip-sync in any shot. Keep one recurring stylized 3D cartoon-like female avatar. Scale lock: avatar is normal world scale (not miniature/toy-sized), while framing stays wide enough that she appears less dominant in the frame. Background and environment must feel ultra-photoreal with mostly static composition, locked-off camera, and only subtle natural movement. Match avatar lighting, floor contact shadows, and perspective to the real scene. Action lock: every shot must show a clear body action beat (entering, walking, turning, sitting, checking phone, hand gesture, reaction pose) and keep mouth relaxed/closed with no speech phoneme motion. Performance style: funny, engaging, meme-like micro-drama with expressive reactions. Do not render text overlays in generation; text overlays are added during editing. ${overlayRefs}`
+    `${basePrompt} No spoken dialogue, no voiceover, and no lip-sync in any shot. Keep one recurring stylized 3D cartoon-like female avatar. Scale lock: avatar stays intentionally small in frame, usually around 20-30% of frame height in full-body shots, and remains clearly smaller than a typical human subject. Background and environment must feel ultra-photoreal with mostly static composition, locked-off camera, and only subtle natural movement. Match avatar lighting, floor contact shadows, and perspective to the real scene. Performance style: funny, engaging, meme-like micro-drama with expressive reactions. Do not render text overlays in generation; text overlays are added during editing. ${overlayRefs}`
   );
 }
 
@@ -3056,13 +3056,12 @@ CAMPAIGN MODE: ai_objects_educational_explainer
 CAMPAIGN MODE: mixed_media_relatable_pov
 - Build a high-retention short-form mixed-media video for TikTok/Reels/Shorts.
 - Visual core: one stylized 3D chibi-like female avatar seamlessly composited into photoreal real-world backgrounds.
-- Avatar scale must stay normal world size (not miniature/toy-sized). Use wider framing so avatar feels less dominant in frame.
+- Avatar scale must be intentionally small in frame (mini-character look), usually around 20-30% of frame height in full-body compositions.
 - Match avatar lighting to each environment (color temperature, shadow direction, intensity, contact shadows).
 - Keep strict 9:16 vertical framing and mobile-first composition.
 - Narrative structure: POV + episodic vignettes across temporal phases (for example: week before, week of, week after).
 - Mood style: relatable and slightly exaggerated everyday moments for comedic/emotional resonance.
 - Text style: minimal lowercase white labels with subtle shadow/rounded backing (text added in post, not rendered in generation).
-- Every shot must have an explicit physical action beat; no talking-mouth performance.
 - Include one hero app beat where avatar checks phone and the app UI appears as a practical utility moment.
 - Keep app mention natural, useful, and brief. Avoid sales-heavy language.
 - Keep this mode strictly ai_animation with recurring character continuity.
@@ -3072,12 +3071,11 @@ CAMPAIGN MODE: mixed_media_relatable_pov
 CAMPAIGN MODE: static_photoreal_avatar_meme
 - Build funny, engaging meme-style short videos for Reels/TikTok/Shorts.
 - Visual core: one stylized 3D cartoon-like female avatar composited into ultra-photoreal real-world environments.
-- Avatar scale must stay normal world size (not miniature/toy-sized). Use wider framing so avatar feels less dominant in frame.
+- Avatar scale must be intentionally small in frame (mini-character look), usually around 20-30% of frame height in full-body compositions.
 - Keep backgrounds mostly static (locked or near-locked camera), while avatar performance carries the humor.
 - Match avatar grounding cues perfectly: perspective, contact shadows, light direction, color temperature, and lens feel.
 - Keep strict 9:16 vertical framing.
 - No spoken dialogue or voiceover. Storytelling is performance + text overlays added in edit.
-- Every shot must have a clear physical action beat (walk/turn/sit/phone-check/gesture/reaction) with mouth in non-speaking state.
 - If user provides topic/context, align all beats to that exact context.
 - If no topic/context is provided, choose a relatable app-topic scenario yourself (period, pregnancy, muslim period, or muslim pregnancy).
 - Include one practical utility beat where avatar checks the app on phone, but keep app mention brief and non-salesy.
@@ -3121,8 +3119,6 @@ TOPIC SELECTION MODE:
 - No spoken dialogue or voiceover in any segment.
 - Keep all shot narration fields as empty strings.
 - Tell the story using visual acting and short on-screen text cues only (text will be added in edit).
-- Every shot must specify a clear physical action so generation favors body performance over lip-sync.
-- Keep mouth relaxed/closed and avoid speech-like mouth articulation in all shots.
 `
     : `
 - Dialogue pacing: for segments around 8 seconds (roughly 7-9s), include one complete spoken line that is typically 10-16 words (max 16) when narration is present.
@@ -3364,7 +3360,7 @@ Return strict JSON only:
         cleanText(beat.visual) ||
         "relatable chaos",
       editNote: cleanText(
-        `${beat.editNote || ""} Silent meme-style beat. Add a clear physical action cue (walk/turn/sit/gesture/phone-check/reaction). Overlay text is added in edit. Keep mouth in non-speaking state.`
+        `${beat.editNote || ""} Silent meme-style beat. Overlay text is added in edit.`
       ),
     }));
   }
