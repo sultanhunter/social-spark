@@ -150,6 +150,7 @@ function buildFallbackCharacterDrafts(segments: MotionControlSegment[], campaign
   const segmentIds = segments.map((segment) => segment.segmentId);
   const isAiObjectsMode = campaignMode === "ai_objects_educational_explainer";
   const isMixedMediaRelatableMode = campaignMode === "mixed_media_relatable_pov";
+  const isStaticPhotorealAvatarMemeMode = campaignMode === "static_photoreal_avatar_meme";
 
   if (isAiObjectsMode) {
     return [
@@ -175,6 +176,21 @@ function buildFallbackCharacterDrafts(segments: MotionControlSegment[], campaign
           "Stylized feminine-coded chibi-like 3D avatar with expressive eyes, soft facial features, and continuity-safe silhouette for relatable short-form scenes.",
         styleNotes:
           "Keep avatar identity consistent across all segments; optimize for compositing into photoreal backgrounds with matching light direction and contact shadows.",
+        segmentIds,
+      },
+    ];
+  }
+
+  if (isStaticPhotorealAvatarMemeMode) {
+    return [
+      {
+        key: "photoreal_meme_avatar",
+        name: "Meme Avatar Host",
+        role: "Recurring silent meme lead",
+        visualIdentityPrompt:
+          "Stylized 3D cartoon-like feminine avatar with expressive face, clean silhouette, and continuity-safe identity across scenes.",
+        styleNotes:
+          "Keep avatar identity stable and optimize for compositing into ultra-photoreal mostly-static environments with matched perspective and contact shadows.",
         segmentIds,
       },
     ];
@@ -360,7 +376,8 @@ export async function POST(request: NextRequest) {
     const isAnimatedVisual =
       selectedVideoType === "ai_animation" ||
       campaignMode === "ai_objects_educational_explainer" ||
-      campaignMode === "mixed_media_relatable_pov";
+      campaignMode === "mixed_media_relatable_pov" ||
+      campaignMode === "static_photoreal_avatar_meme";
     const existingCharacters = Array.isArray(plan.scriptCharacters?.characters)
       ? plan.scriptCharacters?.characters
       : [];

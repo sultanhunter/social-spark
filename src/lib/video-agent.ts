@@ -187,6 +187,7 @@ export type ScriptAgentCampaignMode =
   | "widget_late_period_reaction_hook_ugc"
   | "ai_objects_educational_explainer"
   | "mixed_media_relatable_pov"
+  | "static_photoreal_avatar_meme"
   | "daily_ugc_quran_journey";
 
 export interface VideoScriptIdeationPlan {
@@ -756,7 +757,7 @@ function enforceMixedMediaRelatablePovPattern(
     shots[0] = {
       ...firstShot,
       visual: cleanText(
-        `${firstShot.visual} Mixed-media direction: stylized chibi-like 3D female avatar composited into a photoreal real-world environment with matched perspective, contact shadows, and scene-consistent lighting.`
+        `${firstShot.visual} Mixed-media direction: stylized chibi-like 3D female avatar composited into a photoreal real-world environment with matched perspective, contact shadows, and scene-consistent lighting. Scale lock: avatar stays intentionally small in frame (roughly 20-30% of frame height in full-body shots).`
       ),
       onScreenText: cleanText(firstShot.onScreenText) || phaseLabel,
       editNote: cleanText(
@@ -802,7 +803,7 @@ function enforceMixedMediaRelatablePovPattern(
         ...promptItem,
         generationType: isUiOrFx ? promptItem.generationType : "base_ai_video",
         prompt: cleanText(
-          `${noDialoguePrompt} No dialogue: expressive meme-style performance only. Mixed-media look: stylized chibi-like 3D avatar integrated into photoreal real-world background with matched lighting and perspective. Keep performance funny, relatable, and slightly exaggerated for short-form retention.`
+          `${noDialoguePrompt} No dialogue: expressive meme-style performance only. Mixed-media look: stylized chibi-like 3D avatar integrated into photoreal real-world background with matched lighting and perspective. Keep avatar intentionally small in frame (about 20-30% frame height in full-body shots). Keep performance funny, relatable, and slightly exaggerated for short-form retention.`
         ),
       };
     });
@@ -829,6 +830,122 @@ function enforceMixedMediaRelatablePovPattern(
       startFramePrompt: cleanText(
         segment.startFramePrompt ||
           "Mixed-media opening frame: stylized 3D avatar grounded in a realistic everyday scene with matching light and camera perspective."
+      ),
+      script: {
+        hook: segment.script?.hook || "",
+        shots: normalizedShots,
+        cta: isLastSegment
+          ? closeOpenEndedLine(
+            segment.script?.cta ||
+              `If this feels too real, save this and check ${appName} for today's cycle + worship status.`
+          )
+          : closeOpenEndedLine(segment.script?.cta || ""),
+      },
+      multiShotPrompts: prompts,
+    };
+  });
+}
+
+function enforceStaticPhotorealAvatarMemePattern(
+  segments: MotionControlSegment[],
+  appName: string
+): MotionControlSegment[] {
+  const memeOverlayFallbacks = [
+    "pov: me checking if this mood is me or hormones",
+    "the week before my period",
+    "the week of my period",
+    "the week after my period",
+    "trying to stay calm",
+    "back to normal... maybe",
+  ];
+  const heroSegmentIndex = Math.min(
+    Math.max(0, segments.length - 1),
+    Math.max(1, Math.floor(segments.length * 0.55))
+  );
+
+  return segments.map((segment, index, all) => {
+    const shots = [...(segment.script?.shots || [])];
+    if (shots.length === 0) {
+      shots.push({
+        shotId: "shot1",
+        visual:
+          "Stylized 3D cartoon-like Muslimah avatar in a photoreal home environment, expressive and relatable body language.",
+        narration: "",
+        onScreenText: memeOverlayFallbacks[Math.min(index, memeOverlayFallbacks.length - 1)],
+        editNote: "No dialogue. Meme-style acting and text-overlay storytelling in post.",
+      });
+    }
+
+    const firstShot = shots[0];
+    shots[0] = {
+      ...firstShot,
+      visual: cleanText(
+        `${firstShot.visual} Style direction: one recurring stylized 3D cartoon-like female avatar composited into an ultra-photoreal location. Keep avatar intentionally small in frame (roughly 20-30% of frame height in full-body shots). Keep background mostly static with locked camera and only subtle natural environmental movement.`
+      ),
+      onScreenText: cleanText(firstShot.onScreenText) || memeOverlayFallbacks[Math.min(index, memeOverlayFallbacks.length - 1)],
+      editNote: cleanText(
+        `${firstShot.editNote || ""} Keep meme pacing funny and engaging with expressive micro-reactions. Overlay text added in edit only.`
+      ),
+    };
+
+    if (index === heroSegmentIndex) {
+      if (shots.length < 2) {
+        shots.push({
+          shotId: `shot${shots.length + 1}`,
+          visual: "Phone utility beat in avatar's hand.",
+          narration: "",
+          onScreenText: "quick app check",
+          editNote: "",
+        });
+      }
+
+      const appShotIndex = Math.min(1, shots.length - 1);
+      const appShot = shots[appShotIndex];
+      shots[appShotIndex] = {
+        ...appShot,
+        visual: cleanText(
+          `${appShot.visual || "Phone close-up"} Utility beat: avatar checks ${appName} on phone. Keep generated screen neutral and replace with real app UI in edit.`
+        ),
+        onScreenText: cleanText(appShot.onScreenText) || "quick app check",
+        editNote: cleanText(`${appShot.editNote || ""} Keep this beat practical and brief, not salesy.`),
+      };
+    }
+
+    const prompts = (segment.multiShotPrompts || []).map((promptItem) => {
+      const isUiOrFx =
+        promptItem.generationType === "product_ui_overlay" ||
+        promptItem.generationType === "transition_fx";
+      const noDialoguePrompt = cleanText(
+        promptItem.prompt.replace(/Dialogue\s*:\s*"[^"]*"/gi, "No dialogue: expressive performance only.")
+      );
+
+      return {
+        ...promptItem,
+        generationType: isUiOrFx ? promptItem.generationType : "base_ai_video",
+        prompt: cleanText(
+          `${noDialoguePrompt} No dialogue. 3D cartoon-like avatar in ultra-photoreal environment. Keep avatar intentionally small in frame (about 20-30% frame height in full-body shots). Keep background mostly static, camera locked, lighting physically plausible, avatar grounded with contact shadows and matched perspective. Funny, engaging meme-style acting with subtle exaggeration.`
+        ),
+      };
+    });
+
+    const normalizedShots = shots.map((shot, shotIndex) => ({
+      ...shot,
+      narration: "",
+      onScreenText:
+        cleanText(shot.onScreenText) ||
+        memeOverlayFallbacks[Math.min(shotIndex + index, memeOverlayFallbacks.length - 1)],
+      editNote: cleanText(
+        `${shot.editNote || ""} No spoken dialogue or lip-sync. Storytelling comes from acting + text overlays added in post.`
+      ),
+    }));
+
+    const isLastSegment = index === all.length - 1;
+
+    return {
+      ...segment,
+      startFramePrompt: cleanText(
+        segment.startFramePrompt ||
+          "Opening frame: stylized 3D cartoon-like avatar grounded in an ultra-photoreal everyday location, intentionally small in frame, with a mostly static background and locked camera."
       ),
       script: {
         hook: segment.script?.hook || "",
@@ -1183,7 +1300,37 @@ function buildMixedMediaRelatablePovVeoPrompt(args: {
     .join(" ");
 
   return cleanText(
-    `${basePrompt} No spoken dialogue, no voiceover, and no lip-sync in any shot. This is a silent meme-style video driven by expressive acting. Mixed-media directive: keep one recurring stylized chibi-like 3D female avatar composited into real-world photoreal backgrounds. Match lighting temperature, shadow direction, floor contact, camera perspective, and lens depth so the avatar feels grounded. Performance style: funny, engaging POV micro-drama with slightly exaggerated reactions. Do not render text overlays in generation; overlays are added in edit as lowercase white rounded labels with subtle shadow. ${overlayRefs}`
+    `${basePrompt} No spoken dialogue, no voiceover, and no lip-sync in any shot. This is a silent meme-style video driven by expressive acting. Mixed-media directive: keep one recurring stylized chibi-like 3D female avatar composited into real-world photoreal backgrounds. Scale lock: avatar stays intentionally small in frame, usually around 20-30% of frame height in full-body shots, and should not dominate the scene. Match lighting temperature, shadow direction, floor contact, camera perspective, and lens depth so the avatar feels grounded. Performance style: funny, engaging POV micro-drama with slightly exaggerated reactions. Do not render text overlays in generation; overlays are added in edit as lowercase white rounded labels with subtle shadow. ${overlayRefs}`
+  );
+}
+
+function buildStaticPhotorealAvatarMemeVeoPrompt(args: {
+  segment: MotionControlSegment;
+  nextSegment?: MotionControlSegment;
+  appName: string;
+  ugcCharacter?: UGCCharacterProfile | null;
+}): string {
+  const { segment, nextSegment, appName, ugcCharacter } = args;
+
+  const basePrompt = buildVeo31SegmentPrompt({
+    segment,
+    nextSegment,
+    styleHint: "animated stylized 3D cartoon-like avatar composited into ultra-photoreal mostly-static environments",
+    appName,
+    ugcCharacter,
+  });
+
+  const overlayRefs = (segment.script?.shots || [])
+    .map((shot, index) => {
+      const text = cleanText(shot.onScreenText);
+      if (!text) return "";
+      return `Shot ${index + 1} overlay reference for edit: "${text.replace(/"/g, "'")}".`;
+    })
+    .filter(Boolean)
+    .join(" ");
+
+  return cleanText(
+    `${basePrompt} No spoken dialogue, no voiceover, and no lip-sync in any shot. Keep one recurring stylized 3D cartoon-like female avatar. Scale lock: avatar stays intentionally small in frame, usually around 20-30% of frame height in full-body shots, and remains clearly smaller than a typical human subject. Background and environment must feel ultra-photoreal with mostly static composition, locked-off camera, and only subtle natural movement. Match avatar lighting, floor contact shadows, and perspective to the real scene. Performance style: funny, engaging, meme-like micro-drama with expressive reactions. Do not render text overlays in generation; text overlays are added during editing. ${overlayRefs}`
   );
 }
 
@@ -1680,6 +1827,16 @@ function sanitizeScriptAgentCampaignMode(value: unknown): ScriptAgentCampaignMod
     cleaned === "mixed-media-relatable"
   ) {
     return "mixed_media_relatable_pov";
+  }
+  if (
+    cleaned === "static_photoreal_avatar_meme" ||
+    cleaned === "static-photoreal-avatar-meme" ||
+    cleaned === "photoreal_background_avatar_meme" ||
+    cleaned === "photoreal-background-avatar-meme" ||
+    cleaned === "static_chibi_meme" ||
+    cleaned === "static-chibi-meme"
+  ) {
+    return "static_photoreal_avatar_meme";
   }
   if (
     cleaned === "daily_ugc_quran_journey" ||
@@ -2796,6 +2953,8 @@ export async function buildVideoScriptIdeationPlan({
         ? 8
       : resolvedCampaignMode === "mixed_media_relatable_pov"
         ? clamp(Math.round(targetDurationSeconds), 18, 45)
+      : resolvedCampaignMode === "static_photoreal_avatar_meme"
+        ? clamp(Math.round(targetDurationSeconds), 12, 35)
       : resolvedCampaignMode === "ai_objects_educational_explainer"
         ? clamp(Math.round(targetDurationSeconds), 75, 110)
       : resolvedCampaignMode === "widget_shock_hook_ugc"
@@ -2806,6 +2965,8 @@ export async function buildVideoScriptIdeationPlan({
       ? 2
       : resolvedCampaignMode === "mixed_media_relatable_pov"
         ? Math.min(20, Math.max(6, Math.ceil(safeDurationSeconds / 5)))
+      : resolvedCampaignMode === "static_photoreal_avatar_meme"
+        ? Math.min(20, Math.max(4, Math.ceil(safeDurationSeconds / 4)))
       : resolvedCampaignMode === "ai_objects_educational_explainer"
         ? Math.min(64, Math.max(12, Math.ceil(safeDurationSeconds / 6)))
       : Math.min(64, Math.max(8, Math.ceil(safeDurationSeconds / 4)));
@@ -2819,6 +2980,8 @@ export async function buildVideoScriptIdeationPlan({
       : resolvedCampaignMode === "ai_objects_educational_explainer"
         ? "ai_animation"
       : resolvedCampaignMode === "mixed_media_relatable_pov"
+        ? "ai_animation"
+      : resolvedCampaignMode === "static_photoreal_avatar_meme"
         ? "ai_animation"
       : resolvedCampaignMode === "daily_ugc_quran_journey"
         ? "ai_animation"
@@ -2893,6 +3056,7 @@ CAMPAIGN MODE: ai_objects_educational_explainer
 CAMPAIGN MODE: mixed_media_relatable_pov
 - Build a high-retention short-form mixed-media video for TikTok/Reels/Shorts.
 - Visual core: one stylized 3D chibi-like female avatar seamlessly composited into photoreal real-world backgrounds.
+- Avatar scale must be intentionally small in frame (mini-character look), usually around 20-30% of frame height in full-body compositions.
 - Match avatar lighting to each environment (color temperature, shadow direction, intensity, contact shadows).
 - Keep strict 9:16 vertical framing and mobile-first composition.
 - Narrative structure: POV + episodic vignettes across temporal phases (for example: week before, week of, week after).
@@ -2901,6 +3065,22 @@ CAMPAIGN MODE: mixed_media_relatable_pov
 - Include one hero app beat where avatar checks phone and the app UI appears as a practical utility moment.
 - Keep app mention natural, useful, and brief. Avoid sales-heavy language.
 - Keep this mode strictly ai_animation with recurring character continuity.
+`
+      : resolvedCampaignMode === "static_photoreal_avatar_meme"
+        ? `
+CAMPAIGN MODE: static_photoreal_avatar_meme
+- Build funny, engaging meme-style short videos for Reels/TikTok/Shorts.
+- Visual core: one stylized 3D cartoon-like female avatar composited into ultra-photoreal real-world environments.
+- Avatar scale must be intentionally small in frame (mini-character look), usually around 20-30% of frame height in full-body compositions.
+- Keep backgrounds mostly static (locked or near-locked camera), while avatar performance carries the humor.
+- Match avatar grounding cues perfectly: perspective, contact shadows, light direction, color temperature, and lens feel.
+- Keep strict 9:16 vertical framing.
+- No spoken dialogue or voiceover. Storytelling is performance + text overlays added in edit.
+- If user provides topic/context, align all beats to that exact context.
+- If no topic/context is provided, choose a relatable app-topic scenario yourself (period, pregnancy, muslim period, or muslim pregnancy).
+- Include one practical utility beat where avatar checks the app on phone, but keep app mention brief and non-salesy.
+- Keep recurring character identity consistent across all segments.
+- Keep this mode strictly ai_animation.
 `
     : resolvedCampaignMode === "daily_ugc_quran_journey"
       ? `
@@ -2932,7 +3112,8 @@ TOPIC SELECTION MODE:
 `;
   const noDialogueOnlyMode =
     resolvedCampaignMode === "widget_late_period_reaction_hook_ugc" ||
-    resolvedCampaignMode === "mixed_media_relatable_pov";
+    resolvedCampaignMode === "mixed_media_relatable_pov" ||
+    resolvedCampaignMode === "static_photoreal_avatar_meme";
   const dialogueRulesBlock = noDialogueOnlyMode
     ? `
 - No spoken dialogue or voiceover in any segment.
@@ -3107,6 +3288,7 @@ Return strict JSON only:
   const isLatePeriodReactionHookMode = resolvedCampaignMode === "widget_late_period_reaction_hook_ugc";
   const isAiObjectsEducationalMode = resolvedCampaignMode === "ai_objects_educational_explainer";
   const isMixedMediaRelatablePovMode = resolvedCampaignMode === "mixed_media_relatable_pov";
+  const isStaticPhotorealAvatarMemeMode = resolvedCampaignMode === "static_photoreal_avatar_meme";
   const forcedLatePeriodHookOne = "is everyone's period late in march?";
   const forcedLatePeriodHookTwo = "raise your hand if it's march and your period still hasn't shown up";
   const forcedLatePeriodVisual =
@@ -3168,7 +3350,7 @@ Return strict JSON only:
     }
   }
 
-  if (isMixedMediaRelatablePovMode) {
+  if (isMixedMediaRelatablePovMode || isStaticPhotorealAvatarMemeMode) {
     beatsForPlan = beatsForPlan.map((beat) => ({
       ...beat,
       narration: "",
@@ -3303,6 +3485,8 @@ Return strict JSON only:
         ? enforceAiObjectsEducationalExplainerPattern(transitionReadySegments, appName)
     : resolvedCampaignMode === "mixed_media_relatable_pov"
       ? enforceMixedMediaRelatablePovPattern(transitionReadySegments, appName)
+      : resolvedCampaignMode === "static_photoreal_avatar_meme"
+        ? enforceStaticPhotorealAvatarMemePattern(transitionReadySegments, appName)
       : resolvedCampaignMode === "daily_ugc_quran_journey"
         ? enforceDailyUgcQuranJourneyPattern(transitionReadySegments, appName)
       : transitionReadySegments;
@@ -3311,9 +3495,11 @@ Return strict JSON only:
       ? "premium stylized 3D educational explainer with cute feminine-styled anthropomorphic everyday objects"
       : resolvedCampaignMode === "mixed_media_relatable_pov"
         ? "mixed-media stylized 3D chibi avatar composited into photoreal real-world scenes, relatable comedic POV pacing"
+      : resolvedCampaignMode === "static_photoreal_avatar_meme"
+        ? "animated stylized 3D cartoon avatar in mostly static ultra-photoreal backgrounds, meme-style silent storytelling"
       : resolvedVideoType === "ugc"
-      ? "ugc creator-style live-action"
-      : resolvedVideoType === "ai_animation"
+        ? "ugc creator-style live-action"
+        : resolvedVideoType === "ai_animation"
         ? "animated explainer with realistic motion and texture"
         : resolvedVideoType === "faceless_broll"
           ? "faceless b-roll educational live-action"
@@ -3338,6 +3524,13 @@ Return strict JSON only:
             appName,
             ugcCharacter,
           })
+          : resolvedCampaignMode === "static_photoreal_avatar_meme"
+            ? buildStaticPhotorealAvatarMemeVeoPrompt({
+              segment,
+              nextSegment: all[index + 1],
+              appName,
+              ugcCharacter,
+            })
         : buildVeo31SegmentPrompt({
           segment,
           nextSegment: all[index + 1],

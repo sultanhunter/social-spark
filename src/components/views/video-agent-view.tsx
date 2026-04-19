@@ -223,6 +223,7 @@ type ScriptAgentCampaignMode =
   | "widget_late_period_reaction_hook_ugc"
   | "ai_objects_educational_explainer"
   | "mixed_media_relatable_pov"
+  | "static_photoreal_avatar_meme"
   | "daily_ugc_quran_journey";
 type ScriptAgentSelectableCampaignMode =
   | "standard"
@@ -230,7 +231,8 @@ type ScriptAgentSelectableCampaignMode =
   | "widget_shock_hook_ugc"
   | "widget_late_period_reaction_hook_ugc"
   | "ai_objects_educational_explainer"
-  | "mixed_media_relatable_pov";
+  | "mixed_media_relatable_pov"
+  | "static_photoreal_avatar_meme";
 
 type ScriptAgentPlan = {
   title: string;
@@ -1842,7 +1844,8 @@ export function VideoAgentView({ collectionId }: { collectionId: string }) {
       scriptAgentCampaignMode === "widget_late_period_reaction_hook_ugc";
     const forceAiAnimation =
       scriptAgentCampaignMode === "ai_objects_educational_explainer" ||
-      scriptAgentCampaignMode === "mixed_media_relatable_pov";
+      scriptAgentCampaignMode === "mixed_media_relatable_pov" ||
+      scriptAgentCampaignMode === "static_photoreal_avatar_meme";
 
     if (forceUgc && scriptAgentVideoType !== "ugc") {
       setScriptAgentVideoType("ugc");
@@ -1865,6 +1868,13 @@ export function VideoAgentView({ collectionId }: { collectionId: string }) {
     if (scriptAgentCampaignMode === "mixed_media_relatable_pov") {
       if (scriptAgentDurationSeconds < 18 || scriptAgentDurationSeconds > 45) {
         setScriptAgentDurationSeconds(30);
+      }
+      return;
+    }
+
+    if (scriptAgentCampaignMode === "static_photoreal_avatar_meme") {
+      if (scriptAgentDurationSeconds < 12 || scriptAgentDurationSeconds > 35) {
+        setScriptAgentDurationSeconds(24);
       }
       return;
     }
@@ -3023,11 +3033,11 @@ export function VideoAgentView({ collectionId }: { collectionId: string }) {
             <div className="max-h-[74vh] space-y-3 overflow-y-auto px-6 pb-6 pt-4">
               <div className="space-y-2 rounded-lg border border-slate-200 bg-slate-50 p-3">
                 <div>
-                  <p className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-slate-500">Topic Brief (optional)</p>
+                  <p className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-slate-500">Topic/Context Brief (optional)</p>
                   <textarea
                     value={scriptAgentTopicBrief}
                     onChange={(event) => setScriptAgentTopicBrief(event.target.value)}
-                    placeholder="Optional. Example: Practical guide for irregular periods after childbirth, with faith-sensitive worship tips and one subtle app support moment. If left empty, AI will choose a topic."
+                    placeholder="Optional. Add the exact meme context/topic you want (example: week before/during/after period mood swing POV). If left empty, AI will pick a relevant period/pregnancy topic automatically."
                     rows={4}
                     className="w-full rounded-lg border border-slate-300 bg-white px-2.5 py-2 text-xs text-slate-800 outline-none transition focus:border-rose-400 focus:ring-2 focus:ring-rose-200"
                   />
@@ -3047,6 +3057,7 @@ export function VideoAgentView({ collectionId }: { collectionId: string }) {
                       <option value="widget_late_period_reaction_hook_ugc">Late-period reaction hook UGC (8s)</option>
                       <option value="ai_objects_educational_explainer">AI objects educational explainer (~90s)</option>
                       <option value="mixed_media_relatable_pov">Mixed-media meme POV (no dialogue, text overlays)</option>
+                      <option value="static_photoreal_avatar_meme">3D avatar + static photoreal meme (no dialogue)</option>
                     </select>
                   </div>
 
@@ -3075,6 +3086,8 @@ export function VideoAgentView({ collectionId }: { collectionId: string }) {
                           ? 8
                           : scriptAgentCampaignMode === "mixed_media_relatable_pov"
                             ? 18
+                          : scriptAgentCampaignMode === "static_photoreal_avatar_meme"
+                            ? 12
                           : scriptAgentCampaignMode === "ai_objects_educational_explainer"
                             ? 75
                             : 30
@@ -3084,6 +3097,8 @@ export function VideoAgentView({ collectionId }: { collectionId: string }) {
                           ? 8
                           : scriptAgentCampaignMode === "mixed_media_relatable_pov"
                             ? 45
+                          : scriptAgentCampaignMode === "static_photoreal_avatar_meme"
+                            ? 35
                           : scriptAgentCampaignMode === "ai_objects_educational_explainer"
                             ? 110
                             : 180
@@ -3098,6 +3113,8 @@ export function VideoAgentView({ collectionId }: { collectionId: string }) {
                             ? 8
                             : scriptAgentCampaignMode === "mixed_media_relatable_pov"
                               ? 18
+                            : scriptAgentCampaignMode === "static_photoreal_avatar_meme"
+                              ? 12
                             : scriptAgentCampaignMode === "ai_objects_educational_explainer"
                               ? 75
                               : 30;
@@ -3106,6 +3123,8 @@ export function VideoAgentView({ collectionId }: { collectionId: string }) {
                             ? 8
                             : scriptAgentCampaignMode === "mixed_media_relatable_pov"
                               ? 45
+                            : scriptAgentCampaignMode === "static_photoreal_avatar_meme"
+                              ? 35
                             : scriptAgentCampaignMode === "ai_objects_educational_explainer"
                               ? 110
                               : 180;
@@ -3134,6 +3153,9 @@ export function VideoAgentView({ collectionId }: { collectionId: string }) {
                             return type === "ugc";
                           }
                           if (scriptAgentCampaignMode === "mixed_media_relatable_pov") {
+                            return type === "animated";
+                          }
+                          if (scriptAgentCampaignMode === "static_photoreal_avatar_meme") {
                             return type === "animated";
                           }
                           if (scriptAgentVideoType === "ai_animation") return type === "animated";
