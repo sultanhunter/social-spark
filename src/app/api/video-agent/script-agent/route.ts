@@ -135,16 +135,6 @@ function normalizeCampaignMode(value: unknown): ScriptAgentCampaignMode {
     return "mixed_media_relatable_pov";
   }
   if (
-    cleaned === "static_photoreal_avatar_meme" ||
-    cleaned === "static-photoreal-avatar-meme" ||
-    cleaned === "photoreal_background_avatar_meme" ||
-    cleaned === "photoreal-background-avatar-meme" ||
-    cleaned === "static_chibi_meme" ||
-    cleaned === "static-chibi-meme"
-  ) {
-    return "static_photoreal_avatar_meme";
-  }
-  if (
     cleaned === "daily_ugc_quran_journey" ||
     cleaned === "daily-ugc-quran-journey" ||
     cleaned === "daily_ugc_quran" ||
