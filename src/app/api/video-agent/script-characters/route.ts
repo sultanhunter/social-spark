@@ -25,6 +25,7 @@ type MotionControlSegment = {
   segmentId: number;
   timecode: string;
   startFramePrompt?: string;
+  veoPrompt?: string;
   characterReferenceIds?: string[];
   script?: {
     hook?: string;
@@ -85,6 +86,13 @@ function asText(value: unknown): string {
 
 function cleanText(value: unknown): string {
   return asText(value).replace(/\s+/g, " ").trim();
+}
+
+function clipText(value: unknown, maxChars = 900): string {
+  const cleaned = cleanText(value);
+  if (!cleaned) return "";
+  if (cleaned.length <= maxChars) return cleaned;
+  return `${cleaned.slice(0, maxChars)}...`;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -210,6 +218,7 @@ async function inferCharacterDrafts(args: {
     segmentId: segment.segmentId,
     timecode: cleanText(segment.timecode),
     startFramePrompt: cleanText(segment.startFramePrompt),
+    veoPrompt: clipText(segment.veoPrompt),
     hook: cleanText(segment.script?.hook),
     cta: cleanText(segment.script?.cta),
     shots: Array.isArray(segment.script?.shots)
@@ -233,6 +242,7 @@ APP CONTEXT:
 
 TASK:
 - Read all segment scripts and identify recurring ON-SCREEN characters/entities that must stay visually consistent.
+- Treat each segment veoPrompt as a high-priority visual context signal for casting and character continuity.
 - Include anthropomorphic objects as characters if they are personified narrators/explainers.
 - For this women-focused app, default to feminine-coded, women-audience-friendly character styling unless script explicitly requires otherwise.
 - Keep cast compact (1-5 characters max).
