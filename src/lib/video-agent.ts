@@ -619,7 +619,13 @@ function enforceWidgetLatePeriodReactionHookPattern(segments: MotionControlSegme
 }
 
 const AI_OBJECTS_ANATOMY_RULE =
-  "Object anatomy rule: keep each character coherent to its base object form with object-native articulation only; no human hands, no human legs, and no pasted human body parts.";
+  "Object anatomy rule: keep each character coherent to its base object form (materials, silhouette, and proportions). Human-like features (including hands/legs) are allowed only when intentionally designed for that object and kept visually coherent across shots.";
+
+const AI_OBJECTS_ENVIRONMENT_RULE =
+  "Environment rule: stage every shot in a script-specific environment (for example home sofa, kitchen counter, prayer corner, clinic desk, or stylized inside-body metaphor scene), and avoid plain/fixed or single-color backdrops.";
+
+const AI_OBJECTS_INTERACTION_RULE =
+  "Interaction rule: object characters must interact with surrounding props/background elements in each beat, not just talk to camera.";
 
 function stripAiObjectsLiveActionLanguage(value: string | null | undefined): string {
   const cleaned = cleanText(value || "");
@@ -666,7 +672,7 @@ function enforceAiObjectsEducationalExplainerPattern(
       shots.push({
         shotId: "shot1",
         visual:
-          "High-quality animated everyday object characters explain one practical cycle-health concept with warm expressions and coherent object-first design.",
+          "High-quality animated everyday object characters explain one practical cycle-health concept inside a clear real-world or concept-matched environment with active prop interaction and coherent object-first design.",
         narration: "Let us break this down in a simple way.",
         onScreenText: "Simple object explainer",
         editNote: "Keep educational pacing with expressive object acting.",
@@ -680,10 +686,10 @@ function enforceAiObjectsEducationalExplainerPattern(
       return {
         ...shot,
         visual: cleanText(
-          `${cleanedVisual || "Stylized 3D anthropomorphic everyday object explains the concept with clear, warm visual storytelling."} Premium stylized 3D CGI educational look with expressive face language, material-consistent movement, and studio-grade continuity. ${AI_OBJECTS_ANATOMY_RULE}`
+          `${cleanedVisual || "Stylized 3D anthropomorphic everyday object explains the concept with clear, warm visual storytelling in a script-matched environment."} Premium stylized 3D CGI educational look with expressive face language, material-consistent movement, and cinematic environment continuity. ${AI_OBJECTS_ANATOMY_RULE} ${AI_OBJECTS_ENVIRONMENT_RULE} ${AI_OBJECTS_INTERACTION_RULE}`
         ),
         editNote: cleanText(
-          `${cleanedEditNote || ""} ${shotIndex === 0 ? "Open with clear object character readability and premium animation polish." : "Keep continuity with the same object cast and shape language."} Avoid UGC/live-action realism cues.`
+          `${cleanedEditNote || ""} ${shotIndex === 0 ? "Open with clear object character readability and premium animation polish." : "Keep continuity with the same object cast and shape language."} Keep environment specific to this script beat and show object-to-prop interaction. Avoid UGC/live-action realism cues and avoid plain/fixed backgrounds.`
         ),
       };
     });
@@ -719,7 +725,7 @@ function enforceAiObjectsEducationalExplainerPattern(
         generationType: shouldPreserveType ? promptItem.generationType : "base_ai_video",
         prompt: enforceKlingPromptWordLimit(
           cleanText(
-            `${cleanedPrompt || fallbackPromptBase || "Stylized 3D educational object-character shot"}. Premium stylized 3D CGI educational storytelling with coherent object design and material-aware motion. ${AI_OBJECTS_ANATOMY_RULE} Avoid live-action/UGC realism and human skin detail.`
+            `${cleanedPrompt || fallbackPromptBase || "Stylized 3D educational object-character shot in a script-matched environment"}. Keep dynamic location context and visible prop interaction; avoid plain/fixed backdrops. Premium stylized 3D CGI educational storytelling with coherent object design and material-aware motion. ${AI_OBJECTS_ANATOMY_RULE} Avoid live-action/UGC realism and accidental pasted-real anatomy.`
           ),
           77
         ),
@@ -732,7 +738,7 @@ function enforceAiObjectsEducationalExplainerPattern(
     return {
       ...segment,
       startFramePrompt: cleanText(
-        `${cleanedStartFrame || "Premium stylized 3D animated scene: coherent anthropomorphic everyday objects begin explaining a practical health concept in a warm educational tone."} ${AI_OBJECTS_ANATOMY_RULE}`
+        `${cleanedStartFrame || "Premium stylized 3D animated scene: coherent anthropomorphic everyday objects begin explaining a practical health concept inside a script-matched environment with visible prop interaction and warm educational tone."} ${AI_OBJECTS_ANATOMY_RULE} ${AI_OBJECTS_ENVIRONMENT_RULE} ${AI_OBJECTS_INTERACTION_RULE}`
       ),
       script: {
         hook: segment.script?.hook || "",
@@ -1067,7 +1073,7 @@ function buildVeo31SegmentPrompt(args: {
   const characterLock = ugcCharacter
     ? `Character lock: ${ugcCharacter.characterName}. ${cleanText(ugcCharacter.promptTemplate)}.`
     : isAiObjectsStyle
-      ? "Character consistency: keep the same recurring object cast identity, proportions, material finish, facial-feature placement, and object-native articulation across all shots. No human hands, no human legs, no human skin rendering."
+      ? "Character consistency: keep the same recurring object cast identity, proportions, material finish, and facial-feature placement across all shots. If human-like limbs/features are used, keep them intentional, style-matched to the base object, and consistent in scale and motion."
     : isAnimatedStyle
       ? "Character consistency: keep same animated character silhouette, face shape language, color palette, and costume continuity throughout this segment."
       : "Character consistency: keep same person identity, face geometry, and wardrobe continuity throughout this segment.";
@@ -1079,10 +1085,13 @@ function buildVeo31SegmentPrompt(args: {
     [
       `Veo 3.1 single prompt for segment ${segment.segmentId} (${segment.timecode}). Generate one continuous ${durationSeconds}-second vertical 9:16 ${styleHint} video clip.`,
       isAiObjectsStyle
-        ? "Quality target: premium stylized 3D CGI object-animation, studio-grade shading and materials, coherent object-first character design, smooth deformation-free motion, no human skin realism, and no live-action UGC look."
+        ? "Quality target: premium stylized 3D CGI object-animation, cinematic scene-aware shading and materials, coherent object-first character design, and smooth deformation-free motion. Keep any human-like features stylized and integrated into object design; avoid accidental pasted-real anatomy and avoid live-action UGC look."
         : isAnimatedStyle
           ? "Quality target: high-end CGI animation look, stylized but premium 3D rendering, clean topology, stable shading, smooth deformation, expressive eyes and lips, coherent lighting, no uncanny artifacts, no texture flicker, no muddy frames."
           : "Quality target: photorealistic, true-to-life UGC realism, natural skin texture and pores, realistic fabric physics, authentic handheld smartphone camera behavior, physically plausible lighting, no waxy skin, no plastic look, no AI artifacts or uncanny facial motion.",
+      isAiObjectsStyle
+        ? `Scene staging: every shot must use a script-matched environment and tangible prop interaction (for example home sofa, kitchen counter, desk setup, or stylized inside-body metaphor space). No plain/fixed backdrop.`
+        : "",
       `Environment continuity: keep location, camera axis, lens feel, and light direction stable across all shots in this segment.`,
       characterLock,
       `App integration: if app is referenced, show practical phone interaction with ${appName}, subtle and natural to the scene.`,
@@ -2884,8 +2893,13 @@ CAMPAIGN MODE: ai_objects_educational_explainer
 - Visual language: cute anthropomorphic everyday objects (living objects) that explain concepts clearly.
 - Keep look premium and cinematic: polished stylized 3D CGI, expressive faces, smooth motion, clean lighting.
 - Character coherence is mandatory: each character must visually read as its base object first (material, silhouette, proportions) with object-native articulation.
-- Do not graft human anatomy onto objects: no human hands, no human legs, no realistic human skin/body parts on object characters.
+- Human-like features (including hands/legs) are allowed when intentionally designed to match the object's style and remain coherent.
+- Avoid random pasted anatomy that breaks object coherence.
 - Object casting direction: keep characters feminine-coded and women-audience friendly (soft shapes, warm expressions, graceful motion, tasteful feminine styling).
+- Scene design must be script-driven, not fixed: each segment should clearly describe where the action happens (for example sofa at home, kitchen table, prayer corner, clinic desk, classroom board, or stylized inside-body environment when relevant).
+- Avoid flat/plain/static backgrounds; every beat must include environmental depth and context.
+- Characters must interact with the environment and nearby objects (touch, move, point, open, place, react), not only talk in place.
+- If the script metaphor is internal biology, place objects inside an anatomically-inspired stylized environment that matches the concept.
 - Narrative style: object characters teach one practical period/pregnancy or worship-support concept in simple, memorable metaphors.
 - Keep education first: clear facts, practical steps, warm and friendly tone.
 - Include one natural app hook moment (subtle, useful, non-ad) where the explainer references checking app status for practical decision support.
@@ -3166,10 +3180,10 @@ Return strict JSON only:
       return {
         ...beat,
         visual: cleanText(
-          `${cleanedVisual || "Stylized 3D anthropomorphic object-character educational beat."} ${AI_OBJECTS_ANATOMY_RULE}`
+          `${cleanedVisual || "Stylized 3D anthropomorphic object-character educational beat in a script-matched environment with prop interaction."} ${AI_OBJECTS_ANATOMY_RULE} ${AI_OBJECTS_ENVIRONMENT_RULE} ${AI_OBJECTS_INTERACTION_RULE}`
         ),
         editNote: cleanText(
-          `${cleanedEditNote || ""} Keep this beat fully stylized CGI with object-first character coherence; avoid UGC/live-action realism cues.`
+          `${cleanedEditNote || ""} Keep this beat fully stylized CGI with object-first character coherence. Require scene-specific environment + object interaction, and avoid plain/fixed backgrounds. Avoid UGC/live-action realism cues.`
         ),
       };
     });
@@ -3300,7 +3314,7 @@ Return strict JSON only:
       : transitionReadySegments;
   const scriptAgentStyleHint =
     resolvedCampaignMode === "ai_objects_educational_explainer"
-      ? "premium stylized 3D CGI animated educational explainer with cute feminine-styled anthropomorphic everyday objects"
+      ? "premium stylized 3D CGI animated educational explainer with cute feminine-styled anthropomorphic everyday objects in script-driven environments with active prop interaction and no plain static backdrops"
       : resolvedCampaignMode === "mixed_media_relatable_pov"
         ? "mixed-media stylized 3D chibi avatar composited into photoreal real-world scenes, relatable comedic POV pacing"
       : resolvedVideoType === "ugc"
