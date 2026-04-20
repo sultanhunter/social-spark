@@ -154,6 +154,9 @@ function coerceSegmentIds(value: unknown, validSegmentIds: number[]): number[] {
   return Array.from(new Set(ids));
 }
 
+const AI_OBJECTS_CHARACTER_ANATOMY_RULE =
+  "Keep anatomy object-native to the base object design (handles/hinges/caps/material-consistent articulation), with no human hands, no human legs, and no pasted human body parts.";
+
 function buildFallbackCharacterDrafts(segments: MotionControlSegment[], campaignMode: string): ModelCharacterDraft[] {
   const segmentIds = segments.map((segment) => segment.segmentId);
   const isAiObjectsMode = campaignMode === "ai_objects_educational_explainer";
@@ -166,8 +169,9 @@ function buildFallbackCharacterDrafts(segments: MotionControlSegment[], campaign
         name: "Guide Object",
         role: "Primary explainer",
         visualIdentityPrompt:
-          "Cute feminine-coded anthropomorphic household object with expressive eyes, soft silhouette, and educational-friendly design language.",
-        styleNotes: "Premium stylized 3D CGI look, warm pastel palette, gentle gestures, clear readable face at medium-close framing.",
+          `Cute feminine-coded anthropomorphic household object with expressive eyes, soft silhouette, and educational-friendly design language. ${AI_OBJECTS_CHARACTER_ANATOMY_RULE}`,
+        styleNotes:
+          "Premium stylized 3D CGI look, warm pastel palette, and clear readable face at medium-close framing with studio-grade character coherence and object-first proportions.",
         segmentIds,
       },
     ];
@@ -209,6 +213,7 @@ async function inferCharacterDrafts(args: {
   reasoningModel: string;
 }): Promise<ModelCharacterDraft[]> {
   const { appName, campaignMode, selectedVideoType, segments, reasoningModel } = args;
+  const isAiObjectsMode = campaignMode === "ai_objects_educational_explainer";
   const apiKey = process.env.GOOGLE_GEMINI_API_KEY;
   if (!apiKey) {
     return buildFallbackCharacterDrafts(segments, campaignMode);
@@ -245,6 +250,7 @@ TASK:
 - Treat each segment veoPrompt as a high-priority visual context signal for casting and character continuity.
 - Include anthropomorphic objects as characters if they are personified narrators/explainers.
 - For this women-focused app, default to feminine-coded, women-audience-friendly character styling unless script explicitly requires otherwise.
+${isAiObjectsMode ? "- Keep object characters coherent to their base object identity and enforce object-native anatomy only (no human hands/legs or pasted human body parts)." : ""}
 - Keep cast compact (1-5 characters max).
 - Do NOT include background props that do not act as characters.
 
@@ -279,17 +285,25 @@ Return strict JSON only:
         const name = cleanText(row.name) || `Character ${index + 1}`;
         const key = slugify(cleanText(row.key) || name, `character_${index + 1}`);
         const segmentIds = coerceSegmentIds(row.segmentIds, validSegmentIds);
+        const visualIdentityPrompt =
+          cleanText(row.visualIdentityPrompt) ||
+          "Consistent feminine-coded character identity with expressive face and continuity-safe silhouette.";
+        const styleNotes =
+          cleanText(row.styleNotes) ||
+          "Keep shape language, facial expression style, and color palette consistent in every segment.";
 
         return {
           key,
           name,
           role: cleanText(row.role) || "Recurring character",
-          visualIdentityPrompt:
-            cleanText(row.visualIdentityPrompt) ||
-            "Consistent feminine-coded character identity with expressive face and continuity-safe silhouette.",
-          styleNotes:
-            cleanText(row.styleNotes) ||
-            "Keep shape language, facial expression style, and color palette consistent in every segment.",
+          visualIdentityPrompt: isAiObjectsMode
+            ? cleanText(`${visualIdentityPrompt} ${AI_OBJECTS_CHARACTER_ANATOMY_RULE}`)
+            : visualIdentityPrompt,
+          styleNotes: isAiObjectsMode
+            ? cleanText(
+              `${styleNotes} Keep studio-grade object character coherence with material-consistent motion language; avoid live-action/UGC realism.`
+            )
+            : styleNotes,
           segmentIds,
         };
       })
@@ -371,6 +385,7 @@ export async function POST(request: NextRequest) {
       selectedVideoType === "ai_animation" ||
       campaignMode === "ai_objects_educational_explainer" ||
       campaignMode === "mixed_media_relatable_pov";
+    const isAiObjectsMode = campaignMode === "ai_objects_educational_explainer";
     const existingCharacters = Array.isArray(plan.scriptCharacters?.characters)
       ? plan.scriptCharacters?.characters
       : [];
@@ -413,6 +428,12 @@ export async function POST(request: NextRequest) {
         isAnimatedVisual
           ? "Render as premium stylized 3D CGI character design for animation workflows (not photoreal human skin rendering)."
           : "Render as realistic continuity-safe character image with natural texture and believable lighting.",
+        isAiObjectsMode
+          ? `Character anatomy lock: ${AI_OBJECTS_CHARACTER_ANATOMY_RULE}`
+          : "",
+        isAiObjectsMode
+          ? "For object characters, keep object-first silhouette and materials coherent; avoid human body structure and avoid UGC/live-action realism cues."
+          : "",
         "Keep presentation feminine-coded and women-audience-friendly: soft shape language, warm expression, graceful posture, tasteful styling.",
         "Single character only. Medium-close framing. Clean uncluttered background. No text, no logos, no watermark.",
       ].join(" ");

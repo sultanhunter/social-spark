@@ -1870,7 +1870,7 @@ export function VideoAgentView({ collectionId }: { collectionId: string }) {
     }
 
     if (scriptAgentCampaignMode === "ai_objects_educational_explainer") {
-      if (scriptAgentDurationSeconds < 75 || scriptAgentDurationSeconds > 110) {
+      if (scriptAgentDurationSeconds < 40 || scriptAgentDurationSeconds > 110) {
         setScriptAgentDurationSeconds(90);
       }
       return;
@@ -3045,7 +3045,7 @@ export function VideoAgentView({ collectionId }: { collectionId: string }) {
                       <option value="widget_reaction_ugc">Widget reaction UGC</option>
                       <option value="widget_shock_hook_ugc">Widget shock-hook UGC</option>
                       <option value="widget_late_period_reaction_hook_ugc">Late-period reaction hook UGC (8s)</option>
-                      <option value="ai_objects_educational_explainer">AI objects educational explainer (~90s)</option>
+                      <option value="ai_objects_educational_explainer">AI objects educational explainer (40-110s)</option>
                       <option value="mixed_media_relatable_pov">Mixed-media relatable POV (3D + real)</option>
                     </select>
                   </div>
@@ -3076,7 +3076,7 @@ export function VideoAgentView({ collectionId }: { collectionId: string }) {
                           : scriptAgentCampaignMode === "mixed_media_relatable_pov"
                             ? 18
                           : scriptAgentCampaignMode === "ai_objects_educational_explainer"
-                            ? 75
+                            ? 40
                             : 30
                       }
                       max={
@@ -3099,7 +3099,7 @@ export function VideoAgentView({ collectionId }: { collectionId: string }) {
                             : scriptAgentCampaignMode === "mixed_media_relatable_pov"
                               ? 18
                             : scriptAgentCampaignMode === "ai_objects_educational_explainer"
-                              ? 75
+                              ? 40
                               : 30;
                         const max =
                           scriptAgentCampaignMode === "widget_late_period_reaction_hook_ugc"

@@ -481,7 +481,7 @@ export async function POST(request: NextRequest) {
         topicBrief,
         preferredVideoType,
         campaignMode,
-        targetDurationSeconds: targetDurationSeconds ?? 75,
+        targetDurationSeconds: plan.targetDurationSeconds,
         reasoningModel,
         ugcCharacterId: ugcCharacter?.id || null,
       },

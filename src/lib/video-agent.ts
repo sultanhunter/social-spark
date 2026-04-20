@@ -618,6 +618,27 @@ function enforceWidgetLatePeriodReactionHookPattern(segments: MotionControlSegme
   ];
 }
 
+const AI_OBJECTS_ANATOMY_RULE =
+  "Object anatomy rule: keep each character coherent to its base object form with object-native articulation only; no human hands, no human legs, and no pasted human body parts.";
+
+function stripAiObjectsLiveActionLanguage(value: string | null | undefined): string {
+  const cleaned = cleanText(value || "");
+  if (!cleaned) return "";
+
+  const withoutLiveAction = cleaned
+    .replace(/\b(authentic\s+)?ugc\b/gi, "")
+    .replace(/\b(selfie|talking[-\s]?head|creator[-\s]?style|live[-\s]?action)\b/gi, "")
+    .replace(/\b(photoreal(?:istic)?|true[-\s]?to[-\s]?life|natural\s+skin(?:\s+texture)?(?:\s+and\s+pores)?)\b/gi, "")
+    .replace(/\b(micro[-\s]?expressions?|handheld(?:\s+smartphone)?\s+camera(?:\s+behavior)?)\b/gi, "")
+    .replace(/\b(realistic\s+fabric\s+physics|natural\s+realism|skin\s+texture)\b/gi, "")
+    .replace(/\b(expressive\s+faces\s+and\s+limbs)\b/gi, "expressive faces")
+    .replace(/\b(young\s+woman|woman|female\s+presenter|human\s+host|person)\b/gi, "anthropomorphic everyday object narrator")
+    .replace(/\s{2,}/g, " ")
+    .trim();
+
+  return cleanText(withoutLiveAction);
+}
+
 function enforceAiObjectsEducationalExplainerPattern(
   segments: MotionControlSegment[],
   appName: string
@@ -644,29 +665,34 @@ function enforceAiObjectsEducationalExplainerPattern(
     if (shots.length === 0) {
       shots.push({
         shotId: "shot1",
-        visual: "High-quality animated living objects with feminine styling explain a practical cycle-health concept with warm and cute expressions.",
+        visual:
+          "High-quality animated everyday object characters explain one practical cycle-health concept with warm expressions and coherent object-first design.",
         narration: "Let us break this down in a simple way.",
         onScreenText: "Simple object explainer",
         editNote: "Keep educational pacing with expressive object acting.",
       });
     }
 
-    const firstShot = shots[0];
-    shots[0] = {
-      ...firstShot,
-      visual: cleanText(
-        `${firstShot.visual} Premium stylized 3D animation: cute anthropomorphic everyday objects with feminine-coded design cues (soft silhouettes, gentle expressions, graceful gestures) explain the concept clearly.`
-      ),
-      editNote: cleanText(
-        `${firstShot.editNote || ""} Keep the look polished, cinematic, educational, and feminine-friendly with gentle humor.`
-      ),
-    };
+    const normalizedShots = shots.map((shot, shotIndex) => {
+      const cleanedVisual = stripAiObjectsLiveActionLanguage(shot.visual);
+      const cleanedEditNote = stripAiObjectsLiveActionLanguage(shot.editNote);
+
+      return {
+        ...shot,
+        visual: cleanText(
+          `${cleanedVisual || "Stylized 3D anthropomorphic everyday object explains the concept with clear, warm visual storytelling."} Premium stylized 3D CGI educational look with expressive face language, material-consistent movement, and studio-grade continuity. ${AI_OBJECTS_ANATOMY_RULE}`
+        ),
+        editNote: cleanText(
+          `${cleanedEditNote || ""} ${shotIndex === 0 ? "Open with clear object character readability and premium animation polish." : "Keep continuity with the same object cast and shape language."} Avoid UGC/live-action realism cues.`
+        ),
+      };
+    });
 
     const shouldInjectAppHook = !appHookInjected && index >= appHookSegmentIndex;
     if (shouldInjectAppHook && normalizedAppName) {
-      const appHookShotIndex = Math.min(1, shots.length - 1);
-      const appHookShot = shots[appHookShotIndex];
-      shots[appHookShotIndex] = {
+      const appHookShotIndex = Math.min(1, normalizedShots.length - 1);
+      const appHookShot = normalizedShots[appHookShotIndex];
+      normalizedShots[appHookShotIndex] = {
         ...appHookShot,
         narration: closeOpenEndedLine(
           cleanText(appHookShot.narration) ||
@@ -685,26 +711,32 @@ function enforceAiObjectsEducationalExplainerPattern(
     const prompts = (segment.multiShotPrompts || []).map((promptItem) => {
       const shouldPreserveType =
         promptItem.generationType === "product_ui_overlay" || promptItem.generationType === "transition_fx";
+
+      const cleanedPrompt = stripAiObjectsLiveActionLanguage(promptItem.prompt);
+      const fallbackPromptBase = stripAiObjectsLiveActionLanguage(promptItem.scene);
       return {
         ...promptItem,
         generationType: shouldPreserveType ? promptItem.generationType : "base_ai_video",
-        prompt: cleanText(
-          `${promptItem.prompt} Premium stylized 3D CGI, cute anthropomorphic everyday objects with feminine styling, expressive faces and limbs, educational storytelling clarity.`
+        prompt: enforceKlingPromptWordLimit(
+          cleanText(
+            `${cleanedPrompt || fallbackPromptBase || "Stylized 3D educational object-character shot"}. Premium stylized 3D CGI educational storytelling with coherent object design and material-aware motion. ${AI_OBJECTS_ANATOMY_RULE} Avoid live-action/UGC realism and human skin detail.`
+          ),
+          77
         ),
       };
     });
 
     const isLastSegment = index === all.length - 1;
+    const cleanedStartFrame = stripAiObjectsLiveActionLanguage(segment.startFramePrompt);
 
     return {
       ...segment,
       startFramePrompt: cleanText(
-        segment.startFramePrompt ||
-          "Premium stylized 3D animated scene: cute feminine-styled living objects begin explaining a practical health concept in a warm educational tone."
+        `${cleanedStartFrame || "Premium stylized 3D animated scene: coherent anthropomorphic everyday objects begin explaining a practical health concept in a warm educational tone."} ${AI_OBJECTS_ANATOMY_RULE}`
       ),
       script: {
         hook: segment.script?.hook || "",
-        shots,
+        shots: normalizedShots,
         cta: isLastSegment
           ? closeOpenEndedLine(
             segment.script?.cta || "Save this explainer for later and share it with someone who needs it."
@@ -984,8 +1016,10 @@ function buildVeo31SegmentPrompt(args: {
   ugcCharacter?: UGCCharacterProfile | null;
 }): string {
   const { segment, styleHint, appName, ugcCharacter } = args;
-  const isAnimatedStyle = /animated|animation|cgi/i.test(styleHint);
-  const isUgcLikeStyle = /ugc|hybrid|vlog|social/i.test(styleHint);
+  const normalizedStyleHint = cleanText(styleHint).toLowerCase();
+  const isAiObjectsStyle = /ai\s*object|anthropomorphic|everyday\s*object|object\s*explainer/.test(normalizedStyleHint);
+  const isAnimatedStyle = isAiObjectsStyle || /animated|animation|cgi/.test(normalizedStyleHint);
+  const isUgcLikeStyle = !isAnimatedStyle && /ugc|hybrid|vlog|social/.test(normalizedStyleHint);
   const durationSeconds = Math.max(2, Math.round(segment.durationSeconds || MAX_SINGLE_VIDEO_CLIP_SECONDS));
   const shots = segment.script?.shots || [];
 
@@ -1032,6 +1066,8 @@ function buildVeo31SegmentPrompt(args: {
 
   const characterLock = ugcCharacter
     ? `Character lock: ${ugcCharacter.characterName}. ${cleanText(ugcCharacter.promptTemplate)}.`
+    : isAiObjectsStyle
+      ? "Character consistency: keep the same recurring object cast identity, proportions, material finish, facial-feature placement, and object-native articulation across all shots. No human hands, no human legs, no human skin rendering."
     : isAnimatedStyle
       ? "Character consistency: keep same animated character silhouette, face shape language, color palette, and costume continuity throughout this segment."
       : "Character consistency: keep same person identity, face geometry, and wardrobe continuity throughout this segment.";
@@ -1042,9 +1078,11 @@ function buildVeo31SegmentPrompt(args: {
   return cleanText(
     [
       `Veo 3.1 single prompt for segment ${segment.segmentId} (${segment.timecode}). Generate one continuous ${durationSeconds}-second vertical 9:16 ${styleHint} video clip.`,
-      isAnimatedStyle
-        ? "Quality target: high-end CGI animation look, stylized but premium 3D rendering, clean topology, stable shading, smooth deformation, expressive eyes and lips, coherent lighting, no uncanny artifacts, no texture flicker, no muddy frames."
-        : "Quality target: photorealistic, true-to-life UGC realism, natural skin texture and pores, realistic fabric physics, authentic handheld smartphone camera behavior, physically plausible lighting, no waxy skin, no plastic look, no AI artifacts or uncanny facial motion.",
+      isAiObjectsStyle
+        ? "Quality target: premium stylized 3D CGI object-animation, studio-grade shading and materials, coherent object-first character design, smooth deformation-free motion, no human skin realism, and no live-action UGC look."
+        : isAnimatedStyle
+          ? "Quality target: high-end CGI animation look, stylized but premium 3D rendering, clean topology, stable shading, smooth deformation, expressive eyes and lips, coherent lighting, no uncanny artifacts, no texture flicker, no muddy frames."
+          : "Quality target: photorealistic, true-to-life UGC realism, natural skin texture and pores, realistic fabric physics, authentic handheld smartphone camera behavior, physically plausible lighting, no waxy skin, no plastic look, no AI artifacts or uncanny facial motion.",
       `Environment continuity: keep location, camera axis, lens feel, and light direction stable across all shots in this segment.`,
       characterLock,
       `App integration: if app is referenced, show practical phone interaction with ${appName}, subtle and natural to the scene.`,
@@ -2761,7 +2799,7 @@ export async function buildVideoScriptIdeationPlan({
       : resolvedCampaignMode === "mixed_media_relatable_pov"
         ? clamp(Math.round(targetDurationSeconds), 18, 45)
       : resolvedCampaignMode === "ai_objects_educational_explainer"
-        ? clamp(Math.round(targetDurationSeconds), 75, 110)
+        ? clamp(Math.round(targetDurationSeconds), 40, 110)
       : resolvedCampaignMode === "widget_shock_hook_ugc"
         ? clamp(Math.round(targetDurationSeconds), 30, 90)
       : clamp(Math.round(targetDurationSeconds), 30, 180);
@@ -2771,7 +2809,7 @@ export async function buildVideoScriptIdeationPlan({
       : resolvedCampaignMode === "mixed_media_relatable_pov"
         ? Math.min(20, Math.max(6, Math.ceil(safeDurationSeconds / 5)))
       : resolvedCampaignMode === "ai_objects_educational_explainer"
-        ? Math.min(64, Math.max(12, Math.ceil(safeDurationSeconds / 6)))
+        ? Math.min(64, Math.max(8, Math.ceil(safeDurationSeconds / 6)))
       : Math.min(64, Math.max(8, Math.ceil(safeDurationSeconds / 4)));
   const normalizedTopicBrief = cleanText(topicBrief);
   const hasTopicBrief = normalizedTopicBrief.length > 0;
@@ -2845,11 +2883,14 @@ CAMPAIGN MODE: ai_objects_educational_explainer
 - Build a high-quality AI animation educational explainer around 90 seconds.
 - Visual language: cute anthropomorphic everyday objects (living objects) that explain concepts clearly.
 - Keep look premium and cinematic: polished stylized 3D CGI, expressive faces, smooth motion, clean lighting.
+- Character coherence is mandatory: each character must visually read as its base object first (material, silhouette, proportions) with object-native articulation.
+- Do not graft human anatomy onto objects: no human hands, no human legs, no realistic human skin/body parts on object characters.
 - Object casting direction: keep characters feminine-coded and women-audience friendly (soft shapes, warm expressions, graceful motion, tasteful feminine styling).
 - Narrative style: object characters teach one practical period/pregnancy or worship-support concept in simple, memorable metaphors.
 - Keep education first: clear facts, practical steps, warm and friendly tone.
 - Include one natural app hook moment (subtle, useful, non-ad) where the explainer references checking app status for practical decision support.
 - Do not make hard sell claims; app mention should feel like a helpful tool inside the explanation.
+- Avoid UGC/live-action realism vocabulary in script visuals and prompts; keep this mode fully stylized CGI.
 - Keep this mode strictly ai_animation.
 `
     : resolvedCampaignMode === "mixed_media_relatable_pov"
@@ -3117,6 +3158,21 @@ Return strict JSON only:
         };
       });
     }
+
+    beatsForPlan = beatsForPlan.map((beat) => {
+      const cleanedVisual = stripAiObjectsLiveActionLanguage(beat.visual);
+      const cleanedEditNote = stripAiObjectsLiveActionLanguage(beat.editNote);
+
+      return {
+        ...beat,
+        visual: cleanText(
+          `${cleanedVisual || "Stylized 3D anthropomorphic object-character educational beat."} ${AI_OBJECTS_ANATOMY_RULE}`
+        ),
+        editNote: cleanText(
+          `${cleanedEditNote || ""} Keep this beat fully stylized CGI with object-first character coherence; avoid UGC/live-action realism cues.`
+        ),
+      };
+    });
   }
 
   const modelSegmentsRaw = Array.isArray(row.motionControlSegments) ? row.motionControlSegments : [];
@@ -3244,7 +3300,7 @@ Return strict JSON only:
       : transitionReadySegments;
   const scriptAgentStyleHint =
     resolvedCampaignMode === "ai_objects_educational_explainer"
-      ? "premium stylized 3D educational explainer with cute feminine-styled anthropomorphic everyday objects"
+      ? "premium stylized 3D CGI animated educational explainer with cute feminine-styled anthropomorphic everyday objects"
       : resolvedCampaignMode === "mixed_media_relatable_pov"
         ? "mixed-media stylized 3D chibi avatar composited into photoreal real-world scenes, relatable comedic POV pacing"
       : resolvedVideoType === "ugc"
