@@ -64,6 +64,7 @@ type PlanShape = {
   title?: string;
   strategy?: string;
   objective?: string;
+  campaignMode?: string;
   klingMotionControlOnly?: boolean;
   script?: {
     hook?: string;
@@ -212,6 +213,44 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
 }
 
+const WARDROBE_COLORWAYS = [
+  "deep teal hijab, warm sand abaya, soft ivory inner layer",
+  "dusty rose hijab, mocha brown abaya, cream inner layer",
+  "forest olive hijab, stone beige abaya, muted oatmeal inner layer",
+  "slate blue hijab, camel tan abaya, off-white inner layer",
+  "plum mauve hijab, cocoa taupe abaya, light almond inner layer",
+  "terracotta hijab, charcoal abaya, warm beige inner layer",
+  "sage green hijab, walnut brown abaya, ivory inner layer",
+  "midnight navy hijab, mushroom taupe abaya, soft cream inner layer",
+];
+
+function hashToIndex(seed: string, size: number): number {
+  let hash = 0;
+  for (let i = 0; i < seed.length; i += 1) {
+    hash = (hash * 31 + seed.charCodeAt(i)) >>> 0;
+  }
+  return size > 0 ? hash % size : 0;
+}
+
+function pickWardrobeColorway(seed: string): string {
+  return WARDROBE_COLORWAYS[hashToIndex(seed, WARDROBE_COLORWAYS.length)] || WARDROBE_COLORWAYS[0];
+}
+
+function stripColorTerms(value: string): string {
+  const cleaned = cleanText(value);
+  if (!cleaned) return "";
+
+  return cleanText(
+    cleaned
+      .replace(
+        /\b(black|white|red|blue|green|yellow|orange|purple|pink|brown|beige|tan|gray|grey|maroon|navy|teal|olive|gold|silver|cream|burgundy|lavender|peach|mustard|rust|charcoal|turquoise|indigo|khaki|stone|camel|sage|plum|mauve|terracotta|mocha|oatmeal|ivory|almond|midnight)\b/gi,
+        " "
+      )
+      .replace(/\b(light|dark|pastel|muted|vibrant|bright|colorful|monochrome)\b/gi, " ")
+      .replace(/\s{2,}/g, " ")
+  );
+}
+
 function dataUrlToBuffer(dataUrl: string): { mimeType: string; buffer: Buffer } {
   const match = dataUrl.match(/^data:([^;]+);base64,(.+)$/);
   if (!match) {
@@ -334,12 +373,19 @@ function animatedLightingInstruction(args: { shouldEnforce: boolean; timeOfDay: 
   return `${baseLock} ${timeRule}`;
 }
 
+function isUgcShockingFactReactionMode(plan: PlanShape): boolean {
+  const mode = cleanText(plan.campaignMode).toLowerCase();
+  return mode === "ugc_shocking_fact_reaction" || mode === "ugc-shocking-fact-reaction";
+}
+
 function buildStartFramePrompt(args: {
   appName: string;
   formatType: string;
   video: VideoRow;
   plan: PlanShape;
   character: CharacterRow | null;
+  characterLockDescriptorBase?: string;
+  wardrobeColorwayLock?: string;
   segmentIndex?: number;
   previousSegmentStartFrameUrl?: string | null;
   segmentCharacterNames?: string[];
@@ -350,10 +396,22 @@ function buildStartFramePrompt(args: {
     video,
     plan,
     character,
+    characterLockDescriptorBase,
+    wardrobeColorwayLock,
     segmentIndex,
     previousSegmentStartFrameUrl,
     segmentCharacterNames,
   } = args;
+  const wardrobeVariationInstruction = wardrobeColorwayLock
+    ? `Wardrobe style rule for this full script: keep the SAME hijab type and SAME outfit silhouette as the selected character reference, but use this recolored palette: ${wardrobeColorwayLock}. Do not reuse the original clothing colors from source/reference images.`
+    : "";
+  const wardrobeSegmentContinuityInstruction =
+    wardrobeColorwayLock && typeof segmentIndex === "number" && segmentIndex > 0
+      ? "Across segments, keep exactly the same hijab style, outfit structure, and colorway as earlier generated segments."
+      : "";
+  const positiveShockExpressionInstruction = isUgcShockingFactReactionMode(plan)
+    ? "Expression lock for this campaign: surprised in a cool-discovery way (intrigued + lightly excited + relatable), not fearful. Keep eyes natural size and realistic; avoid bulging eyes, panic face, anxious brows, or distressed worry expression."
+    : "";
   const globalWorshipPoseInstruction = worshipGestureInstruction(
     hasWorshipGestureCue(
       video.title,
@@ -409,7 +467,7 @@ function buildStartFramePrompt(args: {
 
   if (plan.klingMotionControlOnly) {
     const characterInstruction = character
-      ? `Use the selected recurring character identity (${character.character_name}) while preserving source frame-zero composition and environment.`
+      ? `Use the selected recurring character identity (${character.character_name}) while preserving source frame-zero composition and environment. Character descriptor: ${cleanText(characterLockDescriptorBase) || "Keep same face identity and modest wardrobe family."}`
       : "No fixed character lock required unless script clearly needs a person.";
 
     return [
@@ -421,6 +479,8 @@ function buildStartFramePrompt(args: {
       `Format type: ${formatType}.`,
       `Source video title/context: ${video.title || video.description || "N/A"}.`,
       characterInstruction,
+      wardrobeVariationInstruction,
+      positiveShockExpressionInstruction,
       "If a woman appears, wardrobe must include long sleeves with both arms fully covered to the wrists.",
       globalWorshipPoseInstruction,
       globalQuranClosedInstruction,
@@ -540,7 +600,7 @@ function buildStartFramePrompt(args: {
         ? `Segment cast references: ${segmentCharacterNames.join(", ")}. Use attached segment-specific character reference image(s) as identity anchors for whoever appears in frame zero.`
         : "";
     const characterInstruction = character
-      ? `Use the selected recurring character identity (${character.character_name}). Character lock descriptor: ${cleanText(character.prompt_template) || "Keep same face, styling, and wardrobe family in every segment."}`
+      ? `Use the selected recurring character identity (${character.character_name}). Character lock descriptor: ${cleanText(characterLockDescriptorBase) || "Keep same face, styling, and wardrobe family in every segment."}`
       : "No fixed character lock required unless script clearly needs a person.";
 
     return [
@@ -563,6 +623,9 @@ function buildStartFramePrompt(args: {
       scriptCharacterReferenceInstruction,
       conflictResolutionInstruction,
       characterInstruction,
+      wardrobeVariationInstruction,
+      wardrobeSegmentContinuityInstruction,
+      positiveShockExpressionInstruction,
       `Vertical 9:16 composition at 1080x1920 output framing.`,
       `Photorealistic ultra-detailed 4K-quality look (high texture fidelity, clean dynamic range, realistic skin and fabric detail).`,
       `If a person appears, enforce modest, non-sexual framing: neutral posture, respectful body language, and modest wardrobe.`,
@@ -606,7 +669,7 @@ function buildStartFramePrompt(args: {
   );
 
   const characterInstruction = character
-    ? `Use the selected recurring character identity (${character.character_name}). Keep face identity and styling consistent.`
+    ? `Use the selected recurring character identity (${character.character_name}). Character descriptor: ${cleanText(characterLockDescriptorBase) || "Keep face identity and styling consistent."}`
     : "No fixed character lock required unless script clearly needs a person.";
 
   return [
@@ -622,6 +685,8 @@ function buildStartFramePrompt(args: {
     `Shot 1 cue (start-state only): ${firstScenePrompt || "N/A"}.`,
     `Render the first instant before any major action begins. If script later includes jump/dive/run/fall, do NOT depict that later action in this frame.`,
     characterInstruction,
+    wardrobeVariationInstruction,
+    positiveShockExpressionInstruction,
     `Vertical 9:16 composition at 1080x1920 output framing.`,
     `Photorealistic ultra-detailed 4K-quality look (high texture fidelity, clean dynamic range, realistic skin and fabric detail), while keeping output composition suitable for 1080x1920 video start frame usage.`,
     `If a person appears, enforce modest, non-sexual framing: neutral posture, respectful body language, and modest wardrobe with no tight/transparent clothing.`,
@@ -721,6 +786,16 @@ export async function POST(request: NextRequest) {
       }
     }
 
+    const characterLockDescriptorBase = character
+      ? cleanText(stripColorTerms(character.prompt_template)) || cleanText(character.prompt_template)
+      : "";
+    const wardrobeColorwayLock = character
+      ? pickWardrobeColorway(`${planRow.id}:${videoId}:${character.id}`)
+      : "";
+    const positiveShockExpressionLock = isUgcShockingFactReactionMode(plan)
+      ? "Expression lock: surprised-in-a-good-way, intrigued, lightly excited, and relatable. Avoid fearful or worried look, avoid bulging eyes, avoid panic face, and avoid distressed expression."
+      : "";
+
     const hasShotGroups = Array.isArray(plan.motionControlSegments) && plan.motionControlSegments.length > 0;
 
     let effectiveSegmentIndex: number | undefined;
@@ -749,6 +824,8 @@ export async function POST(request: NextRequest) {
       video,
       plan,
       character,
+      characterLockDescriptorBase,
+      wardrobeColorwayLock,
       segmentIndex: effectiveSegmentIndex,
       previousSegmentStartFrameUrl,
       segmentCharacterNames: segmentScriptCharacterReferences.names,
@@ -825,8 +902,8 @@ export async function POST(request: NextRequest) {
         ])
       ).slice(0, 4),
       characterLockDescriptor:
-        character && character.prompt_template
-          ? `${character.character_name}. ${character.prompt_template}`
+        character
+          ? `${character.character_name}. ${characterLockDescriptorBase || "Keep same face identity and same hijab/outfit structure."}. Wardrobe recolor lock for this full script: ${wardrobeColorwayLock}. Keep hijab type and outfit silhouette unchanged, but do not use the original reference-image clothing colors. Apply this same colorway across all segments. ${positiveShockExpressionLock}`
           : segmentScriptCharacterReferences.names.length > 0
             ? `Maintain consistent identity for segment cast: ${segmentScriptCharacterReferences.names.join(", ")}.`
           : undefined,

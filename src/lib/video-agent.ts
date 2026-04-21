@@ -562,14 +562,14 @@ function enforceUgcShockingFactReactionPattern(segments: MotionControlSegment[],
   const reactionVisualBase = cleanText(
     firstShot?.visual ||
     firstSegment?.startFramePrompt ||
-    "Medium close-up UGC selfie indoors with clear shocked expression and natural room lighting."
+    "Medium close-up UGC selfie indoors with a surprised-but-happy discovery reaction, natural room lighting, and playful curiosity."
   );
 
   const reactionShotOneVisual = cleanText(
-    `${reactionVisualBase} Keep expression strong, silent, and emotionally clear for the opening hook.`
+    `${reactionVisualBase} Keep expression as surprised + intrigued + slightly excited, like she discovered something cool. Keep eyes natural, not bulging, and avoid fear or panic.`
   );
   const reactionShotTwoVisual = cleanText(
-    `${secondShot?.visual || reactionVisualBase} Continue same framing and lighting with shock-to-realization expression shift.`
+    `${secondShot?.visual || reactionVisualBase} Continue same framing and lighting with shocked-to-impressed micro-expression shift and subtle half-smile.`
   );
 
   return [
@@ -587,7 +587,7 @@ function enforceUgcShockingFactReactionPattern(segments: MotionControlSegment[],
             narration: "",
             onScreenText: hookTextOne,
             editNote:
-              "0-4 seconds only. Pure shocked reaction hook. No spoken dialogue. Text overlay is added in post.",
+              "0-4 seconds only. Surprised positive-reaction hook (not worried/scared). No spoken dialogue. Text overlay is added in post.",
           },
           {
             shotId: "shot2",
@@ -595,7 +595,7 @@ function enforceUgcShockingFactReactionPattern(segments: MotionControlSegment[],
             narration: "",
             onScreenText: hookTextTwo,
             editNote: cleanText(
-              `4-8 seconds only. Continue reaction with subtle movement. No spoken dialogue. Text overlay is added in post. End with a brief hold so editor can append full-screen ${appName} app recording.`
+              `4-8 seconds only. Continue surprised-to-impressed reaction with subtle movement and gentle positive energy. No spoken dialogue. Text overlay is added in post. End with a brief hold so editor can append full-screen ${appName} app recording.`
             ),
           },
         ],
@@ -607,7 +607,7 @@ function enforceUgcShockingFactReactionPattern(segments: MotionControlSegment[],
           generationType: "ugc_video",
           scene: "Shocking fact reaction hook",
           prompt:
-            "Medium close-up selfie indoors, strong shocked facial reaction, subtle hand movement near face, realistic UGC smartphone framing, natural room lighting, authentic micro-expression changes. No dialogue: reaction only.",
+            "Medium close-up selfie indoors, surprised and impressed facial reaction as if she discovered a cool fact, playful curiosity, subtle hand movement near face, realistic UGC smartphone framing, natural room lighting, authentic micro-expression changes. Keep eyes natural size and relaxed; avoid horror, panic, fear, or worried look. No dialogue: reaction only.",
           shotDuration: "4s",
         },
         {
@@ -615,7 +615,7 @@ function enforceUgcShockingFactReactionPattern(segments: MotionControlSegment[],
           generationType: "ugc_video",
           scene: "Reaction continuation",
           prompt:
-            "Same framing and lighting, continue shock-to-realization reaction with small head movement and natural breathing, maintain authentic UGC realism and stable camera. No dialogue: reaction only.",
+            "Same framing and lighting, continue surprised-to-impressed reaction with a tiny smile and small head movement, natural breathing, authentic UGC realism, stable camera. Keep expression upbeat and relatable; avoid anxious or distressed emotion. No dialogue: reaction only.",
           shotDuration: "4s",
         },
       ],
@@ -1251,8 +1251,10 @@ function buildUgcShockingFactReactionVeoPrompt(args: {
       [
         `Veo 3.1 prompt for segment ${segment.segmentId}. Generate one continuous ${durationSeconds}-second vertical 9:16 UGC reaction clip.`,
         "This first segment is reaction-hook only. No spoken dialogue, no app explanation, no lip-sync.",
-        `0-4 seconds: shocked facial reaction only with subtle hand movement. Overlay reference for post edit: \"${titleOne}\".`,
-        `4-8 seconds: continue shocked-to-realization reaction in same framing. Overlay reference for post edit: \"${titleTwo}\".`,
+        "Expression direction: shocked in a cool-discovery way (surprised + intrigued + pleased), not worried or scared.",
+        "Face direction: keep eyes natural size and realistic micro-expressions; avoid bulging eyes, panic face, or horror look.",
+        `0-4 seconds: surprised-and-impressed reaction only with subtle hand movement. Overlay reference for post edit: \"${titleOne}\".`,
+        `4-8 seconds: continue surprised-to-impressed reaction in same framing with a slight half-smile. Overlay reference for post edit: \"${titleTwo}\".`,
         "Keep camera mostly static selfie framing, natural home realism, and consistent lighting.",
         "Do not render text overlays, captions, subtitles, logos, or watermarks in the generated video.",
       ].join(" ")
@@ -1272,6 +1274,8 @@ function buildUgcShockingFactReactionVeoPrompt(args: {
       "This campaign stays reaction-only. No spoken dialogue, no lip-sync, and no in-video app explanation.",
       `Visual focus: ${visualFocus}`,
       spokenLines ? `Ignore spoken lines and keep this silent: ${spokenLines}` : "No spoken lines. Reaction-only visual performance.",
+      "Performance emotion: surprised + curious + lightly excited, never fearful or worried.",
+      "Avoid exaggerated expressions (no bulging eyes, no panic face, no distressed look).",
       "Finish with a small visual hold so editor can append a full-screen app screen recording in post.",
       "Natural UGC realism, clear facial performance, clean audio focus.",
       "Do not render text overlays, captions, subtitles, logos, or watermarks in the generated video.",
@@ -3018,6 +3022,8 @@ CAMPAIGN MODE: ugc_shocking_fact_reaction
 - Duration is fixed at exactly 8 seconds.
 - Entire clip is reaction-only: no spoken dialogue, no lip-sync, no in-video app explanation.
 - Keep this output designed for post-edit workflow where text overlays are added manually later.
+- Expression style is critical: surprised + intrigued + happy discovery energy (like "wait this is actually cool"), not fear/worry/panic.
+- Avoid exaggerated horror expressions: no unnaturally wide bulging eyes, no distressed brows, no anxious panic face.
 - Split the clip into two reaction title moments:
   * 0-4s: shocked reaction only for title/hook text to be added in post.
   * 4-8s: reaction continuation for second line/fact text to be added in post.
@@ -3281,7 +3287,7 @@ Return strict JSON only:
     cleanText(normalizedBeats[1]?.onScreenText) ||
     "I had no idea this could happen";
   const forcedShockFactVisual =
-    "Medium close-up UGC selfie indoors, visibly shocked expression with subtle hand movement, natural room lighting.";
+    "Medium close-up UGC selfie indoors, surprised and impressed expression with playful curiosity, subtle hand movement, natural room lighting. Avoid worried or panic look.";
 
   const baseHookForPlan = isLatePeriodReactionHookMode
     ? forcedLatePeriodHookOne
@@ -3312,14 +3318,14 @@ Return strict JSON only:
           visual: forcedShockFactVisual,
           narration: "",
           onScreenText: forcedShockFactHookOne,
-          editNote: "Reaction-only hook. No dialogue. Overlay text added in post.",
+          editNote: "Reaction-only hook with surprised + happy discovery energy (not fear/worry). No dialogue. Overlay text added in post.",
         },
         {
           timecode: "0:04-0:08",
-          visual: "Same framing and lighting, continue shock-to-realization expression with subtle head movement.",
+          visual: "Same framing and lighting, continue surprised-to-impressed expression with subtle head movement and tiny half-smile.",
           narration: "",
           onScreenText: forcedShockFactHookTwo,
-          editNote: "Reaction-only continuation. No dialogue. Overlay text added in post.",
+          editNote: "Reaction-only continuation with upbeat micro-expression and natural eyes (no bulging-eye look). No dialogue. Overlay text added in post.",
         },
       ]
     : beats;
