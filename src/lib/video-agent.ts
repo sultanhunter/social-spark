@@ -544,110 +544,83 @@ function enforceWidgetShockHookSeriesPattern(segments: MotionControlSegment[], a
 }
 
 function enforceUgcShockingFactReactionPattern(segments: MotionControlSegment[], appName: string): MotionControlSegment[] {
-  return segments.map((segment, index, all) => {
-    let shots = [...(segment.script?.shots || [])];
-    if (shots.length === 0) {
-      shots.push({
-        shotId: "shot1",
-        visual: "UGC selfie reaction indoors with a clearly surprised face and phone in hand.",
-        narration: "",
-        onScreenText: "WAIT... you can bleed and still be pregnant?!",
-        editNote: "Open with a strong reaction expression before the educational reveal.",
-      });
-    }
+  const firstSegment = segments[0];
+  const firstShot = firstSegment?.script?.shots?.[0];
+  const secondShot = firstSegment?.script?.shots?.[1];
 
-    const firstShot = shots[0];
-    const secondShot = shots[1] || null;
-    const aiGeneratedHookTitleOne = closeOpenEndedLine(
-      cleanText(firstShot.onScreenText) ||
-      cleanText(segment.script?.hook) ||
-      "WAIT... you can bleed and still be pregnant?!"
-    );
-    const aiGeneratedHookTitleTwo = closeOpenEndedLine(
-      cleanText(secondShot?.onScreenText) ||
-      cleanText(secondShot?.narration) ||
-      "Sometimes it is implantation bleeding, not your usual period"
-    );
+  const hookTextOne = closeOpenEndedLine(
+    cleanText(firstShot?.onScreenText) ||
+    cleanText(firstSegment?.script?.hook) ||
+    "WAIT... I just learned this shocking fact"
+  );
+  const hookTextTwo = closeOpenEndedLine(
+    cleanText(secondShot?.onScreenText) ||
+    cleanText(secondShot?.narration) ||
+    "I had no idea this could happen"
+  );
 
-    if (index === 0) {
-      shots = [
-        {
-          shotId: "shot1",
-          visual: cleanText(
-            `${firstShot.visual || "UGC selfie reaction shot"} Shocked reaction only. Keep expression strong, silent, and emotionally clear.`
-          ),
-          narration: "",
-          onScreenText: aiGeneratedHookTitleOne,
-          editNote:
-            "0-4 seconds only: reaction-only hook. No spoken dialogue. Title 1 overlay is added in post.",
-        },
-        {
-          shotId: "shot2",
-          visual: cleanText(
-            `${secondShot?.visual || firstShot.visual || "Same framing continuation"} Continue shock-to-realization expression with subtle head movement.`
-          ),
-          narration: "",
-          onScreenText: aiGeneratedHookTitleTwo,
-          editNote:
-            "4-8 seconds only: reaction-only continuation. No spoken dialogue. Title 2 overlay is added in post.",
-        },
-      ];
-    } else {
-      shots[0] = {
-        ...firstShot,
-        visual: cleanText(
-          `${firstShot.visual} Character now explains one surprising but trustworthy fact in simple language.`
-        ),
-        narration: closeOpenEndedLine(
-          firstShot.narration ||
-          "Quick fact: light bleeding can happen in early pregnancy, so do not assume every bleed is a regular period."
-        ),
-        onScreenText: closeOpenEndedLine(
-          cleanText(firstShot.onScreenText) ||
-          "surprising fact women should know"
-        ),
-        editNote: cleanText(
-          `${firstShot.editNote || ""} Keep delivery relatable, calm, and practical. Avoid fear-based language or diagnosis claims.`
-        ),
-      };
-    }
+  const reactionVisualBase = cleanText(
+    firstShot?.visual ||
+    firstSegment?.startFramePrompt ||
+    "Medium close-up UGC selfie indoors with clear shocked expression and natural room lighting."
+  );
 
-    const prompts = (segment.multiShotPrompts || []).map((promptItem) => {
-      if (promptItem.generationType === "product_ui_overlay") return promptItem;
-      return {
-        ...promptItem,
-        generationType: "ugc_video" as const,
-      };
-    });
+  const reactionShotOneVisual = cleanText(
+    `${reactionVisualBase} Keep expression strong, silent, and emotionally clear for the opening hook.`
+  );
+  const reactionShotTwoVisual = cleanText(
+    `${secondShot?.visual || reactionVisualBase} Continue same framing and lighting with shock-to-realization expression shift.`
+  );
 
-    const isLastSegment = index === all.length - 1;
-    const lastShotIndex = shots.length - 1;
-    const lastShot = shots[lastShotIndex];
-    shots[lastShotIndex] = {
-      ...lastShot,
-      narration: closeOpenEndedLine(lastShot.narration),
-      onScreenText: closeOpenEndedLine(lastShot.onScreenText),
-      editNote: cleanText(
-        `${lastShot.editNote || ""} End with a 0.5-1s visual hold. In final edit, append full-screen ${appName} app screen recording after video ends.`
-      ),
-    };
-
-    return {
-      ...segment,
-      startFramePrompt: cleanText(
-        segment.startFramePrompt ||
-        "UGC shocked reaction opening frame in natural home lighting with phone visible, then transition into quick factual explanation."
-      ),
+  return [
+    {
+      segmentId: 1,
+      timecode: "0:00-0:08",
+      durationSeconds: 8,
+      startFramePrompt: reactionVisualBase,
       script: {
-        hook: segment.script?.hook || "",
-        shots,
-        cta: isLastSegment
-          ? closeOpenEndedLine(segment.script?.cta || "Save this and share with someone who needs this fact today.")
-          : closeOpenEndedLine(segment.script?.cta || ""),
+        hook: hookTextOne,
+        shots: [
+          {
+            shotId: "shot1",
+            visual: reactionShotOneVisual,
+            narration: "",
+            onScreenText: hookTextOne,
+            editNote:
+              "0-4 seconds only. Pure shocked reaction hook. No spoken dialogue. Text overlay is added in post.",
+          },
+          {
+            shotId: "shot2",
+            visual: reactionShotTwoVisual,
+            narration: "",
+            onScreenText: hookTextTwo,
+            editNote: cleanText(
+              `4-8 seconds only. Continue reaction with subtle movement. No spoken dialogue. Text overlay is added in post. End with a brief hold so editor can append full-screen ${appName} app recording.`
+            ),
+          },
+        ],
+        cta: "",
       },
-      multiShotPrompts: prompts,
-    };
-  });
+      multiShotPrompts: [
+        {
+          shotId: "group1_shot1",
+          generationType: "ugc_video",
+          scene: "Shocking fact reaction hook",
+          prompt:
+            "Medium close-up selfie indoors, strong shocked facial reaction, subtle hand movement near face, realistic UGC smartphone framing, natural room lighting, authentic micro-expression changes. No dialogue: reaction only.",
+          shotDuration: "4s",
+        },
+        {
+          shotId: "group1_shot2",
+          generationType: "ugc_video",
+          scene: "Reaction continuation",
+          prompt:
+            "Same framing and lighting, continue shock-to-realization reaction with small head movement and natural breathing, maintain authentic UGC realism and stable camera. No dialogue: reaction only.",
+          shotDuration: "4s",
+        },
+      ],
+    },
+  ];
 }
 
 function enforceWidgetLatePeriodReactionHookPattern(segments: MotionControlSegment[]): MotionControlSegment[] {
@@ -1263,9 +1236,8 @@ function buildWidgetShockHookCompactVeoPrompt(args: {
 function buildUgcShockingFactReactionVeoPrompt(args: {
   segment: MotionControlSegment;
   segmentIndex: number;
-  appName: string;
 }): string {
-  const { segment, segmentIndex, appName } = args;
+  const { segment, segmentIndex } = args;
   const durationSeconds = Math.max(2, Math.round(segment.durationSeconds || MAX_SINGLE_VIDEO_CLIP_SECONDS));
   const shots = segment.script?.shots || [];
 
@@ -1297,11 +1269,10 @@ function buildUgcShockingFactReactionVeoPrompt(args: {
   return cleanText(
     [
       `Veo 3.1 prompt for segment ${segment.segmentId}. Generate one continuous ${durationSeconds}-second vertical 9:16 UGC clip.`,
-      "From this segment onward, character explains one surprising period, pregnancy, or Islamic cycle-related fact in simple and trustworthy language.",
+      "This campaign stays reaction-only. No spoken dialogue, no lip-sync, and no in-video app explanation.",
       `Visual focus: ${visualFocus}`,
-      spokenLines ? `Spoken lines: ${spokenLines}` : "Spoken line: quick fact explanation in a calm, relatable tone.",
-      `Keep one subtle practical app mention (${appName}) without salesy delivery.`,
-      "Finish with a small visual hold so editor can append a full-screen app screen recording after this generated clip.",
+      spokenLines ? `Ignore spoken lines and keep this silent: ${spokenLines}` : "No spoken lines. Reaction-only visual performance.",
+      "Finish with a small visual hold so editor can append a full-screen app screen recording in post.",
       "Natural UGC realism, clear facial performance, clean audio focus.",
       "Do not render text overlays, captions, subtitles, logos, or watermarks in the generated video.",
     ].join(" ")
@@ -2972,7 +2943,7 @@ export async function buildVideoScriptIdeationPlan({
     : resolvedCampaignMode === "widget_late_period_reaction_hook_ugc"
         ? 8
       : resolvedCampaignMode === "ugc_shocking_fact_reaction"
-        ? clamp(Math.round(targetDurationSeconds), 24, 90)
+        ? 8
       : resolvedCampaignMode === "mixed_media_relatable_pov"
         ? clamp(Math.round(targetDurationSeconds), 18, 45)
       : resolvedCampaignMode === "ai_objects_educational_explainer"
@@ -2981,7 +2952,8 @@ export async function buildVideoScriptIdeationPlan({
         ? clamp(Math.round(targetDurationSeconds), 30, 90)
       : clamp(Math.round(targetDurationSeconds), 30, 180);
   const minBeatCount =
-    resolvedCampaignMode === "widget_late_period_reaction_hook_ugc"
+    resolvedCampaignMode === "widget_late_period_reaction_hook_ugc" ||
+    resolvedCampaignMode === "ugc_shocking_fact_reaction"
       ? 2
       : resolvedCampaignMode === "mixed_media_relatable_pov"
         ? Math.min(20, Math.max(6, Math.ceil(safeDurationSeconds / 5)))
@@ -3042,17 +3014,15 @@ CAMPAIGN MODE: widget_shock_hook_ugc
       : resolvedCampaignMode === "ugc_shocking_fact_reaction"
         ? `
 CAMPAIGN MODE: ugc_shocking_fact_reaction
-- Build short, high-retention UGC shocking-reaction videos driven by one surprising fact.
-- Topic must stay in this niche: period, pregnancy, or Islamic period/pregnancy guidance for Muslim women.
-- Open with a visible shocked reaction in the first second.
-- First 8 seconds must be reaction-only and split into two 4-second title moments (no spoken dialogue).
-- Title moment 1 (0-4s): shocking question/claim hook (AI-generated).
-- Title moment 2 (4-8s): quick fact reveal line (AI-generated).
-- After 8 seconds, character explains the fact in simple, trustworthy language.
-- Facts must be practical and careful (avoid diagnosis claims, absolutist wording, or fear-based language).
-- Keep wording natural and relatable, not lecture-heavy.
-- Include one subtle app utility mention as a practical support moment (not ad-like).
-- End with a short visual hold so editor can append full-screen app screen recording after the generated video.
+- Build one 8-second hook-only UGC reaction clip around a shocking period, pregnancy, or Islamic cycle-related fact.
+- Duration is fixed at exactly 8 seconds.
+- Entire clip is reaction-only: no spoken dialogue, no lip-sync, no in-video app explanation.
+- Keep this output designed for post-edit workflow where text overlays are added manually later.
+- Split the clip into two reaction title moments:
+  * 0-4s: shocked reaction only for title/hook text to be added in post.
+  * 4-8s: reaction continuation for second line/fact text to be added in post.
+- Keep framing simple (selfie or medium close-up), natural lighting, and clear facial expression changes.
+- End with a tiny visual hold so editor can append full-screen app screen recording after this generated clip.
 - Keep this mode strictly UGC (not animation).
 `
       : resolvedCampaignMode === "widget_late_period_reaction_hook_ugc"
@@ -3297,13 +3267,27 @@ Return strict JSON only:
   );
 
   const isLatePeriodReactionHookMode = resolvedCampaignMode === "widget_late_period_reaction_hook_ugc";
+  const isUgcShockingFactReactionMode = resolvedCampaignMode === "ugc_shocking_fact_reaction";
   const isAiObjectsEducationalMode = resolvedCampaignMode === "ai_objects_educational_explainer";
   const forcedLatePeriodHookOne = "is everyone's period late in march?";
   const forcedLatePeriodHookTwo = "raise your hand if it's march and your period still hasn't shown up";
   const forcedLatePeriodVisual =
     "Medium close-up of a young woman indoors, thinking pose, then gentle head shake with slight disappointment.";
+  const forcedShockFactHookOne =
+    cleanText(normalizedBeats[0]?.onScreenText) ||
+    cleanText(hook) ||
+    "WAIT... I just learned this shocking fact";
+  const forcedShockFactHookTwo =
+    cleanText(normalizedBeats[1]?.onScreenText) ||
+    "I had no idea this could happen";
+  const forcedShockFactVisual =
+    "Medium close-up UGC selfie indoors, visibly shocked expression with subtle hand movement, natural room lighting.";
 
-  const baseHookForPlan = isLatePeriodReactionHookMode ? forcedLatePeriodHookOne : hook;
+  const baseHookForPlan = isLatePeriodReactionHookMode
+    ? forcedLatePeriodHookOne
+    : isUgcShockingFactReactionMode
+      ? forcedShockFactHookOne
+      : hook;
   const baseBeatsForPlan = isLatePeriodReactionHookMode
     ? [
       {
@@ -3321,8 +3305,25 @@ Return strict JSON only:
         editNote: "Reaction-only continuation. No dialogue. Overlay text added in post.",
       },
     ]
+    : isUgcShockingFactReactionMode
+      ? [
+        {
+          timecode: "0:00-0:04",
+          visual: forcedShockFactVisual,
+          narration: "",
+          onScreenText: forcedShockFactHookOne,
+          editNote: "Reaction-only hook. No dialogue. Overlay text added in post.",
+        },
+        {
+          timecode: "0:04-0:08",
+          visual: "Same framing and lighting, continue shock-to-realization expression with subtle head movement.",
+          narration: "",
+          onScreenText: forcedShockFactHookTwo,
+          editNote: "Reaction-only continuation. No dialogue. Overlay text added in post.",
+        },
+      ]
     : beats;
-  const baseCtaForPlan = isLatePeriodReactionHookMode ? "" : cta;
+  const baseCtaForPlan = isLatePeriodReactionHookMode || isUgcShockingFactReactionMode ? "" : cta;
 
   const hookForPlan = baseHookForPlan;
   let beatsForPlan = baseBeatsForPlan;
@@ -3524,7 +3525,6 @@ Return strict JSON only:
           ? buildUgcShockingFactReactionVeoPrompt({
               segment,
               segmentIndex: index,
-              appName,
             })
           : resolvedCampaignMode === "widget_late_period_reaction_hook_ugc"
             ? buildWidgetLatePeriodReactionHookVeoPrompt({
