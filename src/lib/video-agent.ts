@@ -322,6 +322,54 @@ function closeOpenEndedLine(text: string): string {
   return `${candidate}.`;
 }
 
+function hasIslamicTopicCue(...values: unknown[]): boolean {
+  const combined = values
+    .map((value) => cleanText(typeof value === "string" ? value : ""))
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
+  if (!combined) return false;
+  return /\b(islam|islamic|muslim|muslimah|salah|salat|prayer|fast|fasting|quran|fiqh|haidh|hayd|istihada|worship)\b/i.test(combined);
+}
+
+function ensureDetailedShockFactCaption(args: {
+  caption: string;
+  mainFact: string;
+  topicBrief: string;
+  objective: string;
+  cta: string;
+}): string {
+  const { caption, mainFact, topicBrief, objective, cta } = args;
+  const cleanedCaption = cleanText(caption);
+  const hasWhy = /\b(why|because|reason|cause|happen|happens|happening)\b/i.test(cleanedCaption);
+  const hasHow = /\b(how|when|track|pattern|timing|sign|symptom|check)\b/i.test(cleanedCaption);
+  const sentenceCount = cleanedCaption.split(/[.!?]+/).map((part) => cleanText(part)).filter(Boolean).length;
+
+  if (cleanedCaption.length >= 170 && hasWhy && hasHow && sentenceCount >= 3) {
+    return closeOpenEndedLine(cleanedCaption);
+  }
+
+  const factLine = closeOpenEndedLine(mainFact || "Main fact: one symptom can look confusing without full context.");
+  const contextLine = closeOpenEndedLine(
+    topicBrief || objective || "This topic can feel surprising because period and pregnancy signs can overlap in real life."
+  );
+  const whyLine =
+    "Why this can happen: cycle timing changes, hormone shifts, and symptom overlap can make different situations look similar at first.";
+  const howLine =
+    "How to read it better: check timing, flow pattern, intensity, and related symptoms together over a few days instead of judging from one moment.";
+  const whatToDoLine =
+    "What to do next: track consistently, retest when appropriate, and get qualified medical advice if signs are unusual, severe, or persistent.";
+  const worshipLine = hasIslamicTopicCue(mainFact, topicBrief, objective)
+    ? "For worship decisions, pair symptom tracking with trusted fiqh guidance from reliable scholars."
+    : "";
+  const ctaLine = closeOpenEndedLine(cta);
+
+  return [factLine, contextLine, whyLine, howLine, whatToDoLine, worshipLine, ctaLine]
+    .map((line) => cleanText(line))
+    .filter(Boolean)
+    .join(" ");
+}
+
 function sanitizeSegmentScriptShots(value: unknown, maxShots: number): SegmentScriptShot[] {
   const shotsRaw = Array.isArray(value) ? value : [];
   return shotsRaw
@@ -3024,6 +3072,8 @@ CAMPAIGN MODE: ugc_shocking_fact_reaction
 - Keep this output designed for post-edit workflow where text overlays are added manually later.
 - Expression style is critical: surprised + intrigued + happy discovery energy (like "wait this is actually cool"), not fear/worry/panic.
 - Avoid exaggerated horror expressions: no unnaturally wide bulging eyes, no distressed brows, no anxious panic face.
+- socialCaption is mandatory and must carry the educational depth since video is reaction-only.
+- socialCaption.caption must explain the main fact clearly in 4-7 short sentences: what the fact is, why/how it can happen, how to interpret signs, and what practical next step to take.
 - Split the clip into two reaction title moments:
   * 0-4s: shocked reaction only for title/hook text to be added in post.
   * 4-8s: reaction continuation for second line/fact text to be added in post.
@@ -3556,6 +3606,27 @@ Return strict JSON only:
     resolvedCampaignMode === "daily_ugc_quran_journey"
       ? "islamic_period_pregnancy"
       : sanitizeScriptAgentTopicCategory(row.topicCategory);
+  const rawScriptAgentCaption = sanitizeString(
+    isRecord(row.socialCaption) ? row.socialCaption.caption : "",
+    ""
+  );
+  const scriptAgentCaption =
+    resolvedCampaignMode === "ugc_shocking_fact_reaction"
+      ? ensureDetailedShockFactCaption({
+          caption: rawScriptAgentCaption,
+          mainFact: hookForPlan || beatsForPlan[0]?.onScreenText || beatsForPlan[0]?.narration || "",
+          topicBrief: normalizedTopicBrief,
+          objective: sanitizeString(row.objective, ""),
+          cta: ctaForPlan,
+        })
+      : sanitizeString(
+          rawScriptAgentCaption,
+          "Save this guide and share it with someone who needs gentle, practical support."
+        );
+  const scriptAgentHashtags = sanitizeHashtagArray(
+    isRecord(row.socialCaption) ? row.socialCaption.hashtags : [],
+    8
+  );
 
   return {
     title: sanitizeString(row.title, `${appName} informational video plan`),
@@ -3583,15 +3654,9 @@ Return strict JSON only:
     },
     motionControlSegments: veoReadySegments,
     socialCaption: {
-      caption: sanitizeString(
-        isRecord(row.socialCaption) ? row.socialCaption.caption : "",
-        "Save this guide and share it with someone who needs gentle, practical support."
-      ),
-      hashtags: sanitizeHashtagArray(
-        isRecord(row.socialCaption) ? row.socialCaption.hashtags : [],
-        8
-      ).length
-        ? sanitizeHashtagArray(isRecord(row.socialCaption) ? row.socialCaption.hashtags : [], 8)
+      caption: scriptAgentCaption,
+      hashtags: scriptAgentHashtags.length
+        ? scriptAgentHashtags
         : ["#PeriodHealth", "#PregnancyCare", "#MuslimahWellness", "#WorshipSupport"],
     },
     productionSteps: sanitizeStringArray(row.productionSteps, 12),
