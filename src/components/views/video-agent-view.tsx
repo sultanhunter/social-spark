@@ -220,6 +220,7 @@ type ScriptAgentCampaignMode =
   | "standard"
   | "widget_reaction_ugc"
   | "widget_shock_hook_ugc"
+  | "ugc_shocking_fact_reaction"
   | "widget_late_period_reaction_hook_ugc"
   | "ai_objects_educational_explainer"
   | "mixed_media_relatable_pov"
@@ -228,6 +229,7 @@ type ScriptAgentSelectableCampaignMode =
   | "standard"
   | "widget_reaction_ugc"
   | "widget_shock_hook_ugc"
+  | "ugc_shocking_fact_reaction"
   | "widget_late_period_reaction_hook_ugc"
   | "ai_objects_educational_explainer"
   | "mixed_media_relatable_pov";
@@ -1839,6 +1841,7 @@ export function VideoAgentView({ collectionId }: { collectionId: string }) {
     const forceUgc =
       scriptAgentCampaignMode === "widget_reaction_ugc" ||
       scriptAgentCampaignMode === "widget_shock_hook_ugc" ||
+      scriptAgentCampaignMode === "ugc_shocking_fact_reaction" ||
       scriptAgentCampaignMode === "widget_late_period_reaction_hook_ugc";
     const forceAiAnimation =
       scriptAgentCampaignMode === "ai_objects_educational_explainer" ||
@@ -1858,6 +1861,13 @@ export function VideoAgentView({ collectionId }: { collectionId: string }) {
     if (scriptAgentCampaignMode === "widget_late_period_reaction_hook_ugc") {
       if (scriptAgentDurationSeconds !== 8) {
         setScriptAgentDurationSeconds(8);
+      }
+      return;
+    }
+
+    if (scriptAgentCampaignMode === "ugc_shocking_fact_reaction") {
+      if (scriptAgentDurationSeconds < 24 || scriptAgentDurationSeconds > 90) {
+        setScriptAgentDurationSeconds(45);
       }
       return;
     }
@@ -3044,6 +3054,7 @@ export function VideoAgentView({ collectionId }: { collectionId: string }) {
                       <option value="standard">Standard educational</option>
                       <option value="widget_reaction_ugc">Widget reaction UGC</option>
                       <option value="widget_shock_hook_ugc">Widget shock-hook UGC</option>
+                      <option value="ugc_shocking_fact_reaction">UGC shocking fact reaction</option>
                       <option value="widget_late_period_reaction_hook_ugc">Late-period reaction hook UGC (8s)</option>
                       <option value="ai_objects_educational_explainer">AI objects educational explainer (40-110s)</option>
                       <option value="mixed_media_relatable_pov">Mixed-media relatable POV (3D + real)</option>
@@ -3073,6 +3084,8 @@ export function VideoAgentView({ collectionId }: { collectionId: string }) {
                       min={
                         scriptAgentCampaignMode === "widget_late_period_reaction_hook_ugc"
                           ? 8
+                          : scriptAgentCampaignMode === "ugc_shocking_fact_reaction"
+                            ? 24
                           : scriptAgentCampaignMode === "mixed_media_relatable_pov"
                             ? 18
                           : scriptAgentCampaignMode === "ai_objects_educational_explainer"
@@ -3082,6 +3095,8 @@ export function VideoAgentView({ collectionId }: { collectionId: string }) {
                       max={
                         scriptAgentCampaignMode === "widget_late_period_reaction_hook_ugc"
                           ? 8
+                          : scriptAgentCampaignMode === "ugc_shocking_fact_reaction"
+                            ? 90
                           : scriptAgentCampaignMode === "mixed_media_relatable_pov"
                             ? 45
                           : scriptAgentCampaignMode === "ai_objects_educational_explainer"
@@ -3096,6 +3111,8 @@ export function VideoAgentView({ collectionId }: { collectionId: string }) {
                         const min =
                           scriptAgentCampaignMode === "widget_late_period_reaction_hook_ugc"
                             ? 8
+                            : scriptAgentCampaignMode === "ugc_shocking_fact_reaction"
+                              ? 24
                             : scriptAgentCampaignMode === "mixed_media_relatable_pov"
                               ? 18
                             : scriptAgentCampaignMode === "ai_objects_educational_explainer"
@@ -3104,6 +3121,8 @@ export function VideoAgentView({ collectionId }: { collectionId: string }) {
                         const max =
                           scriptAgentCampaignMode === "widget_late_period_reaction_hook_ugc"
                             ? 8
+                            : scriptAgentCampaignMode === "ugc_shocking_fact_reaction"
+                              ? 90
                             : scriptAgentCampaignMode === "mixed_media_relatable_pov"
                               ? 45
                             : scriptAgentCampaignMode === "ai_objects_educational_explainer"
@@ -3129,6 +3148,7 @@ export function VideoAgentView({ collectionId }: { collectionId: string }) {
                           if (
                             scriptAgentCampaignMode === "widget_reaction_ugc" ||
                             scriptAgentCampaignMode === "widget_shock_hook_ugc" ||
+                            scriptAgentCampaignMode === "ugc_shocking_fact_reaction" ||
                             scriptAgentCampaignMode === "widget_late_period_reaction_hook_ugc"
                           ) {
                             return type === "ugc";
