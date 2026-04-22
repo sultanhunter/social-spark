@@ -185,6 +185,7 @@ export type ScriptAgentCampaignMode =
   | "widget_reaction_ugc"
   | "widget_shock_hook_ugc"
   | "ugc_shocking_fact_reaction"
+  | "ugc_fruit_cutting_fact_explainer"
   | "widget_late_period_reaction_hook_ugc"
   | "ai_objects_educational_explainer"
   | "mixed_media_relatable_pov"
@@ -669,6 +670,91 @@ function enforceUgcShockingFactReactionPattern(segments: MotionControlSegment[],
       ],
     },
   ];
+}
+
+function enforceUgcFruitCuttingFactExplainerPattern(segments: MotionControlSegment[], appName: string): MotionControlSegment[] {
+  const forcedFinalCta = "Download Muslimah Pro to track your period or pregnancy according to Islamic rulings.";
+
+  return segments.map((segment, index, all) => {
+    const shots = [...(segment.script?.shots || [])];
+    if (shots.length === 0) {
+      shots.push({
+        shotId: "shot1",
+        visual: "Medium close-up UGC creator seated at a table with a cutting board and fresh fruit.",
+        narration: "Quick fact a lot of women miss about period and pregnancy signs.",
+        onScreenText: "",
+        editNote: "Keep this natural and conversational.",
+      });
+    }
+
+    const firstShot = shots[0];
+    const isFirstSegment = index === 0;
+    const isLastSegment = index === all.length - 1;
+
+    if (isFirstSegment) {
+      shots[0] = {
+        ...firstShot,
+        visual: cleanText(
+          `${firstShot.visual || "Medium close-up UGC talking head"} Character is seated at a table, gently cutting fruit on a cutting board while speaking to camera. Keep knife handling calm and safe. Natural home kitchen/table setting.`
+        ),
+        narration: closeOpenEndedLine(
+          firstShot.narration ||
+          segment.script?.hook ||
+          "Quick fact: some period and early-pregnancy signs can overlap, so context matters before assumptions."
+        ),
+        editNote: cleanText(
+          `${firstShot.editNote || ""} Opening pattern is mandatory: fruit-cutting while talking. Keep delivery warm, natural, and non-ad-like.`
+        ),
+      };
+    }
+
+    const lastShotIndex = shots.length - 1;
+    const lastShot = shots[lastShotIndex];
+    shots[lastShotIndex] = {
+      ...lastShot,
+      narration: isLastSegment
+        ? forcedFinalCta
+        : closeOpenEndedLine(lastShot.narration),
+      editNote: cleanText(
+        `${lastShot.editNote || ""} ${isLastSegment
+          ? `End with direct CTA line and a brief visual hold so editor can append full-screen ${appName} app screen recording in post.`
+          : "Keep speaking style natural and conversational."}`
+      ),
+    };
+
+    const prompts = (segment.multiShotPrompts || []).map((promptItem, promptIndex) => {
+      if (promptItem.generationType === "product_ui_overlay") return promptItem;
+
+      const forcedPrompt =
+        isFirstSegment && promptIndex === 0
+          ? `${promptItem.prompt} Character is seated at table and gently cutting fruit while speaking to camera in a natural home setting. Knife handling looks calm and safe; no dramatic acting; no staged ad vibe.`
+          : promptItem.prompt;
+
+      return {
+        ...promptItem,
+        generationType: "ugc_video" as const,
+        prompt: enforceKlingPromptWordLimit(cleanText(forcedPrompt), 77),
+      };
+    });
+
+    return {
+      ...segment,
+      startFramePrompt: isFirstSegment
+        ? cleanText(
+          segment.startFramePrompt ||
+          "Natural UGC opening frame: creator seated at kitchen table, fruit and cutting board visible, hand beginning a gentle fruit-cutting action while speaking to camera."
+        )
+        : cleanText(segment.startFramePrompt),
+      script: {
+        hook: closeOpenEndedLine(segment.script?.hook || ""),
+        shots,
+        cta: isLastSegment
+          ? forcedFinalCta
+          : closeOpenEndedLine(segment.script?.cta || ""),
+      },
+      multiShotPrompts: prompts,
+    };
+  });
 }
 
 function enforceWidgetLatePeriodReactionHookPattern(segments: MotionControlSegment[]): MotionControlSegment[] {
@@ -1331,6 +1417,34 @@ function buildUgcShockingFactReactionVeoPrompt(args: {
   );
 }
 
+function buildUgcFruitCuttingFactExplainerVeoPrompt(args: {
+  segment: MotionControlSegment;
+  segmentIndex: number;
+  isLastSegment: boolean;
+  appName: string;
+  ugcCharacter?: UGCCharacterProfile | null;
+}): string {
+  const { segment, segmentIndex, isLastSegment, appName, ugcCharacter } = args;
+  const basePrompt = buildVeo31SegmentPrompt({
+    segment,
+    styleHint: "ugc creator-style live-action, natural kitchen table conversation",
+    appName,
+    ugcCharacter,
+  });
+
+  const openingRule =
+    segmentIndex === 0
+      ? "Opening hard rule: first shot must show creator seated at a table gently cutting fruit on a cutting board while talking to camera. Movement is calm and safe, natural and relatable."
+      : "";
+  const endingRule = isLastSegment
+    ? "Ending hard rule: finish by saying, \"Download Muslimah Pro to track your period or pregnancy according to Islamic rulings.\" Then hold visual for about 0.5-1s for post app screen recording insertion."
+    : "";
+
+  return cleanText(
+    `${basePrompt} Naturalism lock: conversational UGC realism, everyday home ambience, authentic hand motion and eye contact, no over-acting, no ad-like performance. ${openingRule} ${endingRule}`
+  );
+}
+
 function buildWidgetLatePeriodReactionHookVeoPrompt(args: {
   segment: MotionControlSegment;
 }): string {
@@ -1850,6 +1964,16 @@ function sanitizeScriptAgentCampaignMode(value: unknown): ScriptAgentCampaignMod
     cleaned === "shocking-fact-reaction-ugc"
   ) {
     return "ugc_shocking_fact_reaction";
+  }
+  if (
+    cleaned === "ugc_fruit_cutting_fact_explainer" ||
+    cleaned === "ugc-fruit-cutting-fact-explainer" ||
+    cleaned === "ugc_fruit_cutting_explainer" ||
+    cleaned === "ugc-fruit-cutting-explainer" ||
+    cleaned === "fruit_cutting_fact_explainer_ugc" ||
+    cleaned === "fruit-cutting-fact-explainer-ugc"
+  ) {
+    return "ugc_fruit_cutting_fact_explainer";
   }
   if (
     cleaned === "widget_late_period_reaction_hook_ugc" ||
@@ -2996,6 +3120,8 @@ export async function buildVideoScriptIdeationPlan({
         ? 8
       : resolvedCampaignMode === "ugc_shocking_fact_reaction"
         ? 8
+      : resolvedCampaignMode === "ugc_fruit_cutting_fact_explainer"
+        ? clamp(Math.round(targetDurationSeconds), 30, 120)
       : resolvedCampaignMode === "mixed_media_relatable_pov"
         ? clamp(Math.round(targetDurationSeconds), 18, 45)
       : resolvedCampaignMode === "ai_objects_educational_explainer"
@@ -3018,6 +3144,7 @@ export async function buildVideoScriptIdeationPlan({
     resolvedCampaignMode === "widget_reaction_ugc" ||
     resolvedCampaignMode === "widget_shock_hook_ugc" ||
     resolvedCampaignMode === "ugc_shocking_fact_reaction" ||
+    resolvedCampaignMode === "ugc_fruit_cutting_fact_explainer" ||
     resolvedCampaignMode === "widget_late_period_reaction_hook_ugc"
       ? "ugc"
       : resolvedCampaignMode === "ai_objects_educational_explainer"
@@ -3079,6 +3206,20 @@ CAMPAIGN MODE: ugc_shocking_fact_reaction
   * 4-8s: reaction continuation for second line/fact text to be added in post.
 - Keep framing simple (selfie or medium close-up), natural lighting, and clear facial expression changes.
 - End with a tiny visual hold so editor can append full-screen app screen recording after this generated clip.
+- Keep this mode strictly UGC (not animation).
+`
+      : resolvedCampaignMode === "ugc_fruit_cutting_fact_explainer"
+        ? `
+CAMPAIGN MODE: ugc_fruit_cutting_fact_explainer
+- Build natural UGC talking videos where creator explains one period/pregnancy or Islamic period/pregnancy fact clearly.
+- Opening hook mechanic is mandatory: creator is seated at a table and gently cutting fruit while talking to camera.
+- Keep opening action natural and safe (calm knife handling, no dramatic gestures, no fake ad energy).
+- Tone: conversational, trustworthy, and relatable like creator giving useful advice to a friend.
+- Fact explanation must include practical detail: what the fact is, why/how it happens, and how to interpret signs responsibly.
+- Keep wording educational and careful (no diagnosis claims, no fear-bait, no absolutist medical statements).
+- At the end, creator should say this CTA line (or a very close natural variation):
+  * "Download Muslimah Pro to track your period or pregnancy according to Islamic rulings."
+- End with a short visual hold so editor can append full-screen app screen recording in post.
 - Keep this mode strictly UGC (not animation).
 `
       : resolvedCampaignMode === "widget_late_period_reaction_hook_ugc"
@@ -3324,6 +3465,7 @@ Return strict JSON only:
 
   const isLatePeriodReactionHookMode = resolvedCampaignMode === "widget_late_period_reaction_hook_ugc";
   const isUgcShockingFactReactionMode = resolvedCampaignMode === "ugc_shocking_fact_reaction";
+  const isUgcFruitCuttingFactExplainerMode = resolvedCampaignMode === "ugc_fruit_cutting_fact_explainer";
   const isAiObjectsEducationalMode = resolvedCampaignMode === "ai_objects_educational_explainer";
   const forcedLatePeriodHookOne = "is everyone's period late in march?";
   const forcedLatePeriodHookTwo = "raise your hand if it's march and your period still hasn't shown up";
@@ -3338,6 +3480,7 @@ Return strict JSON only:
     "I had no idea this could happen";
   const forcedShockFactVisual =
     "Medium close-up UGC selfie indoors, surprised and impressed expression with playful curiosity, subtle hand movement, natural room lighting. Avoid worried or panic look.";
+  const forcedFruitCuttingFinalCta = "Download Muslimah Pro to track your period or pregnancy according to Islamic rulings.";
 
   const baseHookForPlan = isLatePeriodReactionHookMode
     ? forcedLatePeriodHookOne
@@ -3379,7 +3522,12 @@ Return strict JSON only:
         },
       ]
     : beats;
-  const baseCtaForPlan = isLatePeriodReactionHookMode || isUgcShockingFactReactionMode ? "" : cta;
+  const baseCtaForPlan =
+    isLatePeriodReactionHookMode || isUgcShockingFactReactionMode
+      ? ""
+      : isUgcFruitCuttingFactExplainerMode
+        ? forcedFruitCuttingFinalCta
+        : cta;
 
   const hookForPlan = baseHookForPlan;
   let beatsForPlan = baseBeatsForPlan;
@@ -3547,10 +3695,12 @@ Return strict JSON only:
         ? enforceWidgetShockHookSeriesPattern(transitionReadySegments, appName)
         : resolvedCampaignMode === "ugc_shocking_fact_reaction"
           ? enforceUgcShockingFactReactionPattern(transitionReadySegments, appName)
-          : resolvedCampaignMode === "widget_late_period_reaction_hook_ugc"
-            ? enforceWidgetLatePeriodReactionHookPattern(transitionReadySegments)
+          : resolvedCampaignMode === "ugc_fruit_cutting_fact_explainer"
+            ? enforceUgcFruitCuttingFactExplainerPattern(transitionReadySegments, appName)
             : resolvedCampaignMode === "ai_objects_educational_explainer"
               ? enforceAiObjectsEducationalExplainerPattern(transitionReadySegments, appName)
+              : resolvedCampaignMode === "widget_late_period_reaction_hook_ugc"
+                ? enforceWidgetLatePeriodReactionHookPattern(transitionReadySegments)
               : resolvedCampaignMode === "mixed_media_relatable_pov"
                 ? enforceMixedMediaRelatablePovPattern(transitionReadySegments, appName)
                 : resolvedCampaignMode === "daily_ugc_quran_journey"
@@ -3582,9 +3732,13 @@ Return strict JSON only:
               segment,
               segmentIndex: index,
             })
-          : resolvedCampaignMode === "widget_late_period_reaction_hook_ugc"
-            ? buildWidgetLatePeriodReactionHookVeoPrompt({
+          : resolvedCampaignMode === "ugc_fruit_cutting_fact_explainer"
+            ? buildUgcFruitCuttingFactExplainerVeoPrompt({
                 segment,
+                segmentIndex: index,
+                isLastSegment: index === all.length - 1,
+                appName,
+                ugcCharacter,
               })
             : resolvedCampaignMode === "mixed_media_relatable_pov"
               ? buildMixedMediaRelatablePovVeoPrompt({
@@ -3593,6 +3747,10 @@ Return strict JSON only:
                   appName,
                   ugcCharacter,
                 })
+              : resolvedCampaignMode === "widget_late_period_reaction_hook_ugc"
+                ? buildWidgetLatePeriodReactionHookVeoPrompt({
+                    segment,
+                  })
               : buildVeo31SegmentPrompt({
                   segment,
                   nextSegment: all[index + 1],
@@ -3611,7 +3769,8 @@ Return strict JSON only:
     ""
   );
   const scriptAgentCaption =
-    resolvedCampaignMode === "ugc_shocking_fact_reaction"
+    resolvedCampaignMode === "ugc_shocking_fact_reaction" ||
+    resolvedCampaignMode === "ugc_fruit_cutting_fact_explainer"
       ? ensureDetailedShockFactCaption({
           caption: rawScriptAgentCaption,
           mainFact: hookForPlan || beatsForPlan[0]?.onScreenText || beatsForPlan[0]?.narration || "",

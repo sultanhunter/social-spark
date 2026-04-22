@@ -115,6 +115,16 @@ function normalizeCampaignMode(value: unknown): ScriptAgentCampaignMode {
     return "ugc_shocking_fact_reaction";
   }
   if (
+    cleaned === "ugc_fruit_cutting_fact_explainer" ||
+    cleaned === "ugc-fruit-cutting-fact-explainer" ||
+    cleaned === "ugc_fruit_cutting_explainer" ||
+    cleaned === "ugc-fruit-cutting-explainer" ||
+    cleaned === "fruit_cutting_fact_explainer_ugc" ||
+    cleaned === "fruit-cutting-fact-explainer-ugc"
+  ) {
+    return "ugc_fruit_cutting_fact_explainer";
+  }
+  if (
     cleaned === "widget_late_period_reaction_hook_ugc" ||
     cleaned === "widget-late-period-reaction-hook-ugc" ||
     cleaned === "late_period_reaction_hook_ugc" ||
@@ -236,6 +246,7 @@ export async function POST(request: NextRequest) {
       campaignMode === "widget_reaction_ugc" ||
       campaignMode === "widget_shock_hook_ugc" ||
       campaignMode === "ugc_shocking_fact_reaction" ||
+      campaignMode === "ugc_fruit_cutting_fact_explainer" ||
       campaignMode === "widget_late_period_reaction_hook_ugc" ||
       campaignMode === "daily_ugc_quran_journey";
     const shouldResolveCharacter =

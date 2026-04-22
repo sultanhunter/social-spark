@@ -378,6 +378,11 @@ function isUgcShockingFactReactionMode(plan: PlanShape): boolean {
   return mode === "ugc_shocking_fact_reaction" || mode === "ugc-shocking-fact-reaction";
 }
 
+function isUgcFruitCuttingFactExplainerMode(plan: PlanShape): boolean {
+  const mode = cleanText(plan.campaignMode).toLowerCase();
+  return mode === "ugc_fruit_cutting_fact_explainer" || mode === "ugc-fruit-cutting-fact-explainer";
+}
+
 function buildStartFramePrompt(args: {
   appName: string;
   formatType: string;
@@ -412,6 +417,10 @@ function buildStartFramePrompt(args: {
   const positiveShockExpressionInstruction = isUgcShockingFactReactionMode(plan)
     ? "Expression lock for this campaign: surprised in a cool-discovery way (intrigued + lightly excited + relatable), not fearful. Keep eyes natural size and realistic; avoid bulging eyes, panic face, anxious brows, or distressed worry expression."
     : "";
+  const fruitCuttingOpeningInstruction =
+    isUgcFruitCuttingFactExplainerMode(plan) && (typeof segmentIndex !== "number" || segmentIndex === 0)
+      ? "Opening action lock for this campaign: creator is seated at a table and gently cutting fresh fruit on a cutting board while talking to camera. Keep this everyday-natural and safe (calm knife handling, no dramatic motion)."
+      : "";
   const globalWorshipPoseInstruction = worshipGestureInstruction(
     hasWorshipGestureCue(
       video.title,
@@ -481,6 +490,7 @@ function buildStartFramePrompt(args: {
       characterInstruction,
       wardrobeVariationInstruction,
       positiveShockExpressionInstruction,
+      fruitCuttingOpeningInstruction,
       "If a woman appears, wardrobe must include long sleeves with both arms fully covered to the wrists.",
       globalWorshipPoseInstruction,
       globalQuranClosedInstruction,
@@ -626,6 +636,7 @@ function buildStartFramePrompt(args: {
       wardrobeVariationInstruction,
       wardrobeSegmentContinuityInstruction,
       positiveShockExpressionInstruction,
+      fruitCuttingOpeningInstruction,
       `Vertical 9:16 composition at 1080x1920 output framing.`,
       `Photorealistic ultra-detailed 4K-quality look (high texture fidelity, clean dynamic range, realistic skin and fabric detail).`,
       `If a person appears, enforce modest, non-sexual framing: neutral posture, respectful body language, and modest wardrobe.`,
@@ -687,6 +698,7 @@ function buildStartFramePrompt(args: {
     characterInstruction,
     wardrobeVariationInstruction,
     positiveShockExpressionInstruction,
+    fruitCuttingOpeningInstruction,
     `Vertical 9:16 composition at 1080x1920 output framing.`,
     `Photorealistic ultra-detailed 4K-quality look (high texture fidelity, clean dynamic range, realistic skin and fabric detail), while keeping output composition suitable for 1080x1920 video start frame usage.`,
     `If a person appears, enforce modest, non-sexual framing: neutral posture, respectful body language, and modest wardrobe with no tight/transparent clothing.`,
@@ -794,6 +806,9 @@ export async function POST(request: NextRequest) {
       : "";
     const positiveShockExpressionLock = isUgcShockingFactReactionMode(plan)
       ? "Expression lock: surprised-in-a-good-way, intrigued, lightly excited, and relatable. Avoid fearful or worried look, avoid bulging eyes, avoid panic face, and avoid distressed expression."
+      : "";
+    const fruitCuttingOpeningLock = isUgcFruitCuttingFactExplainerMode(plan)
+      ? "Opening lock: seated-at-table fruit-cutting while talking to camera, calm and safe knife handling, everyday natural home realism, no staged ad performance."
       : "";
 
     const hasShotGroups = Array.isArray(plan.motionControlSegments) && plan.motionControlSegments.length > 0;
@@ -903,7 +918,7 @@ export async function POST(request: NextRequest) {
       ).slice(0, 4),
       characterLockDescriptor:
         character
-          ? `${character.character_name}. ${characterLockDescriptorBase || "Keep same face identity and same hijab/outfit structure."}. Wardrobe recolor lock for this full script: ${wardrobeColorwayLock}. Keep hijab type and outfit silhouette unchanged, but do not use the original reference-image clothing colors. Apply this same colorway across all segments. ${positiveShockExpressionLock}`
+          ? `${character.character_name}. ${characterLockDescriptorBase || "Keep same face identity and same hijab/outfit structure."}. Wardrobe recolor lock for this full script: ${wardrobeColorwayLock}. Keep hijab type and outfit silhouette unchanged, but do not use the original reference-image clothing colors. Apply this same colorway across all segments. ${positiveShockExpressionLock} ${fruitCuttingOpeningLock}`
           : segmentScriptCharacterReferences.names.length > 0
             ? `Maintain consistent identity for segment cast: ${segmentScriptCharacterReferences.names.join(", ")}.`
           : undefined,
