@@ -24,6 +24,13 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import {
+  ASSET_STYLE_PRESETS,
+  DEFAULT_ASSET_STYLE_PRESET,
+  getAssetStylePreset,
+  isAssetStylePresetId,
+  type AssetStylePresetId,
+} from "@/lib/asset-style";
+import {
   DEFAULT_IMAGE_GENERATION_MODEL,
   IMAGE_GENERATION_MODELS,
   isImageGenerationModel,
@@ -97,6 +104,7 @@ type RecreatedHistoryItem = {
     setType?: string;
     adaptationMode?: string;
     visualVariant?: VisualVariant;
+    assetStyleId?: AssetStylePresetId;
     versionLabel?: string;
     characterId?: string;
     stage?: string;
@@ -430,6 +438,7 @@ export function PostDetailView({ postId }: PostDetailViewProps) {
   const [downloadingImageIds, setDownloadingImageIds] = useState<Record<string, boolean>>({});
   const [removeBgLoading, setRemoveBgLoading] = useState<Record<string, boolean>>({});
   const [regeneratingHistoryAssetIds, setRegeneratingHistoryAssetIds] = useState<Record<string, boolean>>({});
+  const [historyAssetStyleById, setHistoryAssetStyleById] = useState<Record<string, AssetStylePresetId>>({});
 
   const handleRemoveBg = async (imageKey: string, imageUrl: string, versionId?: string, historyItemId?: string) => {
     setRemoveBgLoading((prev) => ({ ...prev, [imageKey]: true }));
@@ -475,6 +484,29 @@ export function PostDetailView({ postId }: PostDetailViewProps) {
   }, [selectedPost]);
 
   const activeVersion = scriptVersions.find((version) => version.id === activeVersionId) || null;
+
+  const resolveHistoryAssetStyleId = useCallback((item: RecreatedHistoryItem): AssetStylePresetId => {
+    const selectedStyle = historyAssetStyleById[item.id];
+    if (isAssetStylePresetId(selectedStyle)) return selectedStyle;
+
+    const persistedStyle = item.generation_state?.assetStyleId;
+    if (isAssetStylePresetId(persistedStyle)) return persistedStyle;
+
+    return DEFAULT_ASSET_STYLE_PRESET;
+  }, [historyAssetStyleById]);
+
+  const cycleHistoryAssetStyle = useCallback((item: RecreatedHistoryItem) => {
+    const current = resolveHistoryAssetStyleId(item);
+    const currentIndex = ASSET_STYLE_PRESETS.findIndex((preset) => preset.id === current);
+    const nextPreset =
+      ASSET_STYLE_PRESETS[(currentIndex + 1) % ASSET_STYLE_PRESETS.length] ||
+      ASSET_STYLE_PRESETS[0];
+
+    setHistoryAssetStyleById((prev) => ({
+      ...prev,
+      [item.id]: nextPreset.id,
+    }));
+  }, [resolveHistoryAssetStyleId]);
 
   const parseFileExtension = (url: string): string => {
     try {
@@ -683,6 +715,7 @@ export function PostDetailView({ postId }: PostDetailViewProps) {
       queue,
       characterId,
       visualVariant,
+      assetStyleId,
       onAssetComplete,
     }: {
       recreatedPostId: string;
@@ -695,6 +728,7 @@ export function PostDetailView({ postId }: PostDetailViewProps) {
         totalAssets: number;
         assetIndex: number;
       }) => void;
+      assetStyleId?: AssetStylePresetId;
     }) => {
       if (!activeCollection || !selectedPost) {
         return { failures: ["Missing collection or post context."], generatedMediaUrls: [] as string[] };
@@ -718,6 +752,7 @@ export function PostDetailView({ postId }: PostDetailViewProps) {
               assetPrompt: asset.prompt,
               characterId: characterId || null,
               visualVariant,
+              assetStyleId: assetStyleId || DEFAULT_ASSET_STYLE_PRESET,
               imageGenerationModel,
               reasoningModel,
               totalAssets: queue.length,
@@ -800,6 +835,7 @@ export function PostDetailView({ postId }: PostDetailViewProps) {
           : historyVisualVariant === "ugc_real"
             ? selectedUgcCharacterId
             : null;
+      const historyAssetStyleId = resolveHistoryAssetStyleId(item);
 
       setHistory((prev) =>
         prev.map((historyItem) =>
@@ -816,11 +852,12 @@ export function PostDetailView({ postId }: PostDetailViewProps) {
       const { failures, generatedMediaUrls } = await generateAssetsSequential({
         recreatedPostId: item.id,
         queue,
-        characterId: historyCharacterId,
-        visualVariant: historyVisualVariant,
-        onAssetComplete: ({ generatedMediaUrls: urls }) => {
-          setHistory((prev) =>
-            prev.map((historyItem) =>
+          characterId: historyCharacterId,
+          visualVariant: historyVisualVariant,
+          assetStyleId: historyAssetStyleId,
+          onAssetComplete: ({ generatedMediaUrls: urls }) => {
+            setHistory((prev) =>
+              prev.map((historyItem) =>
               historyItem.id === item.id
                 ? {
                     ...historyItem,
@@ -889,6 +926,7 @@ export function PostDetailView({ postId }: PostDetailViewProps) {
           : historyVisualVariant === "ugc_real"
             ? selectedUgcCharacterId
             : null;
+      const historyAssetStyleId = resolveHistoryAssetStyleId(item);
 
       const response = await fetch("/api/recreate/regenerate-asset", {
         method: "POST",
@@ -902,6 +940,7 @@ export function PostDetailView({ postId }: PostDetailViewProps) {
           assetPrompt: trimmedPrompt,
           characterId: historyCharacterId || null,
           visualVariant: historyVisualVariant,
+          assetStyleId: historyAssetStyleId,
           imageGenerationModel,
           reasoningModel,
         }),
@@ -1054,6 +1093,7 @@ export function PostDetailView({ postId }: PostDetailViewProps) {
     setInstagramResultBySetId({});
     setGeneratingHistoryBySetId({});
     setRegeneratingHistoryAssetIds({});
+    setHistoryAssetStyleById({});
     setVisualVariantPreference(selectedPost.post_type === "image_slides" ? "both" : "brand_optimized");
 
     if (selectedPost.media_urls?.length) {
@@ -1326,6 +1366,7 @@ export function PostDetailView({ postId }: PostDetailViewProps) {
     setInstagramResultBySetId({});
     setGeneratingHistoryBySetId({});
     setRegeneratingHistoryAssetIds({});
+    setHistoryAssetStyleById({});
   };
 
   const isRecreationBlocked = Boolean(nicheState && !nicheState.canRecreate);
@@ -1964,6 +2005,8 @@ export function PostDetailView({ postId }: PostDetailViewProps) {
                     const historyVisualVariant: VisualVariant = isVisualVariant(item.generation_state?.visualVariant)
                       ? item.generation_state.visualVariant
                       : "brand_optimized";
+                    const historyAssetStyleId = resolveHistoryAssetStyleId(item);
+                    const historyAssetStyleLabel = getAssetStylePreset(historyAssetStyleId).label;
 
                     return (
                       <div key={item.id} className="rounded-xl border border-slate-200 bg-slate-50 p-4">
@@ -1973,9 +2016,19 @@ export function PostDetailView({ postId }: PostDetailViewProps) {
                           <Badge variant="default">
                             {historyVisualVariant === "ugc_real" ? "UGC Real" : "Brand Optimized"}
                           </Badge>
+                          <Badge variant="default">Style: {historyAssetStyleLabel}</Badge>
                           <Badge variant="default">{item.generated_media_urls?.length || 0} images</Badge>
                           <span className="text-xs text-slate-500">Created {formatDate(item.created_at)}</span>
                           <div className="ml-auto flex flex-wrap items-center gap-2">
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              disabled={item.status === "generating"}
+                              onClick={() => cycleHistoryAssetStyle(item)}
+                            >
+                              <Wand2 className="mr-2 h-4 w-4" />
+                              Match Style: {historyAssetStyleLabel}
+                            </Button>
                             {hasCaption ? (
                               <Button
                                 variant="ghost"
