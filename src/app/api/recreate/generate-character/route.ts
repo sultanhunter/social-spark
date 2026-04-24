@@ -37,6 +37,7 @@ type CharacterPromptEntry = {
 
 type CharacterDraft = {
   roleKey: string;
+  gender: "male" | "female";
   characterName: string;
   personaSummary: string;
   visualStyle: string;
@@ -77,6 +78,46 @@ function sanitizeRoleKey(value: unknown, fallback: string): string {
   const raw = cleanText(value, fallback).toLowerCase();
   const cleaned = raw.replace(/[^a-z0-9_-]/g, "-").replace(/-+/g, "-").replace(/^-|-$/g, "");
   return cleaned || fallback;
+}
+
+function normalizeGender(value: unknown): "male" | "female" {
+  if (typeof value !== "string") return "female";
+  const normalized = value.trim().toLowerCase();
+  if (normalized === "male" || normalized === "man" || normalized === "boy") return "male";
+  return "female";
+}
+
+function inferGenderFromPromptText(text: string): "male" | "female" {
+  const normalized = text.toLowerCase();
+  if (/(man|male|boy|father|husband|brother|uncle|imam|beard|bearded)/i.test(normalized)) {
+    return "male";
+  }
+  return "female";
+}
+
+function applyGenderAppearanceRules(
+  draft: CharacterDraft,
+  sourcePrompts: CharacterPromptEntry[]
+): CharacterDraft {
+  const promptText = sourcePrompts.map((entry) => entry.prompt).join(" ");
+  const inferredGender = inferGenderFromPromptText(promptText);
+  const gender = draft.gender || inferredGender;
+
+  if (gender === "male") {
+    return {
+      ...draft,
+      gender,
+      wardrobeNotes: `${draft.wardrobeNotes} Ensure masculine presentation with a clearly visible, natural beard in every appearance.`.trim(),
+      promptTemplate: `${draft.promptTemplate} Always keep this character male-presenting with a clearly visible natural beard in every assigned asset.`.trim(),
+    };
+  }
+
+  return {
+    ...draft,
+    gender: "female",
+    wardrobeNotes: `${draft.wardrobeNotes} Always wear a loose hijab and loose, modest, non-tight, non-revealing clothing.`.trim(),
+    promptTemplate: `${draft.promptTemplate} Always keep this character female-presenting with a loose hijab and loose, modest, non-tight, non-revealing clothing in every assigned asset.`.trim(),
+  };
 }
 
 function isMissingTableError(error: unknown): boolean {
@@ -201,8 +242,10 @@ function extractAssetPrompts(slidePlans: SlidePlan[]): CharacterPromptEntry[] {
 }
 
 function fallbackDraftForPrompts(appName: string, promptEntries: CharacterPromptEntry[]): CharacterDraft {
+  const inferredGender = inferGenderFromPromptText(promptEntries.map((entry) => entry.prompt).join(" "));
   return {
     roleKey: "primary",
+    gender: inferredGender,
     characterName: `${appName} Lead Character`,
     personaSummary: "Warm Muslimah lead with practical, nurturing tone and grounded presence.",
     visualStyle: "Consistent portrait realism with stable facial structure and modest styling.",
@@ -267,12 +310,15 @@ Task:
 - Assign each character to the linear AssetIndex values where that character should appear.
 - If a prompt has no person, do not include that index.
 - Keep names and identities practical and consistent.
+- Hard rule: male characters must always have a clearly visible natural beard.
+- Hard rule: female characters must always wear loose hijab and loose, modest, non-tight, non-revealing clothing.
 
 Return strict JSON only in this shape:
 {
   "characters": [
     {
       "roleKey": "short_stable_key",
+      "gender": "male or female",
       "characterName": "string",
       "personaSummary": "string",
       "visualStyle": "string",
@@ -299,6 +345,7 @@ Return strict JSON only in this shape:
     .map((item, index) => {
       const characterName = cleanText(item.characterName, `${appName} Character ${index + 1}`);
       const roleKey = sanitizeRoleKey(item.roleKey, `character_${index + 1}`);
+      const gender = normalizeGender(item.gender);
       const identityAnchors = Array.isArray(item.identityAnchors)
         ? item.identityAnchors
           .map((anchor) => cleanText(anchor))
@@ -309,6 +356,7 @@ Return strict JSON only in this shape:
 
       return {
         roleKey,
+        gender,
         characterName,
         personaSummary: cleanText(
           item.personaSummary,
@@ -338,10 +386,13 @@ Return strict JSON only in this shape:
     .filter((draft) => draft.assetIndexes.length > 0);
 
   if (drafts.length === 0) {
-    return [fallbackDraftForPrompts(appName, promptEntries)];
+    return [applyGenderAppearanceRules(fallbackDraftForPrompts(appName, promptEntries), promptEntries)];
   }
 
-  return drafts;
+  return drafts.map((draft) => {
+    const promptSubset = promptEntries.filter((entry) => draft.assetIndexes.includes(entry.linearAssetIndex));
+    return applyGenderAppearanceRules(draft, promptSubset);
+  });
 }
 
 async function insertCharacterRow({
@@ -364,7 +415,7 @@ async function insertCharacterRow({
     voice_tone: character.voiceTone,
     prompt_template: `${character.promptTemplate} Identity anchors: ${character.identityAnchors.join(
       "; "
-    )}. CharacterRole: ${character.roleKey}. CharacterType: ugc.`,
+    )}. CharacterRole: ${character.roleKey}. CharacterGender: ${character.gender}. CharacterType: ugc.`,
     reference_image_url: referenceImageUrl,
     image_model: imageModel,
   };
@@ -502,6 +553,7 @@ export async function POST(request: NextRequest) {
     const createdCharacters: Array<{
       id: string;
       roleKey: string;
+      gender: "male" | "female";
       characterName: string;
       promptTemplate: string;
       referenceImageUrl: string;
@@ -516,6 +568,9 @@ export async function POST(request: NextRequest) {
       const portraitPrompt = [
         `Create one clean character reference portrait for ${draft.characterName}.`,
         draft.promptTemplate,
+        draft.gender === "male"
+          ? "Mandatory appearance rule: clearly visible natural beard in this character portrait."
+          : "Mandatory appearance rule: loose hijab and loose, modest, non-tight, non-revealing clothing.",
         `Persona: ${draft.personaSummary}.`,
         `Visual style: ${draft.visualStyle}.`,
         `Wardrobe: ${draft.wardrobeNotes}.`,
@@ -552,6 +607,7 @@ export async function POST(request: NextRequest) {
       createdCharacters.push({
         id: characterId,
         roleKey: draft.roleKey,
+        gender: draft.gender,
         characterName: draft.characterName,
         promptTemplate: draft.promptTemplate,
         referenceImageUrl,
@@ -572,6 +628,7 @@ export async function POST(request: NextRequest) {
       ...previousGenerationState,
       characterId: primaryCharacter?.id || null,
       characterIds: createdCharacters.map((item) => item.id),
+      characterGenderById: Object.fromEntries(createdCharacters.map((item) => [item.id, item.gender])),
       characterName: primaryCharacter?.characterName || null,
       characterReferenceImageUrl: primaryCharacter?.referenceImageUrl || null,
       characterGeneratedAt: new Date().toISOString(),

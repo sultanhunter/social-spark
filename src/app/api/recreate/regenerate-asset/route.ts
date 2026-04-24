@@ -94,9 +94,17 @@ function getCollectionAppContext(collection: unknown): string {
 }
 
 function isCharacterAssetPrompt(prompt: string): boolean {
-  return /(woman|female|girl|lady|muslimah|hijab|character|person|portrait|face|model|influencer)/i.test(
+  return /(woman|female|girl|lady|muslimah|hijab|man|male|boy|father|husband|character|person|portrait|face|model|influencer)/i.test(
     prompt.toLowerCase()
   );
+}
+
+function inferCharacterGenderFromPrompt(prompt: string): "male" | "female" {
+  const normalized = prompt.toLowerCase();
+  if (/(man|male|boy|father|husband|brother|beard|bearded)/i.test(normalized)) {
+    return "male";
+  }
+  return "female";
 }
 
 function asVisualVariant(value: unknown): "ugc_real" | "brand_optimized" | null {
@@ -385,7 +393,9 @@ export async function POST(request: NextRequest) {
 
     const characterLockDescriptor = isCharacterAsset
       ? studioCharacter?.prompt_template ||
-        "Same fictional woman identity across all character assets. Preserve face, age range, skin tone, hijab/wardrobe style."
+        (inferCharacterGenderFromPrompt(assetPrompt) === "male"
+          ? "Same fictional male identity across all character assets. Preserve face, age range, skin tone, and masculine styling. Always keep a clearly visible natural beard in every appearance."
+          : "Same fictional female identity across all character assets. Preserve face, age range, skin tone, and hijab/wardrobe style. Always use loose hijab and loose, modest, non-tight, non-revealing clothing.")
       : undefined;
 
     const imageUrl = await generateImage(styledAssetPrompt, {
