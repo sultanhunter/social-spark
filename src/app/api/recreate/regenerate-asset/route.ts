@@ -1,6 +1,14 @@
 import path from "path";
+import { readFile } from "fs/promises";
+import { GoogleGenerativeAI } from "@google/generative-ai";
 import { NextRequest, NextResponse } from "next/server";
 import { generateImage } from "@/lib/gemini-image";
+import {
+  type AssetStylePresetId,
+  DEFAULT_ASSET_STYLE_PRESET,
+  getAssetStylePreset,
+  isAssetStylePresetId,
+} from "@/lib/asset-style";
 import {
   DEFAULT_IMAGE_GENERATION_MODEL,
   isImageGenerationModel,
@@ -8,6 +16,7 @@ import {
 import {
   DEFAULT_REASONING_MODEL,
   isReasoningModel,
+  type ReasoningModel,
 } from "@/lib/reasoning-model";
 import { supabase } from "@/lib/supabase";
 
@@ -17,6 +26,9 @@ const APP_BRAND_PRIMARY_COLOR = "#F36F97";
 const APP_BRAND_GRADIENT = ["#F36F97", "#EEB4C3", "#F7DFD6"];
 const APP_LOGO_PATH = "/Users/sultanibneusman/Desktop/Perri/assets/images/app-logo.png";
 const APP_FEATURE_MOCKUP_PATH = path.join(process.cwd(), "public/assets/main_hero.png");
+const genAI = process.env.GOOGLE_GEMINI_API_KEY
+  ? new GoogleGenerativeAI(process.env.GOOGLE_GEMINI_API_KEY)
+  : null;
 
 function asNonEmptyString(value: unknown): string | null {
   return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
@@ -28,6 +40,11 @@ function asNonNegativeInteger(value: unknown): number | null {
 
 function asPositiveInteger(value: unknown): number | null {
   return typeof value === "number" && Number.isInteger(value) && value > 0 ? value : null;
+}
+
+function asAssetStylePresetId(value: unknown): AssetStylePresetId | null {
+  if (!isAssetStylePresetId(value)) return null;
+  return value;
 }
 
 function isMissingColumnError(error: unknown, columnName: string): boolean {
@@ -76,6 +93,90 @@ function asVisualVariant(value: unknown): "ugc_real" | "brand_optimized" | null 
   return null;
 }
 
+function normalizePromptResponse(value: string): string {
+  return value
+    .replace(/```[a-z]*\n?/gi, "")
+    .replace(/```/g, "")
+    .replace(/^"+|"+$/g, "")
+    .trim();
+}
+
+function resolveStyleReferenceImagePath(styleReferenceImagePath: string): string {
+  if (styleReferenceImagePath.startsWith("/assets/")) {
+    return path.join(process.cwd(), "public", styleReferenceImagePath.replace(/^\/+/, ""));
+  }
+
+  if (path.isAbsolute(styleReferenceImagePath)) {
+    return styleReferenceImagePath;
+  }
+
+  return path.join(process.cwd(), styleReferenceImagePath);
+}
+
+async function applyAssetStylePrompt(
+  assetPrompt: string,
+  stylePrompt: string,
+  styleReferenceImagePath: string,
+  reasoningModel: ReasoningModel
+): Promise<string> {
+  const fallbackPrompt = `${assetPrompt}\n\nStyle reference to match: ${stylePrompt}`;
+
+  if (!genAI) return fallbackPrompt;
+
+  try {
+    const model = genAI.getGenerativeModel({ model: reasoningModel });
+    const instruction = `Rewrite this image-generation prompt to preserve the original subject intent but match the style reference.
+
+ORIGINAL ASSET PROMPT:
+${assetPrompt}
+
+STYLE REFERENCE:
+${stylePrompt}
+
+Rules:
+- Keep the original subject, scene purpose, and composition intent.
+- Apply the style reference strongly and consistently.
+- Keep it practical for image generation.
+- Do not add markdown, labels, bullets, JSON, or explanations.
+
+Return only the final rewritten prompt.`;
+
+    let response;
+    if (styleReferenceImagePath) {
+      try {
+        const resolvedReferencePath = resolveStyleReferenceImagePath(styleReferenceImagePath);
+        const imageBuffer = await readFile(resolvedReferencePath);
+        const lowerPath = resolvedReferencePath.toLowerCase();
+        const mimeType =
+          lowerPath.endsWith(".png")
+            ? "image/png"
+            : lowerPath.endsWith(".webp")
+              ? "image/webp"
+              : "image/jpeg";
+
+        response = await model.generateContent([
+          { text: instruction },
+          {
+            inlineData: {
+              data: imageBuffer.toString("base64"),
+              mimeType,
+            },
+          },
+        ]);
+      } catch {
+        response = await model.generateContent(instruction);
+      }
+    } else {
+      response = await model.generateContent(instruction);
+    }
+
+    const rewritten = normalizePromptResponse(response.response.text());
+    return rewritten.length > 0 ? rewritten : fallbackPrompt;
+  } catch {
+    return fallbackPrompt;
+  }
+}
+
 type UgcCharacterRow = {
   id: string;
   prompt_template: string | null;
@@ -95,6 +196,7 @@ export async function POST(request: NextRequest) {
     const explicitAppName = asNonEmptyString(body.appName);
     const selectedCharacterId = asNonEmptyString(body.characterId);
     const requestedVisualVariant = asVisualVariant(body.visualVariant);
+    const requestedAssetStyleId = asAssetStylePresetId(body.assetStyleId);
     const imageGenerationModel = isImageGenerationModel(body.imageGenerationModel)
       ? body.imageGenerationModel
       : DEFAULT_IMAGE_GENERATION_MODEL;
@@ -194,6 +296,18 @@ export async function POST(request: NextRequest) {
         : {};
     const persistedVisualVariant = asVisualVariant(previousGenerationState.visualVariant);
     const visualVariant = requestedVisualVariant || persistedVisualVariant || "brand_optimized";
+    const persistedAssetStyleId = asAssetStylePresetId(previousGenerationState.assetStyleId);
+    const assetStyleId =
+      requestedAssetStyleId || persistedAssetStyleId || DEFAULT_ASSET_STYLE_PRESET;
+    const assetStylePreset = getAssetStylePreset(assetStyleId);
+    const styledAssetPrompt = assetStylePreset.stylePrompt
+      ? await applyAssetStylePrompt(
+        assetPrompt,
+        assetStylePreset.stylePrompt,
+        assetStylePreset.referenceImagePath,
+        reasoningModel
+      )
+      : assetPrompt;
 
     const isCharacterAsset = visualVariant === "ugc_real" && isCharacterAssetPrompt(assetPrompt);
     const firstExistingGenerated = generatedMediaUrls.find(
@@ -259,7 +373,7 @@ export async function POST(request: NextRequest) {
         "Same fictional woman identity across all character assets. Preserve face, age range, skin tone, hijab/wardrobe style."
       : undefined;
 
-    const imageUrl = await generateImage(assetPrompt, {
+    const imageUrl = await generateImage(styledAssetPrompt, {
       collectionId,
       postId,
       index: assetIndex,
@@ -299,6 +413,7 @@ export async function POST(request: NextRequest) {
       generation_state: {
         ...previousGenerationState,
         visualVariant,
+        assetStyleId,
         characterId:
           visualVariant === "ugc_real"
             ? studioCharacter?.id || selectedCharacterId || previousGenerationState.characterId || null
@@ -344,6 +459,8 @@ export async function POST(request: NextRequest) {
       status,
       imageGenerationModel,
       reasoningModel,
+      assetStyleId,
+      appliedAssetPrompt: styledAssetPrompt,
     });
   } catch (err) {
     return NextResponse.json(

@@ -20,6 +20,12 @@ import { useAppStore } from "@/store/app-store";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import {
+  ASSET_STYLE_PRESETS,
+  DEFAULT_ASSET_STYLE_PRESET,
+  getAssetStylePreset,
+  type AssetStylePresetId,
+} from "@/lib/asset-style";
 
 type SlidePlan = {
   headline: string;
@@ -195,6 +201,7 @@ export function RecreationView() {
   const [nicheState, setNicheState] = useState<NicheState>(null);
   const [isGeneratingScript, setIsGeneratingScript] = useState(false);
   const [isGeneratingImages, setIsGeneratingImages] = useState(false);
+  const [assetStyleId, setAssetStyleId] = useState<AssetStylePresetId>(DEFAULT_ASSET_STYLE_PRESET);
   const [imageProgress, setImageProgress] = useState<{ done: number; total: number; current: string }>({
     done: 0,
     total: 0,
@@ -209,6 +216,7 @@ export function RecreationView() {
   }, [selectedPost]);
 
   const activeVersion = scriptVersions.find((version) => version.id === activeVersionId) || null;
+  const selectedAssetStyle = getAssetStylePreset(assetStyleId);
 
   useEffect(() => {
     if (!selectedPost) {
@@ -322,7 +330,6 @@ export function RecreationView() {
 
     setIsGeneratingImages(true);
     setError("");
-
     try {
       const baseResults: GeneratedVersionResult[] = scriptVersions.map((version) => ({
         id: version.id,
@@ -382,6 +389,7 @@ export function RecreationView() {
                 totalAssets: queue.length,
                 isFinalAsset: index === queue.length - 1,
                 appName: activeCollection.app_name,
+                assetStyleId,
               }),
             });
 
@@ -564,6 +572,35 @@ export function RecreationView() {
                     No source images found. The model will use post text only.
                   </p>
                 )}
+              </div>
+
+              <div className="space-y-2">
+                <p className="text-sm font-semibold text-slate-800">Asset Style Match</p>
+                <div className="flex flex-wrap gap-2">
+                  {ASSET_STYLE_PRESETS.map((preset) => {
+                    const isActive = preset.id === assetStyleId;
+                    return (
+                      <button
+                        key={preset.id}
+                        type="button"
+                        onClick={() => setAssetStyleId(preset.id)}
+                        className={`rounded-lg border px-3 py-2 text-left text-sm transition ${
+                          isActive
+                            ? "border-rose-300 bg-rose-50 text-rose-700"
+                            : "border-slate-200 bg-white text-slate-600 hover:border-slate-300"
+                        }`}
+                      >
+                        <p className="font-medium">{preset.label}</p>
+                        <p className="text-xs text-slate-500">{preset.description}</p>
+                      </button>
+                    );
+                  })}
+                </div>
+                {selectedAssetStyle.stylePrompt ? (
+                  <p className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600">
+                    Selected style prompt: {selectedAssetStyle.stylePrompt}
+                  </p>
+                ) : null}
               </div>
 
               <div className="flex flex-wrap gap-3">
