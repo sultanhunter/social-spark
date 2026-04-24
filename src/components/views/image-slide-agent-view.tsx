@@ -1,264 +1,383 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { ArrowLeft, Copy, FileText, Sparkles, Users } from "lucide-react";
+import { useCallback, useMemo, useState } from "react";
+import { ArrowLeft, Copy, ExternalLink, Sparkles } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { useAppStore } from "@/store/app-store";
 import {
   DEFAULT_REASONING_MODEL,
   REASONING_MODELS,
   isReasoningModel,
   type ReasoningModel,
 } from "@/lib/reasoning-model";
-import {
-  DEFAULT_IMAGE_GENERATION_MODEL,
-  IMAGE_GENERATION_MODELS,
-  isImageGenerationModel,
-  type ImageGenerationModel,
-} from "@/lib/image-generation-model";
 
-type ImageSlideCampaignType =
-  | "widget_shock_hook_ugc"
-  | "widget_stop_using_flo_ugc"
-  | "widget_wait_muslim_women_tracking_app_ugc";
-
-const FALLBACK_CAMPAIGNS: ImageSlideCampaignOption[] = [
-  {
-    id: "widget_shock_hook_ugc",
-    label: "UGC Shock Hook (Halal Flo Alternative)",
-    description: "",
-  },
-  {
-    id: "widget_stop_using_flo_ugc",
-    label: "UGC Stop Using Flo (Faith-first)",
-    description: "",
-  },
-  {
-    id: "widget_wait_muslim_women_tracking_app_ugc",
-    label: "UGC Wait App For Muslim Women",
-    description: "",
-  },
-];
-
-type ImageSlideCampaignOption = {
-  id: ImageSlideCampaignType;
-  label: string;
-  description: string;
-};
-
-type ImageSlideDesignAssetPrompt = {
+type ImageSlideAssetPrompt = {
   prompt: string;
   description: string;
 };
 
-type ImageSlideDesignPlan = {
+type ImageSlidePlan = {
   headline: string;
   supportingText: string;
-  figmaInstructions: string[];
-  assetPrompts: ImageSlideDesignAssetPrompt[];
+  assetPrompts: ImageSlideAssetPrompt[];
 };
 
-type ImageSlideSavedPlanSummary = {
+type ScriptVersion = {
   id: string;
-  planNumber: number;
-  campaignType: string;
-  topicBrief?: string;
-  slideCount: number;
-  reasoningModel?: string;
-  characterId?: string;
-  characterName?: string;
-  scriptPreview?: string;
-  slidePlanCount?: number | null;
-  createdAt: string;
-  updatedAt: string;
+  label: string;
+  adaptationMode: "app_context" | "variant_only";
+  script: string;
+  slidePlans: ImageSlidePlan[];
 };
 
-type ImageSlideMetaResponse = {
-  campaigns?: ImageSlideCampaignOption[];
-  savedPlans?: ImageSlideSavedPlanSummary[];
-  warning?: string;
-  error?: string;
-};
-
-type ImageSlideAgentResponse = {
-  campaignType?: string;
-  script?: string;
-  slidePlans?: ImageSlideDesignPlan[];
-  meta?: {
-    topicBrief?: string;
-    reasoningModel?: string;
-    slideCount?: number;
-    characterId?: string;
-    characterName?: string;
-  };
-  saved?: {
-    id?: string;
-    planNumber?: number;
-    createdAt?: string;
-  };
-  error?: string;
-};
-
-type UgcCharacter = {
+type SavedPostResponse = {
   id: string;
-  characterName: string;
-  personaSummary: string;
-  characterType?: "ugc" | "animated";
-  isDefault?: boolean;
-};
-
-type CharacterResponse = {
-  characters?: UgcCharacter[];
-  character?: UgcCharacter | null;
+  title: string | null;
+  original_url: string;
+  media_urls: string[];
+  thumbnail_url: string | null;
+  post_type: string;
+  platform: string;
   error?: string;
 };
+
+type RecreateScriptResponse = {
+  versions?: unknown;
+  isIslamic?: boolean;
+  isPregnancyOrPeriodRelated?: boolean;
+  canIncorporateAppContext?: boolean;
+  canReframeToIslamicAppContext?: boolean;
+  canRecreate?: boolean;
+  relevanceReason?: string;
+  relevanceConfidence?: number;
+  error?: string;
+};
+
+type ParsedScriptSlide = {
+  slideNumber: number;
+  headline: string;
+  supporting: string;
+  body: string;
+};
+
+type GeneratedVersion = {
+  id: string;
+  label: string;
+  adaptationMode: "app_context" | "variant_only";
+  script: string;
+  slides: ParsedScriptSlide[];
+  chatGptImagePrompts: string[];
+};
+
+type RelevanceState = {
+  canRecreate: boolean;
+  isIslamic: boolean;
+  isPregnancyOrPeriodRelated: boolean;
+  canIncorporateAppContext: boolean;
+  canReframeToIslamicAppContext: boolean;
+  reason: string;
+  confidence: number;
+} | null;
+
+function sanitizeScriptVersions(payload: unknown): ScriptVersion[] {
+  if (!Array.isArray(payload)) return [];
+
+  return payload
+    .map((item): ScriptVersion | null => {
+      if (typeof item !== "object" || item === null) return null;
+      const row = item as Record<string, unknown>;
+
+      const script = typeof row.script === "string" ? row.script : "";
+      if (!script.trim()) return null;
+
+      const adaptationMode =
+        row.adaptationMode === "app_context" || row.adaptationMode === "variant_only"
+          ? row.adaptationMode
+          : /Adaptation Mode\s*:\s*app_context/i.test(script)
+            ? "app_context"
+            : "variant_only";
+
+      const slidePlans: ImageSlidePlan[] = Array.isArray(row.slidePlans)
+        ? row.slidePlans
+          .map((plan): ImageSlidePlan | null => {
+            if (typeof plan !== "object" || plan === null) return null;
+            const planRow = plan as Record<string, unknown>;
+            const assetPrompts = Array.isArray(planRow.assetPrompts)
+              ? planRow.assetPrompts
+                .map((asset): ImageSlideAssetPrompt | null => {
+                  if (typeof asset !== "object" || asset === null) return null;
+                  const assetRow = asset as Record<string, unknown>;
+                  return {
+                    prompt: typeof assetRow.prompt === "string" ? assetRow.prompt.trim() : "",
+                    description:
+                      typeof assetRow.description === "string" ? assetRow.description.trim() : "",
+                  };
+                })
+                .filter((asset): asset is ImageSlideAssetPrompt => Boolean(asset && asset.prompt))
+              : [];
+
+            return {
+              headline: typeof planRow.headline === "string" ? planRow.headline.trim() : "",
+              supportingText:
+                typeof planRow.supportingText === "string" ? planRow.supportingText.trim() : "",
+              assetPrompts,
+            };
+          })
+          .filter((plan): plan is ImageSlidePlan => Boolean(plan))
+        : [];
+
+      return {
+        id: typeof row.id === "string" && row.id.trim() ? row.id : adaptationMode,
+        label:
+          typeof row.label === "string" && row.label.trim()
+            ? row.label
+            : adaptationMode === "app_context"
+              ? "App Context"
+              : "Original Topic",
+        adaptationMode,
+        script,
+        slidePlans,
+      };
+    })
+    .filter((version): version is ScriptVersion => Boolean(version));
+}
+
+function parseScriptSlides(script: string): ParsedScriptSlide[] {
+  const sections = script
+    .replace(/\r/g, "")
+    .match(/(?:^|\n)(Slide\s+\d+[\s\S]*?)(?=\nSlide\s+\d+|$)/gi);
+
+  if (!sections) return [];
+
+  return sections.map((section, index) => {
+    const lines = section
+      .split("\n")
+      .map((line) => line.trim())
+      .filter((line) => line.length > 0);
+
+    let headline = "";
+    let supporting = "";
+    const bodyLines: string[] = [];
+    let bodyMode = false;
+
+    for (const line of lines) {
+      if (/^Slide\s+\d+/i.test(line)) continue;
+
+      const headlineMatch = line.match(/^Headline\s*:\s*(.*)$/i);
+      if (headlineMatch) {
+        headline = headlineMatch[1]?.trim() || "";
+        bodyMode = false;
+        continue;
+      }
+
+      const supportingMatch = line.match(/^Supporting\s*:\s*(.*)$/i);
+      if (supportingMatch) {
+        supporting = supportingMatch[1]?.trim() || "";
+        bodyMode = false;
+        continue;
+      }
+
+      const bodyMatch = line.match(/^Body\s*:\s*(.*)$/i);
+      if (bodyMatch) {
+        const firstBodyLine = bodyMatch[1]?.trim() || "";
+        if (firstBodyLine) bodyLines.push(firstBodyLine);
+        bodyMode = true;
+        continue;
+      }
+
+      if (bodyMode) {
+        bodyLines.push(line);
+      }
+    }
+
+    return {
+      slideNumber: index + 1,
+      headline,
+      supporting,
+      body: bodyLines.join("\n").trim(),
+    };
+  });
+}
+
+function buildChatGptSlidePrompt(
+  slide: ParsedScriptSlide,
+  slidePlan: ImageSlidePlan | undefined,
+  totalSlides: number
+): string {
+  const scriptContext = [slide.headline, slide.supporting, slide.body]
+    .filter((line) => line.trim().length > 0)
+    .join(" | ");
+
+  const visualContext = (slidePlan?.assetPrompts || [])
+    .slice(0, 2)
+    .map((asset) => asset.prompt.trim())
+    .filter((prompt) => prompt.length > 0)
+    .join(" ");
+
+  return [
+    `Create one Instagram carousel image for slide ${slide.slideNumber} of ${totalSlides}.`,
+    scriptContext
+      ? `Narrative reference from slide copy: ${scriptContext}.`
+      : "Narrative reference: faith-sensitive Muslimah lifestyle educational context.",
+    visualContext
+      ? `Visual direction: ${visualContext}`
+      : "Visual direction: candid UGC-style Muslimah lifestyle setting with natural lighting and emotional clarity.",
+    "4:5 portrait composition, photorealistic, social-media-native framing.",
+    "No text, no typography, no logos, no app UI screenshots, no watermarks.",
+  ].join(" ");
+}
+
+function buildGeneratedVersion(version: ScriptVersion): GeneratedVersion {
+  const slides = parseScriptSlides(version.script);
+  const sourceSlides =
+    slides.length > 0
+      ? slides
+      : version.slidePlans.map((plan, index) => ({
+          slideNumber: index + 1,
+          headline: plan.headline,
+          supporting: plan.supportingText,
+          body: "",
+        }));
+
+  const totalSlides = sourceSlides.length > 0 ? sourceSlides.length : Math.max(version.slidePlans.length, 1);
+  const chatGptImagePrompts = sourceSlides.map((slide, index) =>
+    buildChatGptSlidePrompt(slide, version.slidePlans[index], totalSlides)
+  );
+
+  return {
+    id: version.id,
+    label: version.label,
+    adaptationMode: version.adaptationMode,
+    script: version.script,
+    slides: sourceSlides,
+    chatGptImagePrompts,
+  };
+}
 
 export function ImageSlideAgentView({ collectionId }: { collectionId: string }) {
   const router = useRouter();
-  const { activeCollection } = useAppStore();
 
+  const [instagramUrl, setInstagramUrl] = useState("");
   const [reasoningModel, setReasoningModel] = useState<ReasoningModel>(DEFAULT_REASONING_MODEL);
-  const [imageGenerationModel, setImageGenerationModel] = useState<ImageGenerationModel>(DEFAULT_IMAGE_GENERATION_MODEL);
-  const [isLoadingMeta, setIsLoadingMeta] = useState(false);
-  const [isLoadingCharacters, setIsLoadingCharacters] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
-  const [latestGeneratedPlanId, setLatestGeneratedPlanId] = useState<string | null>(null);
-
-  const [campaigns, setCampaigns] = useState<ImageSlideCampaignOption[]>([]);
-  const [savedPlans, setSavedPlans] = useState<ImageSlideSavedPlanSummary[]>([]);
-  const [ugcCharacters, setUgcCharacters] = useState<UgcCharacter[]>([]);
-
-  const [campaignType, setCampaignType] = useState<ImageSlideCampaignType>("widget_shock_hook_ugc");
-  const [characterId, setCharacterId] = useState<string>("auto");
-  const [slideCount, setSlideCount] = useState<number>(6);
-  const [topicBrief, setTopicBrief] = useState("");
-
-  const [script, setScript] = useState("");
-  const [slidePlans, setSlidePlans] = useState<ImageSlideDesignPlan[]>([]);
-
+  const [statusMessage, setStatusMessage] = useState("");
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
+  const [savedPost, setSavedPost] = useState<SavedPostResponse | null>(null);
+  const [relevance, setRelevance] = useState<RelevanceState>(null);
+  const [versions, setVersions] = useState<GeneratedVersion[]>([]);
 
-  const selectedUgcCharacter = useMemo(
-    () => ugcCharacters.find((character) => character.id === characterId) || null,
-    [ugcCharacters, characterId]
-  );
+  const hasResult = useMemo(() => versions.length > 0, [versions]);
 
-  const loadMeta = useCallback(async () => {
-    setIsLoadingMeta(true);
+  const copyText = useCallback(async (value: string) => {
     try {
-      const response = await fetch(
-        `/api/image-slide-agent?collectionId=${encodeURIComponent(collectionId)}&limit=30`,
-        { method: "GET", cache: "no-store" }
-      );
-      const data = (await response.json()) as ImageSlideMetaResponse;
-      if (!response.ok) {
-        throw new Error(data.error || "Failed to load image-slide metadata.");
-      }
-
-      const nextCampaigns = Array.isArray(data.campaigns) ? data.campaigns : [];
-      const nextSavedPlans = Array.isArray(data.savedPlans) ? data.savedPlans : [];
-      setCampaigns(nextCampaigns);
-      setSavedPlans(nextSavedPlans);
-
-      setCampaignType((current) => {
-        if (nextCampaigns.some((item) => item.id === current)) return current;
-        return nextCampaigns[0]?.id || FALLBACK_CAMPAIGNS[0].id;
-      });
-
-      if (data.warning) {
-        setError(data.warning);
-      }
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to load image-slide metadata.");
-    } finally {
-      setIsLoadingMeta(false);
+      await navigator.clipboard.writeText(value);
+      setSuccess("Copied to clipboard.");
+    } catch {
+      setError("Failed to copy to clipboard.");
     }
-  }, [collectionId]);
-
-  const loadCharacters = useCallback(async () => {
-    setIsLoadingCharacters(true);
-    try {
-      const response = await fetch(
-        `/api/video-agent/characters?collectionId=${encodeURIComponent(collectionId)}`,
-        { method: "GET", cache: "no-store" }
-      );
-      const data = (await response.json()) as CharacterResponse;
-      if (!response.ok) {
-        throw new Error(data.error || "Failed to load characters.");
-      }
-
-      const characters = Array.isArray(data.characters)
-        ? data.characters
-        : data.character
-          ? [data.character]
-          : [];
-      const ugcOnly = characters.filter((character) => (character.characterType || "ugc") === "ugc");
-      setUgcCharacters(ugcOnly);
-
-      setCharacterId((current) => {
-        if (current !== "auto" && ugcOnly.some((item) => item.id === current)) return current;
-        const defaultCharacter = ugcOnly.find((item) => item.isDefault) || null;
-        return defaultCharacter?.id || "auto";
-      });
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to load characters.");
-    } finally {
-      setIsLoadingCharacters(false);
-    }
-  }, [collectionId]);
-
-  useEffect(() => {
-    void loadMeta();
-    void loadCharacters();
-  }, [loadMeta, loadCharacters]);
+  }, []);
 
   const handleGenerate = useCallback(async () => {
+    const cleanedUrl = instagramUrl.trim();
+    if (!cleanedUrl) {
+      setError("Please paste an Instagram post URL.");
+      return;
+    }
+
+    if (!/instagram\.com/i.test(cleanedUrl)) {
+      setError("This agent currently supports Instagram links only.");
+      return;
+    }
+
     setIsGenerating(true);
     setError("");
     setSuccess("");
+    setStatusMessage("Saving Instagram post...");
+    setSavedPost(null);
+    setVersions([]);
+    setRelevance(null);
 
     try {
-      const response = await fetch("/api/image-slide-agent", {
+      const saveResponse = await fetch("/api/posts/save", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
+          url: cleanedUrl,
           collectionId,
-          campaignType,
-          characterId: characterId === "auto" ? null : characterId,
-          slideCount,
-          topicBrief: topicBrief.trim(),
+          postType: "image_slides",
+        }),
+      });
+
+      const saveData = (await saveResponse.json()) as SavedPostResponse;
+      if (!saveResponse.ok) {
+        throw new Error(saveData.error || "Failed to save Instagram post.");
+      }
+
+      const referenceImageUrls = Array.isArray(saveData.media_urls)
+        ? saveData.media_urls
+        : saveData.thumbnail_url
+          ? [saveData.thumbnail_url]
+          : [];
+
+      if (referenceImageUrls.length === 0) {
+        throw new Error("No images were extracted from the saved post.");
+      }
+
+      setSavedPost(saveData);
+      setStatusMessage("Classifying niche and generating scripts...");
+
+      const scriptResponse = await fetch("/api/recreate/script", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          postId: saveData.id,
+          collectionId,
+          referenceImageUrls,
+          includeHookStrategy: false,
+          visualVariantPreference: "ugc_real",
           reasoningModel,
         }),
       });
 
-      const data = (await response.json()) as ImageSlideAgentResponse;
-      if (!response.ok) {
-        throw new Error(data.error || "Failed to generate image-slide plan.");
+      const scriptData = (await scriptResponse.json()) as RecreateScriptResponse;
+      if (!scriptResponse.ok) {
+        throw new Error(scriptData.error || "Failed to classify and generate scripts.");
       }
 
-      if (!data.script || !Array.isArray(data.slidePlans)) {
-        throw new Error("Image-slide agent response is incomplete.");
+      setRelevance({
+        canRecreate: Boolean(scriptData.canRecreate),
+        isIslamic: Boolean(scriptData.isIslamic),
+        isPregnancyOrPeriodRelated: Boolean(scriptData.isPregnancyOrPeriodRelated),
+        canIncorporateAppContext: Boolean(scriptData.canIncorporateAppContext),
+        canReframeToIslamicAppContext: Boolean(scriptData.canReframeToIslamicAppContext),
+        reason: typeof scriptData.relevanceReason === "string" ? scriptData.relevanceReason : "",
+        confidence: typeof scriptData.relevanceConfidence === "number" ? scriptData.relevanceConfidence : 0,
+      });
+
+      const sanitizedVersions = sanitizeScriptVersions(scriptData.versions);
+      if (!Boolean(scriptData.canRecreate) || sanitizedVersions.length === 0) {
+        throw new Error(
+          scriptData.relevanceReason ||
+            "This post is not eligible for recreation in the current niche rules."
+        );
       }
 
-      setScript(data.script);
-      setSlidePlans(data.slidePlans);
-      setLatestGeneratedPlanId(typeof data.saved?.id === "string" ? data.saved.id : null);
+      const generatedVersions = sanitizedVersions.map((version) => buildGeneratedVersion(version));
+      setVersions(generatedVersions);
       setSuccess(
-        data.saved?.planNumber
-          ? `Generated and saved as plan ${data.saved.planNumber}.`
-          : "Image-slide plan generated."
+        `Done. Generated ${generatedVersions.length} script version${generatedVersions.length > 1 ? "s" : ""} with per-slide ChatGPT image prompts.`
       );
-      await loadMeta();
+      setStatusMessage("Generation complete.");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to generate image-slide plan.");
+      setError(err instanceof Error ? err.message : "Failed to run image slide agent flow.");
+      setStatusMessage("");
     } finally {
       setIsGenerating(false);
     }
-  }, [collectionId, campaignType, characterId, slideCount, topicBrief, reasoningModel, loadMeta]);
+  }, [instagramUrl, collectionId, reasoningModel]);
 
   return (
     <div className="flex-1 overflow-y-auto px-6 py-6 md:px-8">
@@ -272,59 +391,25 @@ export function ImageSlideAgentView({ collectionId }: { collectionId: string }) 
           <CardHeader>
             <CardTitle className="text-lg">Image Slides Agent</CardTitle>
             <CardDescription>
-              UGC TikTok slide scripts + Figma recreation plan. Campaign-first flow for faith-sensitive app positioning.
+              Paste an Instagram post link. The agent runs save -&gt; classify -&gt; script generation,
+              then returns ChatGPT-ready image prompts for every slide.
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
-            <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-4">
+            <div className="grid gap-3 md:grid-cols-2">
               <div className="space-y-1.5">
-                <label className="text-xs font-semibold uppercase tracking-wide text-slate-500">Campaign</label>
-                <select
-                  value={campaignType}
-                  onChange={(event) => setCampaignType(event.target.value as ImageSlideCampaignType)}
-                  className="w-full rounded-lg border border-slate-300 bg-white px-2.5 py-2 text-sm text-slate-800 outline-none transition focus:border-rose-400 focus:ring-2 focus:ring-rose-200"
-                >
-                  {(campaigns.length > 0 ? campaigns : FALLBACK_CAMPAIGNS).map((item) => (
-                    <option key={item.id} value={item.id}>{item.label}</option>
-                  ))}
-                </select>
-              </div>
-
-              <div className="space-y-1.5">
-                <label className="text-xs font-semibold uppercase tracking-wide text-slate-500">Character</label>
-                <select
-                  value={characterId}
-                  disabled={isLoadingCharacters}
-                  onChange={(event) => setCharacterId(event.target.value)}
-                  className="w-full rounded-lg border border-slate-300 bg-white px-2.5 py-2 text-sm text-slate-800 outline-none transition focus:border-rose-400 focus:ring-2 focus:ring-rose-200"
-                >
-                  <option value="auto">Auto/default UGC character</option>
-                  {ugcCharacters.map((character) => (
-                    <option key={character.id} value={character.id}>
-                      {character.characterName}{character.isDefault ? " (Default)" : ""}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <div className="space-y-1.5">
-                <label className="text-xs font-semibold uppercase tracking-wide text-slate-500">Slides</label>
+                <label className="text-xs font-semibold uppercase tracking-wide text-slate-500">Instagram Post URL</label>
                 <input
-                  type="number"
-                  min={5}
-                  max={6}
-                  value={slideCount}
-                  onChange={(event) => {
-                    const value = Number(event.target.value);
-                    if (!Number.isFinite(value)) return;
-                    setSlideCount(Math.max(5, Math.min(6, Math.round(value))));
-                  }}
+                  type="url"
+                  value={instagramUrl}
+                  onChange={(event) => setInstagramUrl(event.target.value)}
+                  placeholder="https://www.instagram.com/p/..."
                   className="w-full rounded-lg border border-slate-300 bg-white px-2.5 py-2 text-sm text-slate-800 outline-none transition focus:border-rose-400 focus:ring-2 focus:ring-rose-200"
                 />
               </div>
 
               <div className="space-y-1.5">
-                <label className="text-xs font-semibold uppercase tracking-wide text-slate-500">Reasoning Model</label>
+                <label className="text-xs font-semibold uppercase tracking-wide text-slate-500">Reasoning model</label>
                 <select
                   value={reasoningModel}
                   onChange={(event) => {
@@ -340,157 +425,137 @@ export function ImageSlideAgentView({ collectionId }: { collectionId: string }) 
               </div>
             </div>
 
-            <div className="space-y-1.5">
-              <label className="text-xs font-semibold uppercase tracking-wide text-slate-500">Topic Focus (optional)</label>
-              <textarea
-                value={topicBrief}
-                onChange={(event) => setTopicBrief(event.target.value)}
-                rows={3}
-                placeholder="Optional angle or constraints for this campaign."
-                className="w-full rounded-lg border border-slate-300 bg-white px-2.5 py-2 text-sm text-slate-800 outline-none transition focus:border-rose-400 focus:ring-2 focus:ring-rose-200"
-              />
-            </div>
-
-            {selectedUgcCharacter ? (
-              <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600">
-                <p className="font-semibold text-slate-700">{selectedUgcCharacter.characterName}</p>
-                <p className="mt-0.5">{selectedUgcCharacter.personaSummary}</p>
-              </div>
-            ) : null}
-
             <div className="flex flex-wrap gap-2">
               <Button variant="primary" onClick={() => void handleGenerate()} isLoading={isGenerating}>
                 <Sparkles className="mr-2 h-4 w-4" />
-                {isGenerating ? "Generating..." : "Generate Script + Figma Plan"}
+                {isGenerating ? "Running Flow..." : "Save + Classify + Generate"}
               </Button>
-              <Button variant="outline" onClick={() => void loadMeta()} isLoading={isLoadingMeta}>
-                Refresh Saved Plans
-              </Button>
-              {script ? (
-                <Button variant="outline" onClick={() => void navigator.clipboard.writeText(script)}>
-                  <Copy className="mr-2 h-4 w-4" />
-                  Copy Script
-                </Button>
-              ) : null}
-              {latestGeneratedPlanId ? (
+
+              {savedPost ? (
                 <Button
                   variant="outline"
-                  onClick={() => router.push(`/collections/${collectionId}/image-slide-agent/${latestGeneratedPlanId}`)}
+                  onClick={() => router.push(`/collections/${collectionId}/posts/${savedPost.id}`)}
                 >
-                  <FileText className="mr-2 h-4 w-4" />
-                  Open Latest Plan
+                  <ExternalLink className="mr-2 h-4 w-4" />
+                  Open Saved Post
                 </Button>
               ) : null}
             </div>
 
-            <div className="max-w-xs space-y-1.5">
-              <label className="text-xs font-semibold uppercase tracking-wide text-slate-500">Image Model (for plan detail asset generation)</label>
-              <select
-                value={imageGenerationModel}
-                onChange={(event) => {
-                  const value = event.target.value;
-                  if (isImageGenerationModel(value)) setImageGenerationModel(value);
-                }}
-                className="w-full rounded-lg border border-slate-300 bg-white px-2.5 py-2 text-sm text-slate-800 outline-none transition focus:border-rose-400 focus:ring-2 focus:ring-rose-200"
-              >
-                {IMAGE_GENERATION_MODELS.map((model) => (
-                  <option key={model.id} value={model.id}>{model.label}</option>
-                ))}
-              </select>
-            </div>
+            {statusMessage ? (
+              <p className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700">{statusMessage}</p>
+            ) : null}
 
-            {error ? (
-              <p className="rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">{error}</p>
+            {error ? <p className="rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">{error}</p> : null}
+            {success ? <p className="rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700">{success}</p> : null}
+
+            {savedPost ? (
+              <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-700">
+                <p className="font-semibold text-slate-800">Saved Post</p>
+                <p className="mt-0.5">{savedPost.title || savedPost.original_url}</p>
+                <p className="mt-0.5 text-slate-500">
+                  {savedPost.platform} · {savedPost.post_type} · {savedPost.media_urls?.length || 0} extracted image(s)
+                </p>
+              </div>
             ) : null}
-            {success ? (
-              <p className="rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700">{success}</p>
-            ) : null}
-            {activeCollection?.app_name ? (
-              <p className="text-xs text-slate-500">App context source: {activeCollection.app_name}</p>
+
+            {relevance ? (
+              <div className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs text-slate-700">
+                <p className="font-semibold text-slate-800">Classification</p>
+                <div className="mt-1 flex flex-wrap gap-2">
+                  <Badge variant="default">isIslamic: {String(relevance.isIslamic)}</Badge>
+                  <Badge variant="default">period/pregnancy: {String(relevance.isPregnancyOrPeriodRelated)}</Badge>
+                  <Badge variant="default">canRecreate: {String(relevance.canRecreate)}</Badge>
+                </div>
+                {relevance.reason ? (
+                  <p className="mt-1.5 text-slate-600">
+                    {relevance.reason}
+                    {relevance.confidence > 0 ? ` (${Math.round(relevance.confidence * 100)}% confidence)` : ""}
+                  </p>
+                ) : null}
+              </div>
             ) : null}
           </CardContent>
         </Card>
 
-        {savedPlans.length > 0 ? (
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-base">Saved Plans</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-2">
-              {savedPlans.slice(0, 10).map((item) => (
-                <button
-                  key={item.id}
-                  type="button"
-                  onClick={() => router.push(`/collections/${collectionId}/image-slide-agent/${item.id}`)}
-                  className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-left transition hover:border-rose-300 hover:bg-rose-50/40"
-                >
-                  <p className="text-sm font-semibold text-slate-800">{`Plan ${item.planNumber} - ${item.campaignType.replace(/_/g, " ")}`}</p>
-                  <p className="text-xs text-slate-500">{`${item.slideCount} slides${item.characterName ? ` | ${item.characterName}` : ""} | ${new Date(item.createdAt).toLocaleString()}`}</p>
-                  {item.scriptPreview ? <p className="mt-1 text-xs text-slate-600">{item.scriptPreview}</p> : null}
-                </button>
-              ))}
-            </CardContent>
-          </Card>
-        ) : null}
-
-        {script ? (
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-base">Generated Script</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <pre className="whitespace-pre-wrap rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700">{script}</pre>
-            </CardContent>
-          </Card>
-        ) : null}
-
-        {slidePlans.length > 0 ? (
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-base">Figma Recreation Plan</CardTitle>
-              <CardDescription>Per-slide build steps and visual asset prompts.</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-3">
-              {slidePlans.map((plan, index) => (
-                <div key={`slide-plan-${index}`} className="rounded-lg border border-slate-200 bg-white p-3">
-                  <div className="mb-1.5 flex items-center gap-1.5">
-                    <Badge variant="default">Slide {index + 1}</Badge>
-                    <Badge variant="default"><FileText className="mr-1 h-3 w-3" />Figma</Badge>
-                    <Badge variant="default"><Users className="mr-1 h-3 w-3" />UGC vibe</Badge>
+        {hasResult
+          ? versions.map((version) => (
+            <Card key={version.id}>
+              <CardHeader>
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div>
+                    <CardTitle className="text-base">{version.label}</CardTitle>
+                    <CardDescription>
+                      {version.adaptationMode === "app_context" ? "app_context" : "variant_only"} · {version.slides.length} slides
+                    </CardDescription>
                   </div>
-
-                  {plan.headline ? <p className="text-sm text-slate-700"><span className="font-semibold text-slate-500">Headline:</span> {plan.headline}</p> : null}
-                  {plan.supportingText ? <p className="mt-0.5 text-sm text-slate-700"><span className="font-semibold text-slate-500">Supporting:</span> {plan.supportingText}</p> : null}
-
-                  {plan.figmaInstructions.length > 0 ? (
-                    <div className="mt-2">
-                      <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Figma Instructions</p>
-                      <ol className="mt-1 list-inside list-decimal space-y-0.5">
-                        {plan.figmaInstructions.map((step, stepIndex) => (
-                          <li key={`step-${index}-${stepIndex}`} className="text-sm text-slate-600">{step}</li>
-                        ))}
-                      </ol>
-                    </div>
-                  ) : null}
-
-                  {plan.assetPrompts.length > 0 ? (
-                    <div className="mt-2">
-                      <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Asset Prompts</p>
-                      <div className="mt-1 space-y-1">
-                        {plan.assetPrompts.map((asset, assetIndex) => (
-                          <div key={`asset-${index}-${assetIndex}`} className="rounded border border-slate-200 bg-slate-50 px-2.5 py-1.5">
-                            <p className="text-xs font-semibold text-slate-700">{asset.description || `Asset ${assetIndex + 1}`}</p>
-                            <p className="text-xs text-slate-600">{asset.prompt}</p>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  ) : null}
+                  <div className="flex flex-wrap gap-2">
+                    <Button variant="outline" size="sm" onClick={() => void copyText(version.script)}>
+                      <Copy className="mr-1.5 h-3.5 w-3.5" />
+                      Copy Script
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() =>
+                        void copyText(
+                          version.chatGptImagePrompts
+                            .map((prompt, index) => `Slide ${index + 1}\n${prompt}`)
+                            .join("\n\n")
+                        )
+                      }
+                    >
+                      <Copy className="mr-1.5 h-3.5 w-3.5" />
+                      Copy All Prompts
+                    </Button>
+                  </div>
                 </div>
-              ))}
-            </CardContent>
-          </Card>
-        ) : null}
+              </CardHeader>
+              <CardContent className="space-y-3">
+                <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Script</p>
+                  <pre className="mt-1 whitespace-pre-wrap text-sm text-slate-700">{version.script}</pre>
+                </div>
+
+                {version.slides.map((slide, index) => (
+                  <div key={`${version.id}-slide-${index}`} className="rounded-lg border border-slate-200 bg-white p-3">
+                    <p className="text-sm font-semibold text-slate-800">Slide {slide.slideNumber}</p>
+                    {slide.headline ? (
+                      <p className="mt-1 text-sm text-slate-700">
+                        <span className="font-semibold text-slate-500">Headline:</span> {slide.headline}
+                      </p>
+                    ) : null}
+                    {slide.supporting ? (
+                      <p className="mt-0.5 text-sm text-slate-700">
+                        <span className="font-semibold text-slate-500">Supporting:</span> {slide.supporting}
+                      </p>
+                    ) : null}
+                    {slide.body ? (
+                      <p className="mt-0.5 whitespace-pre-wrap text-sm text-slate-700">
+                        <span className="font-semibold text-slate-500">Body:</span> {slide.body}
+                      </p>
+                    ) : null}
+
+                    <div className="mt-2 rounded border border-slate-200 bg-slate-50 px-2.5 py-2">
+                      <div className="flex items-center justify-between gap-2">
+                        <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">ChatGPT Image Prompt</p>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => void copyText(version.chatGptImagePrompts[index] || "")}
+                        >
+                          <Copy className="mr-1.5 h-3.5 w-3.5" />
+                          Copy
+                        </Button>
+                      </div>
+                      <p className="mt-1 text-xs text-slate-700">{version.chatGptImagePrompts[index] || "Prompt unavailable."}</p>
+                    </div>
+                  </div>
+                ))}
+              </CardContent>
+            </Card>
+          ))
+          : null}
       </div>
     </div>
   );
