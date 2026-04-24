@@ -7,6 +7,11 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import {
+  ASSET_STYLE_PRESETS,
+  DEFAULT_ASSET_STYLE_PRESET,
+  type AssetStylePresetId,
+} from "@/lib/asset-style";
+import {
   DEFAULT_IMAGE_GENERATION_MODEL,
   IMAGE_GENERATION_MODELS,
   isImageGenerationModel,
@@ -80,6 +85,7 @@ export function ImageSlideAgentPlanView({
   const [isLoading, setIsLoading] = useState(false);
   const [isGeneratingByAssetKey, setIsGeneratingByAssetKey] = useState<Record<string, boolean>>({});
   const [imageGenerationModel, setImageGenerationModel] = useState<ImageGenerationModel>(DEFAULT_IMAGE_GENERATION_MODEL);
+  const [assetStyleId, setAssetStyleId] = useState<AssetStylePresetId>(DEFAULT_ASSET_STYLE_PRESET);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
 
@@ -134,6 +140,8 @@ export function ImageSlideAgentPlanView({
           slideIndex,
           assetIndex,
           imageGenerationModel,
+          assetStyleId,
+          reasoningModel: plan?.reasoningModel,
         }),
       });
 
@@ -159,7 +167,7 @@ export function ImageSlideAgentPlanView({
     } finally {
       setIsGeneratingByAssetKey((prev) => ({ ...prev, [key]: false }));
     }
-  }, [collectionId, planId, imageGenerationModel]);
+  }, [collectionId, planId, imageGenerationModel, assetStyleId, plan?.reasoningModel]);
 
   return (
     <div className="flex-1 overflow-y-auto px-6 py-6 md:px-8">
@@ -204,6 +212,21 @@ export function ImageSlideAgentPlanView({
                   >
                     {IMAGE_GENERATION_MODELS.map((model) => (
                       <option key={model.id} value={model.id}>{model.label}</option>
+                    ))}
+                  </select>
+                </div>
+                <div className="max-w-xs space-y-1.5">
+                  <label className="text-xs font-semibold uppercase tracking-wide text-slate-500">Asset Style Match</label>
+                  <select
+                    value={assetStyleId}
+                    onChange={(event) => {
+                      const nextStyleId = event.target.value as AssetStylePresetId;
+                      setAssetStyleId(nextStyleId);
+                    }}
+                    className="w-full rounded-lg border border-slate-300 bg-white px-2.5 py-2 text-sm text-slate-800 outline-none transition focus:border-rose-400 focus:ring-2 focus:ring-rose-200"
+                  >
+                    {ASSET_STYLE_PRESETS.map((preset) => (
+                      <option key={preset.id} value={preset.id}>{preset.label}</option>
                     ))}
                   </select>
                 </div>

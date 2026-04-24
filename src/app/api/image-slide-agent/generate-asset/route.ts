@@ -1,5 +1,13 @@
+import path from "path";
+import { readFile } from "fs/promises";
+import { GoogleGenerativeAI } from "@google/generative-ai";
 import { NextRequest, NextResponse } from "next/server";
 import { supabase } from "@/lib/supabase";
+import {
+  DEFAULT_ASSET_STYLE_PRESET,
+  getAssetStylePreset,
+  isAssetStylePresetId,
+} from "@/lib/asset-style";
 import type { SlideGenerationPlan } from "@/lib/gemini";
 import { generateImage } from "@/lib/gemini-image";
 import {
@@ -7,12 +15,20 @@ import {
   isImageGenerationModel,
   type ImageGenerationModel,
 } from "@/lib/image-generation-model";
+import {
+  DEFAULT_REASONING_MODEL,
+  isReasoningModel,
+  type ReasoningModel,
+} from "@/lib/reasoning-model";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
 
 const APP_BRAND_PRIMARY_COLOR = "#F36F97";
 const APP_BRAND_GRADIENT = ["#F36F97", "#EEB4C3", "#F7DFD6"];
+const genAI = process.env.GOOGLE_GEMINI_API_KEY
+  ? new GoogleGenerativeAI(process.env.GOOGLE_GEMINI_API_KEY)
+  : null;
 
 type GeneratedImageAssetEntry = {
   slideIndex: number;
@@ -33,6 +49,86 @@ function asIndex(value: unknown): number | null {
   const rounded = Math.round(value);
   if (rounded < 0) return null;
   return rounded;
+}
+
+function resolveStyleReferenceImagePath(styleReferenceImagePath: string): string {
+  if (styleReferenceImagePath.startsWith("/assets/")) {
+    return path.join(process.cwd(), "public", styleReferenceImagePath.replace(/^\/+/, ""));
+  }
+
+  if (path.isAbsolute(styleReferenceImagePath)) return styleReferenceImagePath;
+  return path.join(process.cwd(), styleReferenceImagePath);
+}
+
+function normalizePromptResponse(value: string): string {
+  return value
+    .replace(/```[a-z]*\n?/gi, "")
+    .replace(/```/g, "")
+    .replace(/^"+|"+$/g, "")
+    .trim();
+}
+
+async function applyAssetStylePrompt(
+  assetPrompt: string,
+  stylePrompt: string,
+  styleReferenceImagePath: string,
+  reasoningModel: ReasoningModel
+): Promise<string> {
+  const fallbackPrompt = `${assetPrompt}\n\nStyle reference to match: ${stylePrompt}`;
+  if (!genAI) return fallbackPrompt;
+
+  try {
+    const model = genAI.getGenerativeModel({ model: reasoningModel });
+    const instruction = `Rewrite this image-generation prompt to preserve the original subject intent but match the style reference.
+
+ORIGINAL ASSET PROMPT:
+${assetPrompt}
+
+STYLE REFERENCE:
+${stylePrompt}
+
+Rules:
+- Keep the original subject, scene purpose, and composition intent.
+- Apply the style reference strongly and consistently.
+- Keep it practical for image generation.
+- Do not add markdown, labels, bullets, JSON, or explanations.
+
+Return only the final rewritten prompt.`;
+
+    let response;
+    if (styleReferenceImagePath) {
+      try {
+        const resolvedReferencePath = resolveStyleReferenceImagePath(styleReferenceImagePath);
+        const imageBuffer = await readFile(resolvedReferencePath);
+        const lowerPath = resolvedReferencePath.toLowerCase();
+        const mimeType =
+          lowerPath.endsWith(".png")
+            ? "image/png"
+            : lowerPath.endsWith(".webp")
+              ? "image/webp"
+              : "image/jpeg";
+
+        response = await model.generateContent([
+          { text: instruction },
+          {
+            inlineData: {
+              data: imageBuffer.toString("base64"),
+              mimeType,
+            },
+          },
+        ]);
+      } catch {
+        response = await model.generateContent(instruction);
+      }
+    } else {
+      response = await model.generateContent(instruction);
+    }
+
+    const rewritten = normalizePromptResponse(response.response.text());
+    return rewritten.length > 0 ? rewritten : fallbackPrompt;
+  } catch {
+    return fallbackPrompt;
+  }
 }
 
 function asRecord(value: unknown): Record<string, unknown> | null {
@@ -145,6 +241,12 @@ export async function POST(request: NextRequest) {
     const planId = asText(body.planId);
     const slideIndex = asIndex(body.slideIndex);
     const assetIndex = asIndex(body.assetIndex);
+    const assetStyleId = isAssetStylePresetId(body.assetStyleId)
+      ? body.assetStyleId
+      : DEFAULT_ASSET_STYLE_PRESET;
+    const reasoningModel: ReasoningModel = isReasoningModel(body.reasoningModel)
+      ? body.reasoningModel
+      : DEFAULT_REASONING_MODEL;
     const imageGenerationModel: ImageGenerationModel = isImageGenerationModel(body.imageGenerationModel)
       ? body.imageGenerationModel
       : DEFAULT_IMAGE_GENERATION_MODEL;
@@ -193,6 +295,16 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: `Asset ${assetIndex + 1} not found for slide ${slideIndex + 1}.` }, { status: 400 });
     }
 
+    const assetStylePreset = getAssetStylePreset(assetStyleId);
+    const styledAssetPrompt = assetStylePreset.stylePrompt
+      ? await applyAssetStylePrompt(
+        asset.prompt,
+        assetStylePreset.stylePrompt,
+        assetStylePreset.referenceImagePath,
+        reasoningModel
+      )
+      : asset.prompt;
+
     const payloadCharacter = asRecord(payload.character);
     let characterReferenceImageUrl = payloadCharacter ? asText(payloadCharacter.referenceImageUrl) : "";
     let characterLockDescriptor = payloadCharacter ? asText(payloadCharacter.promptTemplate) : "";
@@ -217,7 +329,7 @@ export async function POST(request: NextRequest) {
       Boolean(characterReferenceImageUrl) && isCharacterAssetPrompt(asset.prompt, asset.description);
 
     const appName = await fetchCollectionAppName(collectionId);
-    const imageUrl = await generateImage(asset.prompt, {
+    const imageUrl = await generateImage(styledAssetPrompt, {
       collectionId,
       postId: planId,
       index: slideIndex * 100 + assetIndex,
@@ -248,7 +360,7 @@ export async function POST(request: NextRequest) {
         slideIndex,
         assetIndex,
         imageUrl,
-        prompt: asset.prompt,
+        prompt: styledAssetPrompt,
         description: asset.description,
         imageModel: imageGenerationModel,
         generatedAt: new Date().toISOString(),
@@ -290,6 +402,8 @@ export async function POST(request: NextRequest) {
       assetIndex,
       imageUrl,
       imageGenerationModel,
+      assetStyleId,
+      reasoningModel,
       generatedAssets: nextGeneratedAssets,
     });
   } catch (err) {
