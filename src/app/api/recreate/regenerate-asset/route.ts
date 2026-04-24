@@ -296,6 +296,7 @@ export async function POST(request: NextRequest) {
         : {};
     const persistedVisualVariant = asVisualVariant(previousGenerationState.visualVariant);
     const visualVariant = requestedVisualVariant || persistedVisualVariant || "brand_optimized";
+    const persistedCharacterId = asNonEmptyString(previousGenerationState.characterId);
     const persistedAssetStyleId = asAssetStylePresetId(previousGenerationState.assetStyleId);
     const assetStyleId =
       requestedAssetStyleId || persistedAssetStyleId || DEFAULT_ASSET_STYLE_PRESET;
@@ -309,7 +310,7 @@ export async function POST(request: NextRequest) {
       )
       : assetPrompt;
 
-    const isCharacterAsset = visualVariant === "ugc_real" && isCharacterAssetPrompt(assetPrompt);
+    const isCharacterAsset = isCharacterAssetPrompt(assetPrompt);
     const firstExistingGenerated = generatedMediaUrls.find(
       (item): item is string => typeof item === "string" && item.trim().length > 0
     );
@@ -414,10 +415,7 @@ export async function POST(request: NextRequest) {
         ...previousGenerationState,
         visualVariant,
         assetStyleId,
-        characterId:
-          visualVariant === "ugc_real"
-            ? studioCharacter?.id || selectedCharacterId || previousGenerationState.characterId || null
-            : null,
+        characterId: studioCharacter?.id || selectedCharacterId || persistedCharacterId || null,
         generatedAssets: generatedCount,
         totalAssets: effectiveTotal,
         lastAssetIndex: assetIndex,

@@ -115,6 +115,9 @@ type RecreatedHistoryItem = {
     assetStyleId?: AssetStylePresetId;
     versionLabel?: string;
     characterId?: string;
+    characterName?: string;
+    characterReferenceImageUrl?: string;
+    characterGeneratedAt?: string;
     stage?: string;
     totalSlides?: number;
     completedSlides?: number;
@@ -446,6 +449,7 @@ export function PostDetailView({ postId }: PostDetailViewProps) {
   const [downloadingImageIds, setDownloadingImageIds] = useState<Record<string, boolean>>({});
   const [removeBgLoading, setRemoveBgLoading] = useState<Record<string, boolean>>({});
   const [regeneratingHistoryAssetIds, setRegeneratingHistoryAssetIds] = useState<Record<string, boolean>>({});
+  const [generatingHistoryCharacterBySetId, setGeneratingHistoryCharacterBySetId] = useState<Record<string, boolean>>({});
   const [historyAssetStyleById, setHistoryAssetStyleById] = useState<Record<string, AssetStylePresetId>>({});
   const [stylePickerTargetId, setStylePickerTargetId] = useState<string | null>(null);
   const [stylePickerStyleId, setStylePickerStyleId] = useState<AssetStylePresetId>(DEFAULT_ASSET_STYLE_PRESET);
@@ -841,11 +845,9 @@ export function PostDetailView({ postId }: PostDetailViewProps) {
         ? item.generation_state.visualVariant
         : "brand_optimized";
       const historyCharacterId =
-        historyVisualVariant === "ugc_real" && typeof item.generation_state?.characterId === "string"
+        typeof item.generation_state?.characterId === "string" && item.generation_state.characterId.trim().length > 0
           ? item.generation_state.characterId
-          : historyVisualVariant === "ugc_real"
-            ? selectedUgcCharacterId
-            : null;
+          : selectedUgcCharacterId;
       const historyAssetStyleId = forcedAssetStyleId || resolveHistoryAssetStyleId(item);
 
       setHistory((prev) =>
@@ -863,12 +865,12 @@ export function PostDetailView({ postId }: PostDetailViewProps) {
       const { failures, generatedMediaUrls } = await generateAssetsSequential({
         recreatedPostId: item.id,
         queue,
-          characterId: historyCharacterId,
-          visualVariant: historyVisualVariant,
-          assetStyleId: historyAssetStyleId,
-          onAssetComplete: ({ generatedMediaUrls: urls }) => {
-            setHistory((prev) =>
-              prev.map((historyItem) =>
+        characterId: historyCharacterId,
+        visualVariant: historyVisualVariant,
+        assetStyleId: historyAssetStyleId,
+        onAssetComplete: ({ generatedMediaUrls: urls }) => {
+          setHistory((prev) =>
+            prev.map((historyItem) =>
               historyItem.id === item.id
                 ? {
                     ...historyItem,
@@ -987,6 +989,93 @@ export function PostDetailView({ postId }: PostDetailViewProps) {
     }
   };
 
+  const handleGenerateHistoryCharacter = async (item: RecreatedHistoryItem) => {
+    if (!activeCollection || !selectedPost) return;
+
+    setGeneratingHistoryCharacterBySetId((prev) => ({ ...prev, [item.id]: true }));
+    setError("");
+
+    try {
+      const response = await fetch("/api/recreate/generate-character", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          collectionId: activeCollection.id,
+          postId: selectedPost.id,
+          recreatedPostId: item.id,
+          reasoningModel,
+          imageGenerationModel,
+        }),
+      });
+
+      const data = (await response.json()) as {
+        error?: string;
+        character?: {
+          id?: string;
+          characterName?: string;
+          referenceImageUrl?: string;
+        };
+        generationState?: RecreatedHistoryItem["generation_state"];
+        reasoningModel?: string;
+        imageGenerationModel?: string;
+      };
+
+      if (!response.ok) {
+        throw new Error(data.error || "Failed to generate character for this saved post");
+      }
+
+      if (isReasoningModel(data.reasoningModel)) {
+        setReasoningModel(data.reasoningModel);
+      }
+
+      if (isImageGenerationModel(data.imageGenerationModel)) {
+        setImageGenerationModel(data.imageGenerationModel);
+      }
+
+      const createdCharacterId = typeof data.character?.id === "string" ? data.character.id : "";
+      const createdCharacterName = typeof data.character?.characterName === "string"
+        ? data.character.characterName
+        : "";
+      const createdCharacterReferenceImageUrl = typeof data.character?.referenceImageUrl === "string"
+        ? data.character.referenceImageUrl
+        : "";
+
+      if (createdCharacterId) {
+        setSelectedUgcCharacterId(createdCharacterId);
+      }
+
+      setHistory((prev) =>
+        prev.map((historyItem) =>
+          historyItem.id === item.id
+            ? {
+                ...historyItem,
+                generation_state:
+                  data.generationState && typeof data.generationState === "object"
+                    ? {
+                        ...historyItem.generation_state,
+                        ...data.generationState,
+                      }
+                    : {
+                        ...historyItem.generation_state,
+                        characterId: createdCharacterId || historyItem.generation_state?.characterId,
+                        characterName: createdCharacterName || historyItem.generation_state?.characterName,
+                        characterReferenceImageUrl:
+                          createdCharacterReferenceImageUrl || historyItem.generation_state?.characterReferenceImageUrl,
+                      },
+              }
+            : historyItem
+        )
+      );
+
+      await loadUgcCharacters();
+      await loadHistory({ silent: true });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to generate character for this saved post");
+    } finally {
+      setGeneratingHistoryCharacterBySetId((prev) => ({ ...prev, [item.id]: false }));
+    }
+  };
+
   const handleRegenerateHistoryAsset = async ({
     item,
     assetIndex,
@@ -1013,11 +1102,9 @@ export function PostDetailView({ postId }: PostDetailViewProps) {
         ? item.generation_state.visualVariant
         : "brand_optimized";
       const historyCharacterId =
-        historyVisualVariant === "ugc_real" && typeof item.generation_state?.characterId === "string"
+        typeof item.generation_state?.characterId === "string" && item.generation_state.characterId.trim().length > 0
           ? item.generation_state.characterId
-          : historyVisualVariant === "ugc_real"
-            ? selectedUgcCharacterId
-            : null;
+          : selectedUgcCharacterId;
       const historyAssetStyleId = resolveHistoryAssetStyleId(item);
 
       const response = await fetch("/api/recreate/regenerate-asset", {
@@ -1185,6 +1272,7 @@ export function PostDetailView({ postId }: PostDetailViewProps) {
     setInstagramResultBySetId({});
     setGeneratingHistoryBySetId({});
     setRegeneratingHistoryAssetIds({});
+    setGeneratingHistoryCharacterBySetId({});
     setHistoryAssetStyleById({});
     setVisualVariantPreference(selectedPost.post_type === "image_slides" ? "both" : "brand_optimized");
 
@@ -1458,6 +1546,7 @@ export function PostDetailView({ postId }: PostDetailViewProps) {
     setInstagramResultBySetId({});
     setGeneratingHistoryBySetId({});
     setRegeneratingHistoryAssetIds({});
+    setGeneratingHistoryCharacterBySetId({});
     setHistoryAssetStyleById({});
   };
 
@@ -2099,6 +2188,14 @@ export function PostDetailView({ postId }: PostDetailViewProps) {
                       : "brand_optimized";
                     const historyAssetStyleId = resolveHistoryAssetStyleId(item);
                     const historyAssetStyleLabel = getAssetStylePreset(historyAssetStyleId).label;
+                    const hasGeneratedCharacter =
+                      typeof item.generation_state?.characterId === "string" &&
+                      item.generation_state.characterId.trim().length > 0;
+                    const generatedCharacterName =
+                      typeof item.generation_state?.characterName === "string" &&
+                      item.generation_state.characterName.trim().length > 0
+                        ? item.generation_state.characterName
+                        : "Saved Character";
 
                     return (
                       <div key={item.id} className="rounded-xl border border-slate-200 bg-slate-50 p-4">
@@ -2109,9 +2206,24 @@ export function PostDetailView({ postId }: PostDetailViewProps) {
                             {historyVisualVariant === "ugc_real" ? "UGC Real" : "Brand Optimized"}
                           </Badge>
                           <Badge variant="default">Style: {historyAssetStyleLabel}</Badge>
+                          {hasGeneratedCharacter ? (
+                            <Badge variant="success">Character: {generatedCharacterName}</Badge>
+                          ) : null}
                           <Badge variant="default">{item.generated_media_urls?.length || 0} images</Badge>
                           <span className="text-xs text-slate-500">Created {formatDate(item.created_at)}</span>
                           <div className="ml-auto flex flex-wrap items-center gap-2">
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              disabled={item.status === "generating"}
+                              isLoading={Boolean(generatingHistoryCharacterBySetId[item.id])}
+                              onClick={() => {
+                                void handleGenerateHistoryCharacter(item);
+                              }}
+                            >
+                              <Wand2 className="mr-2 h-4 w-4" />
+                              {hasGeneratedCharacter ? "Regenerate Character" : "Generate Character"}
+                            </Button>
                             <Button
                               variant="outline"
                               size="sm"
