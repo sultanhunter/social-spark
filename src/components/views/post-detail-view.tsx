@@ -449,6 +449,7 @@ export function PostDetailView({ postId }: PostDetailViewProps) {
   const [historyAssetStyleById, setHistoryAssetStyleById] = useState<Record<string, AssetStylePresetId>>({});
   const [stylePickerTargetId, setStylePickerTargetId] = useState<string | null>(null);
   const [stylePickerStyleId, setStylePickerStyleId] = useState<AssetStylePresetId>(DEFAULT_ASSET_STYLE_PRESET);
+  const [isApplyingStylePicker, setIsApplyingStylePicker] = useState(false);
 
   const handleRemoveBg = async (imageKey: string, imageUrl: string, versionId?: string, historyItemId?: string) => {
     setRemoveBgLoading((prev) => ({ ...prev, [imageKey]: true }));
@@ -511,17 +512,9 @@ export function PostDetailView({ postId }: PostDetailViewProps) {
   }, [resolveHistoryAssetStyleId]);
 
   const closeHistoryStylePicker = useCallback(() => {
+    if (isApplyingStylePicker) return;
     setStylePickerTargetId(null);
-  }, []);
-
-  const applyHistoryStylePicker = useCallback(() => {
-    if (!stylePickerTargetId) return;
-    setHistoryAssetStyleById((prev) => ({
-      ...prev,
-      [stylePickerTargetId]: stylePickerStyleId,
-    }));
-    setStylePickerTargetId(null);
-  }, [stylePickerTargetId, stylePickerStyleId]);
+  }, [isApplyingStylePicker]);
 
   const parseFileExtension = (url: string): string => {
     try {
@@ -826,7 +819,10 @@ export function PostDetailView({ postId }: PostDetailViewProps) {
     [activeCollection, selectedPost, imageGenerationModel, reasoningModel]
   );
 
-  const handleGenerateHistoryImages = async (item: RecreatedHistoryItem) => {
+  const handleGenerateHistoryImages = async (
+    item: RecreatedHistoryItem,
+    forcedAssetStyleId?: AssetStylePresetId
+  ) => {
     if (!activeCollection || !selectedPost) return;
 
     const script = typeof item.script === "string" ? item.script.trim() : "";
@@ -850,7 +846,7 @@ export function PostDetailView({ postId }: PostDetailViewProps) {
           : historyVisualVariant === "ugc_real"
             ? selectedUgcCharacterId
             : null;
-      const historyAssetStyleId = resolveHistoryAssetStyleId(item);
+      const historyAssetStyleId = forcedAssetStyleId || resolveHistoryAssetStyleId(item);
 
       setHistory((prev) =>
         prev.map((historyItem) =>
@@ -907,6 +903,87 @@ export function PostDetailView({ postId }: PostDetailViewProps) {
       setError(err instanceof Error ? err.message : "Failed to generate images for this set");
     } finally {
       setGeneratingHistoryBySetId((prev) => ({ ...prev, [item.id]: false }));
+    }
+  };
+
+  const applyHistoryStylePicker = async () => {
+    if (!stylePickerTargetId) return;
+    if (!activeCollection || !selectedPost) return;
+
+    const targetItem = history.find((item) => item.id === stylePickerTargetId);
+    if (!targetItem) {
+      setStylePickerTargetId(null);
+      return;
+    }
+
+    setIsApplyingStylePicker(true);
+    setError("");
+
+    try {
+      const response = await fetch("/api/recreate/match-style", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          collectionId: activeCollection.id,
+          postId: selectedPost.id,
+          recreatedPostId: targetItem.id,
+          assetStyleId: stylePickerStyleId,
+          reasoningModel,
+        }),
+      });
+
+      const data = (await response.json()) as {
+        error?: string;
+        slidePlans?: SlidePlan[];
+        generationState?: RecreatedHistoryItem["generation_state"];
+        assetStyleId?: string;
+        reasoningModel?: string;
+      };
+
+      if (!response.ok) {
+        throw new Error(data.error || "Failed to match style for this saved post");
+      }
+
+      const appliedStyleId = isAssetStylePresetId(data.assetStyleId)
+        ? data.assetStyleId
+        : stylePickerStyleId;
+
+      if (isReasoningModel(data.reasoningModel)) {
+        setReasoningModel(data.reasoningModel);
+      }
+
+      setHistoryAssetStyleById((prev) => ({
+        ...prev,
+        [stylePickerTargetId]: appliedStyleId,
+      }));
+
+      setHistory((prev) =>
+        prev.map((item) =>
+          item.id === stylePickerTargetId
+            ? {
+                ...item,
+                slide_plans: Array.isArray(data.slidePlans) ? data.slidePlans : item.slide_plans,
+                generation_state:
+                  data.generationState && typeof data.generationState === "object"
+                    ? {
+                        ...item.generation_state,
+                        ...data.generationState,
+                      }
+                    : {
+                        ...item.generation_state,
+                        assetStyleId: appliedStyleId,
+                      },
+              }
+            : item
+        )
+      );
+
+      setStylePickerTargetId(null);
+      await loadHistory({ silent: true });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to match style for this saved post");
+    } finally {
+      setIsApplyingStylePicker(false);
     }
   };
 
@@ -2260,7 +2337,7 @@ export function PostDetailView({ postId }: PostDetailViewProps) {
           <DialogHeader>
             <DialogTitle>Match Asset Style</DialogTitle>
             <DialogDescription>
-              Choose a style to apply when you regenerate assets for this saved recreation.
+              Choose a style to rewrite each asset prompt for this saved recreation.
             </DialogDescription>
           </DialogHeader>
 
@@ -2303,8 +2380,17 @@ export function PostDetailView({ postId }: PostDetailViewProps) {
           </div>
 
           <DialogFooter>
-            <Button variant="outline" onClick={closeHistoryStylePicker}>Cancel</Button>
-            <Button variant="primary" onClick={applyHistoryStylePicker}>Apply Style</Button>
+            <Button variant="outline" onClick={closeHistoryStylePicker} disabled={isApplyingStylePicker}>Cancel</Button>
+            <Button
+              variant="primary"
+              onClick={() => {
+                void applyHistoryStylePicker();
+              }}
+              isLoading={isApplyingStylePicker}
+              disabled={isApplyingStylePicker}
+            >
+              Apply Style to Prompts
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
