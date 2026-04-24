@@ -24,6 +24,14 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/modal";
+import {
   ASSET_STYLE_PRESETS,
   DEFAULT_ASSET_STYLE_PRESET,
   getAssetStylePreset,
@@ -439,6 +447,8 @@ export function PostDetailView({ postId }: PostDetailViewProps) {
   const [removeBgLoading, setRemoveBgLoading] = useState<Record<string, boolean>>({});
   const [regeneratingHistoryAssetIds, setRegeneratingHistoryAssetIds] = useState<Record<string, boolean>>({});
   const [historyAssetStyleById, setHistoryAssetStyleById] = useState<Record<string, AssetStylePresetId>>({});
+  const [stylePickerTargetId, setStylePickerTargetId] = useState<string | null>(null);
+  const [stylePickerStyleId, setStylePickerStyleId] = useState<AssetStylePresetId>(DEFAULT_ASSET_STYLE_PRESET);
 
   const handleRemoveBg = async (imageKey: string, imageUrl: string, versionId?: string, historyItemId?: string) => {
     setRemoveBgLoading((prev) => ({ ...prev, [imageKey]: true }));
@@ -495,18 +505,23 @@ export function PostDetailView({ postId }: PostDetailViewProps) {
     return DEFAULT_ASSET_STYLE_PRESET;
   }, [historyAssetStyleById]);
 
-  const cycleHistoryAssetStyle = useCallback((item: RecreatedHistoryItem) => {
-    const current = resolveHistoryAssetStyleId(item);
-    const currentIndex = ASSET_STYLE_PRESETS.findIndex((preset) => preset.id === current);
-    const nextPreset =
-      ASSET_STYLE_PRESETS[(currentIndex + 1) % ASSET_STYLE_PRESETS.length] ||
-      ASSET_STYLE_PRESETS[0];
+  const openHistoryStylePicker = useCallback((item: RecreatedHistoryItem) => {
+    setStylePickerTargetId(item.id);
+    setStylePickerStyleId(resolveHistoryAssetStyleId(item));
+  }, [resolveHistoryAssetStyleId]);
 
+  const closeHistoryStylePicker = useCallback(() => {
+    setStylePickerTargetId(null);
+  }, []);
+
+  const applyHistoryStylePicker = useCallback(() => {
+    if (!stylePickerTargetId) return;
     setHistoryAssetStyleById((prev) => ({
       ...prev,
-      [item.id]: nextPreset.id,
+      [stylePickerTargetId]: stylePickerStyleId,
     }));
-  }, [resolveHistoryAssetStyleId]);
+    setStylePickerTargetId(null);
+  }, [stylePickerTargetId, stylePickerStyleId]);
 
   const parseFileExtension = (url: string): string => {
     try {
@@ -2024,10 +2039,10 @@ export function PostDetailView({ postId }: PostDetailViewProps) {
                               variant="outline"
                               size="sm"
                               disabled={item.status === "generating"}
-                              onClick={() => cycleHistoryAssetStyle(item)}
+                              onClick={() => openHistoryStylePicker(item)}
                             >
                               <Wand2 className="mr-2 h-4 w-4" />
-                              Match Style: {historyAssetStyleLabel}
+                              Match Style
                             </Button>
                             {hasCaption ? (
                               <Button
@@ -2234,6 +2249,48 @@ export function PostDetailView({ postId }: PostDetailViewProps) {
           </Card>
         </div>
       </div>
+
+      <Dialog
+        open={Boolean(stylePickerTargetId)}
+        onOpenChange={(open) => {
+          if (!open) closeHistoryStylePicker();
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Match Asset Style</DialogTitle>
+            <DialogDescription>
+              Choose a style to apply when you regenerate assets for this saved recreation.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-2 px-6 pb-2">
+            {ASSET_STYLE_PRESETS.map((preset) => {
+              const isSelected = stylePickerStyleId === preset.id;
+              return (
+                <button
+                  key={preset.id}
+                  type="button"
+                  onClick={() => setStylePickerStyleId(preset.id)}
+                  className={`w-full rounded-lg border px-3 py-2 text-left transition ${
+                    isSelected
+                      ? "border-rose-300 bg-rose-50"
+                      : "border-slate-200 bg-white hover:border-slate-300"
+                  }`}
+                >
+                  <p className="text-sm font-medium text-slate-800">{preset.label}</p>
+                  <p className="text-xs text-slate-500">{preset.description}</p>
+                </button>
+              );
+            })}
+          </div>
+
+          <DialogFooter>
+            <Button variant="outline" onClick={closeHistoryStylePicker}>Cancel</Button>
+            <Button variant="primary" onClick={applyHistoryStylePicker}>Apply Style</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div >
   );
 }
