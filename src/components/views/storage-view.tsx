@@ -163,6 +163,13 @@ export function StorageView() {
               </Button>
               <Button
                 variant="outline"
+                onClick={() => router.push(`/collections/${activeCollection.id}/gpt-slide-agent`)}
+              >
+                <Sparkles className="mr-2 h-4 w-4" />
+                GPT Slide Agent
+              </Button>
+              <Button
+                variant="outline"
                 onClick={() => router.push(`/collections/${activeCollection.id}/characters`)}
               >
                 <Users className="mr-2 h-4 w-4" />
