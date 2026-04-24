@@ -2278,8 +2278,25 @@ export function PostDetailView({ postId }: PostDetailViewProps) {
                       : "border-slate-200 bg-white hover:border-slate-300"
                   }`}
                 >
-                  <p className="text-sm font-medium text-slate-800">{preset.label}</p>
-                  <p className="text-xs text-slate-500">{preset.description}</p>
+                  <div className="flex items-start gap-3">
+                    {preset.referenceImagePath ? (
+                      <div
+                        className="h-14 w-14 shrink-0 rounded-md border border-slate-200 bg-cover bg-center"
+                        style={{ backgroundImage: `url(${preset.referenceImagePath})` }}
+                        role="img"
+                        aria-label={`${preset.label} thumbnail`}
+                      />
+                    ) : (
+                      <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-md border border-dashed border-slate-200 bg-slate-50 text-[10px] text-slate-400">
+                        Default
+                      </div>
+                    )}
+
+                    <div>
+                      <p className="text-sm font-medium text-slate-800">{preset.label}</p>
+                      <p className="text-xs text-slate-500">{preset.description}</p>
+                    </div>
+                  </div>
                 </button>
               );
             })}
