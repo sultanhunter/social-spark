@@ -115,9 +115,13 @@ type RecreatedHistoryItem = {
     assetStyleId?: AssetStylePresetId;
     versionLabel?: string;
     characterId?: string;
+    characterIds?: string[];
     characterName?: string;
     characterReferenceImageUrl?: string;
     characterGeneratedAt?: string;
+    charactersGeneratedCount?: number;
+    characterMapByAssetIndex?: Record<string, string>;
+    characterRoleByAssetIndex?: Record<string, string>;
     stage?: string;
     totalSlides?: number;
     completedSlides?: number;
@@ -1010,11 +1014,15 @@ export function PostDetailView({ postId }: PostDetailViewProps) {
 
       const data = (await response.json()) as {
         error?: string;
-        character?: {
+        characters?: Array<{
           id?: string;
+          roleKey?: string;
           characterName?: string;
+          promptTemplate?: string;
           referenceImageUrl?: string;
-        };
+          assetIndexes?: number[];
+        }>;
+        assetCharacterAssignments?: Record<string, string>;
         generationState?: RecreatedHistoryItem["generation_state"];
         reasoningModel?: string;
         imageGenerationModel?: string;
@@ -1032,13 +1040,18 @@ export function PostDetailView({ postId }: PostDetailViewProps) {
         setImageGenerationModel(data.imageGenerationModel);
       }
 
-      const createdCharacterId = typeof data.character?.id === "string" ? data.character.id : "";
-      const createdCharacterName = typeof data.character?.characterName === "string"
-        ? data.character.characterName
+      const createdCharacters = Array.isArray(data.characters) ? data.characters : [];
+      const primaryCharacter = createdCharacters.find((item) => typeof item?.id === "string") || null;
+      const createdCharacterId = typeof primaryCharacter?.id === "string" ? primaryCharacter.id : "";
+      const createdCharacterName = typeof primaryCharacter?.characterName === "string"
+        ? primaryCharacter.characterName
         : "";
-      const createdCharacterReferenceImageUrl = typeof data.character?.referenceImageUrl === "string"
-        ? data.character.referenceImageUrl
+      const createdCharacterReferenceImageUrl = typeof primaryCharacter?.referenceImageUrl === "string"
+        ? primaryCharacter.referenceImageUrl
         : "";
+      const createdCharacterIds = createdCharacters
+        .map((item) => (typeof item.id === "string" ? item.id : ""))
+        .filter((id) => id.length > 0);
 
       if (createdCharacterId) {
         setSelectedUgcCharacterId(createdCharacterId);
@@ -1058,9 +1071,21 @@ export function PostDetailView({ postId }: PostDetailViewProps) {
                     : {
                         ...historyItem.generation_state,
                         characterId: createdCharacterId || historyItem.generation_state?.characterId,
+                        characterIds:
+                          createdCharacterIds.length > 0
+                            ? createdCharacterIds
+                            : historyItem.generation_state?.characterIds,
                         characterName: createdCharacterName || historyItem.generation_state?.characterName,
                         characterReferenceImageUrl:
                           createdCharacterReferenceImageUrl || historyItem.generation_state?.characterReferenceImageUrl,
+                        charactersGeneratedCount:
+                          createdCharacterIds.length > 0
+                            ? createdCharacterIds.length
+                            : historyItem.generation_state?.charactersGeneratedCount,
+                        characterMapByAssetIndex:
+                          data.assetCharacterAssignments && typeof data.assetCharacterAssignments === "object"
+                            ? data.assetCharacterAssignments
+                            : historyItem.generation_state?.characterMapByAssetIndex,
                       },
               }
             : historyItem
@@ -1070,7 +1095,7 @@ export function PostDetailView({ postId }: PostDetailViewProps) {
       await loadUgcCharacters();
       await loadHistory({ silent: true });
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to generate character for this saved post");
+      setError(err instanceof Error ? err.message : "Failed to generate characters for this saved post");
     } finally {
       setGeneratingHistoryCharacterBySetId((prev) => ({ ...prev, [item.id]: false }));
     }
@@ -2188,12 +2213,21 @@ export function PostDetailView({ postId }: PostDetailViewProps) {
                       : "brand_optimized";
                     const historyAssetStyleId = resolveHistoryAssetStyleId(item);
                     const historyAssetStyleLabel = getAssetStylePreset(historyAssetStyleId).label;
-                    const hasGeneratedCharacter =
-                      typeof item.generation_state?.characterId === "string" &&
-                      item.generation_state.characterId.trim().length > 0;
+                    const generatedCharacterIds = Array.isArray(item.generation_state?.characterIds)
+                      ? item.generation_state.characterIds.filter((value) => typeof value === "string" && value.trim().length > 0)
+                      : [];
+                    const generatedCharacterCount = generatedCharacterIds.length > 0
+                      ? generatedCharacterIds.length
+                      : typeof item.generation_state?.characterId === "string" && item.generation_state.characterId.trim().length > 0
+                        ? 1
+                        : 0;
+                    const hasGeneratedCharacter = generatedCharacterCount > 0;
+                    const hasMultipleCharacters = generatedCharacterCount > 1;
+                    const generatedCharacterLabel = hasMultipleCharacters
+                      ? `${generatedCharacterCount} characters`
+                      : "1 character";
                     const generatedCharacterName =
-                      typeof item.generation_state?.characterName === "string" &&
-                      item.generation_state.characterName.trim().length > 0
+                      typeof item.generation_state?.characterName === "string" && item.generation_state.characterName.trim().length > 0
                         ? item.generation_state.characterName
                         : "Saved Character";
 
@@ -2207,7 +2241,11 @@ export function PostDetailView({ postId }: PostDetailViewProps) {
                           </Badge>
                           <Badge variant="default">Style: {historyAssetStyleLabel}</Badge>
                           {hasGeneratedCharacter ? (
-                            <Badge variant="success">Character: {generatedCharacterName}</Badge>
+                            <Badge variant="success">
+                              {hasMultipleCharacters
+                                ? `Characters: ${generatedCharacterLabel}`
+                                : `Character: ${generatedCharacterName}`}
+                            </Badge>
                           ) : null}
                           <Badge variant="default">{item.generated_media_urls?.length || 0} images</Badge>
                           <span className="text-xs text-slate-500">Created {formatDate(item.created_at)}</span>
@@ -2222,7 +2260,7 @@ export function PostDetailView({ postId }: PostDetailViewProps) {
                               }}
                             >
                               <Wand2 className="mr-2 h-4 w-4" />
-                              {hasGeneratedCharacter ? "Regenerate Character" : "Generate Character"}
+                              {hasGeneratedCharacter ? "Regenerate Characters" : "Generate Characters"}
                             </Button>
                             <Button
                               variant="outline"

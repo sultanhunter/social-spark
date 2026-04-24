@@ -27,6 +27,26 @@ type SlidePlan = {
   }>;
 };
 
+type CharacterPromptEntry = {
+  linearAssetIndex: number;
+  slideIndex: number;
+  assetIndexInSlide: number;
+  description: string;
+  prompt: string;
+};
+
+type CharacterDraft = {
+  roleKey: string;
+  characterName: string;
+  personaSummary: string;
+  visualStyle: string;
+  wardrobeNotes: string;
+  voiceTone: string;
+  promptTemplate: string;
+  identityAnchors: string[];
+  assetIndexes: number[];
+};
+
 function asText(value: unknown): string {
   return typeof value === "string" ? value.trim() : "";
 }
@@ -40,6 +60,23 @@ function cleanText(value: unknown, fallback = ""): string {
   if (typeof value !== "string") return fallback;
   const normalized = value.replace(/\s+/g, " ").trim();
   return normalized || fallback;
+}
+
+function asIntegerArray(value: unknown): number[] {
+  if (!Array.isArray(value)) return [];
+  const list: number[] = [];
+  for (const item of value) {
+    if (typeof item === "number" && Number.isInteger(item) && item >= 0) {
+      list.push(item);
+    }
+  }
+  return Array.from(new Set(list));
+}
+
+function sanitizeRoleKey(value: unknown, fallback: string): string {
+  const raw = cleanText(value, fallback).toLowerCase();
+  const cleaned = raw.replace(/[^a-z0-9_-]/g, "-").replace(/-+/g, "-").replace(/^-|-$/g, "");
+  return cleaned || fallback;
 }
 
 function isMissingTableError(error: unknown): boolean {
@@ -136,38 +173,53 @@ function sanitizeSlidePlans(value: unknown): SlidePlan[] {
 
 function isCharacterAssetPrompt(prompt: string, description: string): boolean {
   const combined = `${prompt} ${description}`.toLowerCase();
-  return /(woman|female|girl|lady|muslimah|hijab|character|person|portrait|face|model|mother|child|family|people)/i.test(
+  return /(woman|female|girl|lady|muslimah|hijab|character|person|portrait|face|model|mother|father|child|kid|family|people|couple)/i.test(
     combined
   );
 }
 
-type CharacterPromptEntry = {
-  slideIndex: number;
-  assetIndex: number;
-  description: string;
-  prompt: string;
-};
-
 function extractAssetPrompts(slidePlans: SlidePlan[]): CharacterPromptEntry[] {
   const items: CharacterPromptEntry[] = [];
+  let linearAssetIndex = 0;
 
   for (let slideIndex = 0; slideIndex < slidePlans.length; slideIndex += 1) {
     const plan = slidePlans[slideIndex];
-    for (let assetIndex = 0; assetIndex < plan.assetPrompts.length; assetIndex += 1) {
-      const asset = plan.assetPrompts[assetIndex];
+    for (let assetIndexInSlide = 0; assetIndexInSlide < plan.assetPrompts.length; assetIndexInSlide += 1) {
+      const asset = plan.assetPrompts[assetIndexInSlide];
       items.push({
+        linearAssetIndex,
         slideIndex,
-        assetIndex,
+        assetIndexInSlide,
         description: asset.description,
         prompt: asset.prompt,
       });
+      linearAssetIndex += 1;
     }
   }
 
   return items;
 }
 
-async function generateCharacterFromPrompts({
+function fallbackDraftForPrompts(appName: string, promptEntries: CharacterPromptEntry[]): CharacterDraft {
+  return {
+    roleKey: "primary",
+    characterName: `${appName} Lead Character`,
+    personaSummary: "Warm Muslimah lead with practical, nurturing tone and grounded presence.",
+    visualStyle: "Consistent portrait realism with stable facial structure and modest styling.",
+    wardrobeNotes: "Modest outfit with long sleeves to wrists; consistent hijab styling when applicable.",
+    voiceTone: "Warm, clear, calm, reassuring.",
+    promptTemplate:
+      "Use the same recurring Muslimah character identity across all assigned assets: consistent face, age range, skin tone, modest styling, and natural expression.",
+    identityAnchors: [
+      "Consistent face proportions and eye shape",
+      "Stable modest wardrobe silhouette",
+      "Calm nurturing expression style",
+    ],
+    assetIndexes: promptEntries.map((entry) => entry.linearAssetIndex),
+  };
+}
+
+async function generateCharacterDraftsFromPrompts({
   appName,
   appContext,
   styleHint,
@@ -179,29 +231,25 @@ async function generateCharacterFromPrompts({
   styleHint: string;
   promptEntries: CharacterPromptEntry[];
   reasoningModel: ReasoningModel;
-}): Promise<{
-  characterName: string;
-  personaSummary: string;
-  visualStyle: string;
-  wardrobeNotes: string;
-  voiceTone: string;
-  promptTemplate: string;
-  identityAnchors: string[];
-}> {
+}): Promise<CharacterDraft[]> {
   if (!process.env.GOOGLE_GEMINI_API_KEY) {
     throw new Error("GOOGLE_GEMINI_API_KEY is missing.");
   }
 
   const genAI = new GoogleGenerativeAI(process.env.GOOGLE_GEMINI_API_KEY);
   const model = genAI.getGenerativeModel({ model: reasoningModel });
+
   const promptList = promptEntries
-    .slice(0, 40)
-    .map((item) =>
-      `Slide ${item.slideIndex + 1}, Asset ${item.assetIndex + 1} (${item.description || "Asset"}): ${item.prompt}`
+    .slice(0, 80)
+    .map(
+      (item) =>
+        `AssetIndex ${item.linearAssetIndex} | Slide ${item.slideIndex + 1} Asset ${item.assetIndexInSlide + 1} | ${
+          item.description || "Asset"
+        }: ${item.prompt}`
     )
     .join("\n");
 
-  const instruction = `You are extracting one recurring main character profile from social-slide asset prompts.
+  const instruction = `You are extracting recurring visual characters from asset prompts for consistent image generation.
 
 APP:
 - Name: ${appName}
@@ -213,56 +261,87 @@ ${styleHint || "N/A"}
 ASSET PROMPTS:
 ${promptList}
 
-Goal:
-- Infer ONE main recurring character identity to keep visual consistency across assets.
-- Prioritize Muslimah/modest representation if present in prompts.
-- If assets include both mother and child, choose the PRIMARY recurring person as main character and mention others in persona summary only.
-- Keep output useful for character-lock image generation.
+Task:
+- Identify ALL distinct recurring human characters required by these prompts.
+- Create one stable character profile per distinct character.
+- Assign each character to the linear AssetIndex values where that character should appear.
+- If a prompt has no person, do not include that index.
+- Keep names and identities practical and consistent.
 
-Return strict JSON only:
+Return strict JSON only in this shape:
 {
-  "characterName": "string",
-  "personaSummary": "string",
-  "visualStyle": "string",
-  "wardrobeNotes": "string",
-  "voiceTone": "string",
-  "promptTemplate": "single continuity sentence",
-  "identityAnchors": ["3-6 concise anchors"]
+  "characters": [
+    {
+      "roleKey": "short_stable_key",
+      "characterName": "string",
+      "personaSummary": "string",
+      "visualStyle": "string",
+      "wardrobeNotes": "string",
+      "voiceTone": "string",
+      "promptTemplate": "single continuity sentence",
+      "identityAnchors": ["3-6 concise anchors"],
+      "assetIndexes": [0, 1]
+    }
+  ]
 }`;
 
   const response = await model.generateContent(instruction);
   const parsed = parseJsonObject(response.response.text()) || {};
+  const rawCharacters = Array.isArray(parsed.characters) ? parsed.characters : [];
 
-  return {
-    characterName: cleanText(parsed.characterName, `${appName} Lead Character`),
-    personaSummary: cleanText(
-      parsed.personaSummary,
-      "Warm Muslimah guide character with grounded, practical, nurturing presence."
-    ),
-    visualStyle: cleanText(
-      parsed.visualStyle,
-      "Natural cinematic portrait style with consistent facial structure and modest presentation."
-    ),
-    wardrobeNotes: cleanText(
-      parsed.wardrobeNotes,
-      "Modest outfit with long sleeves to wrists, clean fabric textures, and consistent hijab styling when applicable."
-    ),
-    voiceTone: cleanText(parsed.voiceTone, "Warm, clear, calm, reassuring."),
-    promptTemplate: cleanText(
-      parsed.promptTemplate,
-      "Use the same recurring Muslimah character identity across all scenes: consistent face, age range, skin tone, modest styling, and natural expression." 
-    ),
-    identityAnchors: Array.isArray(parsed.identityAnchors)
-      ? parsed.identityAnchors
-        .map((item) => cleanText(item))
-        .filter(Boolean)
-        .slice(0, 6)
-      : [
-          "Consistent face proportions and eye shape",
-          "Stable modest wardrobe silhouette",
-          "Calm, nurturing expression style",
-        ],
-  };
+  const maxAssetIndex = promptEntries.reduce(
+    (max, item) => (item.linearAssetIndex > max ? item.linearAssetIndex : max),
+    -1
+  );
+
+  const drafts: CharacterDraft[] = rawCharacters
+    .filter((item): item is Record<string, unknown> => typeof item === "object" && item !== null)
+    .map((item, index) => {
+      const characterName = cleanText(item.characterName, `${appName} Character ${index + 1}`);
+      const roleKey = sanitizeRoleKey(item.roleKey, `character_${index + 1}`);
+      const identityAnchors = Array.isArray(item.identityAnchors)
+        ? item.identityAnchors
+          .map((anchor) => cleanText(anchor))
+          .filter(Boolean)
+          .slice(0, 6)
+        : [];
+      const assetIndexes = asIntegerArray(item.assetIndexes).filter((value) => value >= 0 && value <= maxAssetIndex);
+
+      return {
+        roleKey,
+        characterName,
+        personaSummary: cleanText(
+          item.personaSummary,
+          "Warm Muslimah character with grounded and practical presence."
+        ),
+        visualStyle: cleanText(item.visualStyle, "Consistent portrait realism with stable identity markers."),
+        wardrobeNotes: cleanText(
+          item.wardrobeNotes,
+          "Modest outfit with long sleeves to wrists and consistent styling cues."
+        ),
+        voiceTone: cleanText(item.voiceTone, "Warm, clear, calm, reassuring."),
+        promptTemplate: cleanText(
+          item.promptTemplate,
+          "Use this same recurring character identity across assigned assets with stable facial and wardrobe continuity."
+        ),
+        identityAnchors:
+          identityAnchors.length > 0
+            ? identityAnchors
+            : [
+                "Consistent face proportions and eye shape",
+                "Stable modest wardrobe silhouette",
+                "Calm, natural expression profile",
+              ],
+        assetIndexes,
+      };
+    })
+    .filter((draft) => draft.assetIndexes.length > 0);
+
+  if (drafts.length === 0) {
+    return [fallbackDraftForPrompts(appName, promptEntries)];
+  }
+
+  return drafts;
 }
 
 async function insertCharacterRow({
@@ -272,15 +351,7 @@ async function insertCharacterRow({
   imageModel,
 }: {
   collectionId: string;
-  character: {
-    characterName: string;
-    personaSummary: string;
-    visualStyle: string;
-    wardrobeNotes: string;
-    voiceTone: string;
-    promptTemplate: string;
-    identityAnchors: string[];
-  };
+  character: CharacterDraft;
   referenceImageUrl: string;
   imageModel: ImageGenerationModel;
 }): Promise<Record<string, unknown>> {
@@ -291,7 +362,9 @@ async function insertCharacterRow({
     visual_style: character.visualStyle,
     wardrobe_notes: character.wardrobeNotes,
     voice_tone: character.voiceTone,
-    prompt_template: `${character.promptTemplate} Identity anchors: ${character.identityAnchors.join("; ")}. CharacterType: ugc.`,
+    prompt_template: `${character.promptTemplate} Identity anchors: ${character.identityAnchors.join(
+      "; "
+    )}. CharacterRole: ${character.roleKey}. CharacterType: ugc.`,
     reference_image_url: referenceImageUrl,
     image_model: imageModel,
   };
@@ -394,16 +467,19 @@ export async function POST(request: NextRequest) {
 
     const allAssetPrompts = extractAssetPrompts(slidePlans);
     if (allAssetPrompts.length === 0) {
-      return NextResponse.json(
-        { error: "No asset prompts found in this saved post." },
-        { status: 400 }
-      );
+      return NextResponse.json({ error: "No asset prompts found in this saved post." }, { status: 400 });
     }
 
     const characterAssetPrompts = allAssetPrompts.filter((entry) =>
       isCharacterAssetPrompt(entry.prompt, entry.description)
     );
-    const effectivePrompts = characterAssetPrompts.length > 0 ? characterAssetPrompts : allAssetPrompts;
+
+    if (characterAssetPrompts.length === 0) {
+      return NextResponse.json(
+        { error: "No character-related asset prompts found for this saved post." },
+        { status: 400 }
+      );
+    }
 
     const previousGenerationState = asRecord(recreatedResult.data.generation_state) || {};
     const styleId = isAssetStylePresetId(previousGenerationState.assetStyleId)
@@ -414,56 +490,94 @@ export async function POST(request: NextRequest) {
 
     const appName = asText(collection.app_name) || "Muslimah Pro";
     const appContext = asText(collection.app_description) || asText(collection.app_context);
-    const generatedCharacter = await generateCharacterFromPrompts({
+
+    const characterDrafts = await generateCharacterDraftsFromPrompts({
       appName,
       appContext,
       styleHint,
-      promptEntries: effectivePrompts,
+      promptEntries: characterAssetPrompts,
       reasoningModel,
     });
 
-    const portraitPrompt = [
-      `Create one clean character reference portrait for ${generatedCharacter.characterName}.`,
-      generatedCharacter.promptTemplate,
-      `Persona: ${generatedCharacter.personaSummary}.`,
-      `Visual style: ${generatedCharacter.visualStyle}.`,
-      `Wardrobe: ${generatedCharacter.wardrobeNotes}.`,
-      `Identity anchors: ${generatedCharacter.identityAnchors.join("; ")}.`,
-      styleHint ? `Match style: ${styleHint}.` : "",
-      "Framing: upper body portrait, centered, uncluttered background, no text overlays.",
-    ]
-      .filter(Boolean)
-      .join(" ");
+    const createdCharacters: Array<{
+      id: string;
+      roleKey: string;
+      characterName: string;
+      promptTemplate: string;
+      referenceImageUrl: string;
+      assetIndexes: number[];
+    }> = [];
 
-    const referenceImageUrl = await generateImage(portraitPrompt, {
-      collectionId,
-      postId,
-      index: 0,
-      platform: asText(postResult.data.platform) || "instagram",
-      generationId: `saved-post-character-${recreatedPostId}-${Date.now()}`,
-      versionId: `recreated-${recreatedPostId}`,
-      forceCarouselAspect: postResult.data.post_type === "image_slides",
-      imageModel: imageGenerationModel,
-    });
+    const assetCharacterAssignments: Record<string, string> = {};
+    const assetCharacterRoles: Record<string, string> = {};
 
-    const insertedCharacter = await insertCharacterRow({
-      collectionId,
-      character: generatedCharacter,
-      referenceImageUrl,
-      imageModel: imageGenerationModel,
-    });
+    for (let i = 0; i < characterDrafts.length; i += 1) {
+      const draft = characterDrafts[i];
+      const portraitPrompt = [
+        `Create one clean character reference portrait for ${draft.characterName}.`,
+        draft.promptTemplate,
+        `Persona: ${draft.personaSummary}.`,
+        `Visual style: ${draft.visualStyle}.`,
+        `Wardrobe: ${draft.wardrobeNotes}.`,
+        `Identity anchors: ${draft.identityAnchors.join("; ")}.`,
+        styleHint ? `Match style: ${styleHint}.` : "",
+        "Framing: upper body portrait, centered, uncluttered background, no text overlays.",
+      ]
+        .filter(Boolean)
+        .join(" ");
 
-    const characterId = asText(insertedCharacter.id);
-    if (!characterId) {
-      throw new Error("Character created but ID was not returned.");
+      const referenceImageUrl = await generateImage(portraitPrompt, {
+        collectionId,
+        postId,
+        index: i,
+        platform: asText(postResult.data.platform) || "instagram",
+        generationId: `saved-post-characters-${recreatedPostId}-${Date.now()}-${i}`,
+        versionId: `recreated-${recreatedPostId}`,
+        forceCarouselAspect: postResult.data.post_type === "image_slides",
+        imageModel: imageGenerationModel,
+      });
+
+      const insertedCharacter = await insertCharacterRow({
+        collectionId,
+        character: draft,
+        referenceImageUrl,
+        imageModel: imageGenerationModel,
+      });
+
+      const characterId = asText(insertedCharacter.id);
+      if (!characterId) {
+        throw new Error(`Character ${draft.characterName} was created but no ID was returned.`);
+      }
+
+      createdCharacters.push({
+        id: characterId,
+        roleKey: draft.roleKey,
+        characterName: draft.characterName,
+        promptTemplate: draft.promptTemplate,
+        referenceImageUrl,
+        assetIndexes: draft.assetIndexes,
+      });
+
+      for (const assetIndex of draft.assetIndexes) {
+        const key = String(assetIndex);
+        if (!assetCharacterAssignments[key]) {
+          assetCharacterAssignments[key] = characterId;
+          assetCharacterRoles[key] = draft.roleKey;
+        }
+      }
     }
 
+    const primaryCharacter = createdCharacters[0] || null;
     const generationStateUpdate = {
       ...previousGenerationState,
-      characterId,
-      characterName: generatedCharacter.characterName,
-      characterReferenceImageUrl: referenceImageUrl,
+      characterId: primaryCharacter?.id || null,
+      characterIds: createdCharacters.map((item) => item.id),
+      characterName: primaryCharacter?.characterName || null,
+      characterReferenceImageUrl: primaryCharacter?.referenceImageUrl || null,
       characterGeneratedAt: new Date().toISOString(),
+      charactersGeneratedCount: createdCharacters.length,
+      characterMapByAssetIndex: assetCharacterAssignments,
+      characterRoleByAssetIndex: assetCharacterRoles,
     };
 
     const updatePayload: Record<string, unknown> = {
@@ -492,21 +606,16 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({
       recreatedPostId,
-      character: {
-        id: characterId,
-        characterName: generatedCharacter.characterName,
-        promptTemplate: generatedCharacter.promptTemplate,
-        referenceImageUrl,
-      },
-      characterPromptCount: effectivePrompts.length,
-      usedCharacterPromptsOnly: characterAssetPrompts.length > 0,
+      characters: createdCharacters,
+      assetCharacterAssignments,
+      characterPromptCount: characterAssetPrompts.length,
       imageGenerationModel,
       reasoningModel,
       generationState: generationStateUpdate,
     });
   } catch (err) {
     return NextResponse.json(
-      { error: err instanceof Error ? err.message : "Failed to generate saved-post character." },
+      { error: err instanceof Error ? err.message : "Failed to generate saved-post characters." },
       { status: 500 }
     );
   }

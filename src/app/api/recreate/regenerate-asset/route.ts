@@ -47,6 +47,17 @@ function asAssetStylePresetId(value: unknown): AssetStylePresetId | null {
   return value;
 }
 
+function asCharacterMapByAssetIndex(value: unknown): Record<string, string> {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return {};
+  const record = value as Record<string, unknown>;
+  const entries = Object.entries(record)
+    .map(([key, rawValue]) => [key, asNonEmptyString(rawValue)] as const)
+    .filter(([, rawValue]) => typeof rawValue === "string" && rawValue.length > 0)
+    .map(([key, rawValue]) => [key, rawValue as string] as const);
+
+  return Object.fromEntries(entries);
+}
+
 function isMissingColumnError(error: unknown, columnName: string): boolean {
   if (!error || typeof error !== "object") return false;
   const row = error as Record<string, unknown>;
@@ -297,6 +308,9 @@ export async function POST(request: NextRequest) {
     const persistedVisualVariant = asVisualVariant(previousGenerationState.visualVariant);
     const visualVariant = requestedVisualVariant || persistedVisualVariant || "brand_optimized";
     const persistedCharacterId = asNonEmptyString(previousGenerationState.characterId);
+    const persistedCharacterMap = asCharacterMapByAssetIndex(previousGenerationState.characterMapByAssetIndex);
+    const mappedCharacterId = asNonEmptyString(persistedCharacterMap[String(assetIndex)]);
+    const preferredCharacterId = mappedCharacterId || selectedCharacterId || persistedCharacterId;
     const persistedAssetStyleId = asAssetStylePresetId(previousGenerationState.assetStyleId);
     const assetStyleId =
       requestedAssetStyleId || persistedAssetStyleId || DEFAULT_ASSET_STYLE_PRESET;
@@ -318,12 +332,12 @@ export async function POST(request: NextRequest) {
     let studioCharacter: UgcCharacterRow | null = null;
     if (isCharacterAsset) {
       const fetchSelected = async () => {
-        if (!selectedCharacterId) return { data: null as UgcCharacterRow | null, error: null as unknown };
+        if (!preferredCharacterId) return { data: null as UgcCharacterRow | null, error: null as unknown };
         const result = await supabase
           .from("video_ugc_characters")
           .select("id, prompt_template, reference_image_url")
           .eq("collection_id", collectionId)
-          .eq("id", selectedCharacterId)
+          .eq("id", preferredCharacterId)
           .maybeSingle();
         return { data: (result.data as UgcCharacterRow | null) || null, error: result.error };
       };
@@ -415,7 +429,7 @@ export async function POST(request: NextRequest) {
         ...previousGenerationState,
         visualVariant,
         assetStyleId,
-        characterId: studioCharacter?.id || selectedCharacterId || persistedCharacterId || null,
+        characterId: studioCharacter?.id || preferredCharacterId || null,
         generatedAssets: generatedCount,
         totalAssets: effectiveTotal,
         lastAssetIndex: assetIndex,
