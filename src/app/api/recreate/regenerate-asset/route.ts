@@ -101,7 +101,7 @@ function isCharacterAssetPrompt(prompt: string): boolean {
 
 function inferCharacterGenderFromPrompt(prompt: string): "male" | "female" {
   const normalized = prompt.toLowerCase();
-  if (/(man|male|boy|father|husband|brother|beard|bearded)/i.test(normalized)) {
+  if (/(man|male|boy|father|husband|brother|son|beard|bearded)/i.test(normalized)) {
     return "male";
   }
   return "female";
@@ -395,7 +395,7 @@ export async function POST(request: NextRequest) {
       ? studioCharacter?.prompt_template ||
         (inferCharacterGenderFromPrompt(assetPrompt) === "male"
           ? "Same fictional male identity across all character assets. Preserve face, age range, skin tone, and masculine styling. Always keep a clearly visible natural beard in every appearance."
-          : "Same fictional female identity across all character assets. Preserve face, age range, skin tone, and hijab/wardrobe style. Always use loose hijab and loose, modest, non-tight, non-revealing clothing.")
+          : "Same fictional female identity across all character assets. Preserve face, age range, skin tone, and hijab/wardrobe style. Always use loose hijab with full top-to-bottom modest coverage: long loose outer garment/abaya, arms covered to wrists, legs covered to ankles. No tight/revealing clothing, no leggings, no skinny/body-hugging pants.")
       : undefined;
 
     const imageUrl = await generateImage(styledAssetPrompt, {

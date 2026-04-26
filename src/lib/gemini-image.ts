@@ -232,6 +232,10 @@ function isCharacterAssetPrompt(prompt: string, description: string): boolean {
   );
 }
 
+function mentionsFemaleCharacter(prompt: string): boolean {
+  return /(woman|female|girl|lady|muslimah|mother|sister|hijab)/i.test(prompt.toLowerCase());
+}
+
 function shouldAttachBrandVisualRefs(prompt: string): boolean {
   return /(app ui|ui mockup|app mockup|phone mockup|screen mockup|dashboard|interface|logo placement|logo lockup|product shot of app)/i.test(
     prompt.toLowerCase()
@@ -316,8 +320,18 @@ BRAND TONE GUIDELINES:
 CHARACTER CONTINUITY RULES:
 - ${characterLockDescriptor}
 - Preserve face identity, age range, skin tone, expression style, and hijab/wardrobe style consistently.
-- If a woman appears and arms are visible, both arms must be fully covered to the wrists with long sleeves.
+- If a female character appears, she must wear loose hijab and full top-to-bottom modest coverage: long loose outer garment/abaya style, arms covered to wrists, and legs covered to ankles.
+- Strictly avoid tight or revealing outfits for female characters (no leggings, skinny pants, bodycon fits, transparent or low-neck clothing).
 - Do not switch to a different person.
+`
+    : "";
+
+  const modestyGuardRules = mentionsFemaleCharacter(`${assetPromptText} ${characterLockDescriptor || ""}`)
+    ? `
+MODESTY GUARDRAILS (MANDATORY FOR FEMALE CHARACTERS):
+- Keep hijab loose and fully covering hair, neck, and chest.
+- Clothing must be loose-fitting and non-revealing from top to bottom.
+- No tight pants, leggings, skinny jeans, or body-hugging silhouettes.
 `
     : "";
 
@@ -360,6 +374,7 @@ STYLE REFERENCE:
 - ${peopleCopyRule}
 
 ${characterLockRules}
+${modestyGuardRules}
 ${realismRules}
 ${variantRules}
 

@@ -115,8 +115,10 @@ function applyGenderAppearanceRules(
   return {
     ...draft,
     gender: "female",
-    wardrobeNotes: `${draft.wardrobeNotes} Always wear a loose hijab and loose, modest, non-tight, non-revealing clothing.`.trim(),
-    promptTemplate: `${draft.promptTemplate} Always keep this character female-presenting with a loose hijab and loose, modest, non-tight, non-revealing clothing in every assigned asset.`.trim(),
+    wardrobeNotes:
+      `${draft.wardrobeNotes} Always wear a loose hijab with full modest coverage from top to bottom: long loose outer garment/abaya, arms fully covered to wrists, legs fully covered to ankles, and no tight or revealing clothing (no leggings, skinny pants, bodycon fits).`.trim(),
+    promptTemplate:
+      `${draft.promptTemplate} Always keep this character female-presenting with loose hijab and full top-to-bottom modest coverage in every assigned asset. Clothing must be loose and non-revealing: cover arms to wrists and legs to ankles, and avoid tight pants/leggings/body-hugging fits.`.trim(),
   };
 }
 
@@ -249,7 +251,8 @@ function fallbackDraftForPrompts(appName: string, promptEntries: CharacterPrompt
     characterName: `${appName} Lead Character`,
     personaSummary: "Warm Muslimah lead with practical, nurturing tone and grounded presence.",
     visualStyle: "Consistent portrait realism with stable facial structure and modest styling.",
-    wardrobeNotes: "Modest outfit with long sleeves to wrists; consistent hijab styling when applicable.",
+    wardrobeNotes:
+      "Loose hijab with full top-to-bottom modest coverage: long loose outer garment/abaya, arms covered to wrists, legs covered to ankles, and no tight or revealing garments.",
     voiceTone: "Warm, clear, calm, reassuring.",
     promptTemplate:
       "Use the same recurring Muslimah character identity across all assigned assets: consistent face, age range, skin tone, modest styling, and natural expression.",
@@ -311,7 +314,8 @@ Task:
 - If a prompt has no person, do not include that index.
 - Keep names and identities practical and consistent.
 - Hard rule: male characters must always have a clearly visible natural beard.
-- Hard rule: female characters must always wear loose hijab and loose, modest, non-tight, non-revealing clothing.
+- Hard rule: female characters must always wear loose hijab with full top-to-bottom modest coverage.
+- For female characters, enforce: long loose outer garment/abaya style, arms covered to wrists, legs covered to ankles, no tight pants/leggings/jeans, no body-hugging fits, no revealing neckline, no transparent fabrics.
 
 Return strict JSON only in this shape:
 {
@@ -570,7 +574,7 @@ export async function POST(request: NextRequest) {
         draft.promptTemplate,
         draft.gender === "male"
           ? "Mandatory appearance rule: clearly visible natural beard in this character portrait."
-          : "Mandatory appearance rule: loose hijab and loose, modest, non-tight, non-revealing clothing.",
+          : "Mandatory appearance rule: female modest dress with loose hijab and full top-to-bottom coverage; loose long outer garment/abaya, arms covered to wrists, legs covered to ankles, no tight pants/leggings/body-hugging or revealing clothing.",
         `Persona: ${draft.personaSummary}.`,
         `Visual style: ${draft.visualStyle}.`,
         `Wardrobe: ${draft.wardrobeNotes}.`,
