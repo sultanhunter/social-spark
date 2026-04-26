@@ -441,6 +441,7 @@ export function PostDetailView({ postId }: PostDetailViewProps) {
   const [error, setError] = useState("");
   const [reasoningModel, setReasoningModel] = useState(DEFAULT_REASONING_MODEL);
   const [imageGenerationModel, setImageGenerationModel] = useState(DEFAULT_IMAGE_GENERATION_MODEL);
+  const [customInstructions, setCustomInstructions] = useState("");
   const [visualVariantPreference, setVisualVariantPreference] = useState<VisualVariantPreference>("both");
   const [ugcCharacters, setUgcCharacters] = useState<UgcCharacter[]>([]);
   const [selectedUgcCharacterId, setSelectedUgcCharacterId] = useState<string | null>(null);
@@ -1299,6 +1300,7 @@ export function PostDetailView({ postId }: PostDetailViewProps) {
     setRegeneratingHistoryAssetIds({});
     setGeneratingHistoryCharacterBySetId({});
     setHistoryAssetStyleById({});
+    setCustomInstructions("");
     setVisualVariantPreference(selectedPost.post_type === "image_slides" ? "both" : "brand_optimized");
 
     if (selectedPost.media_urls?.length) {
@@ -1356,6 +1358,7 @@ export function PostDetailView({ postId }: PostDetailViewProps) {
           includeHookStrategy: mode === "hook_strategy",
           characterId: shouldUseCharacterLock ? selectedUgcCharacterId : null,
           visualVariantPreference,
+          customInstructions,
           reasoningModel,
         }),
       });
@@ -1845,6 +1848,20 @@ export function PostDetailView({ postId }: PostDetailViewProps) {
                   {selectedPost.post_type === "image_slides"
                     ? "UGC Real keeps photoreal style; Brand Optimized applies app theme and can use mascot/3D styling."
                     : "Visual variant switching is only available for image slides."}
+                </p>
+              </div>
+
+              <div className="space-y-2">
+                <p className="text-sm font-semibold text-slate-800">Custom Instructions (Optional)</p>
+                <textarea
+                  value={customInstructions}
+                  onChange={(event) => setCustomInstructions(event.target.value)}
+                  placeholder="Example: Use softer emotional tone, keep each slide short, include one actionable takeaway, avoid medical claims."
+                  rows={4}
+                  className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700 outline-none transition placeholder:text-slate-400 focus:border-rose-400 focus:ring-2 focus:ring-rose-200"
+                />
+                <p className="text-xs text-slate-500">
+                  These instructions are passed to the reasoning model during script generation.
                 </p>
               </div>
 

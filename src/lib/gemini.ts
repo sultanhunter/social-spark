@@ -173,6 +173,7 @@ export async function generatePostScript(
   referenceImageUrls: string[] = [],
   nicheRelevance?: NicheRelevanceResult,
   forcedAdaptationMode?: AdaptationMode,
+  customInstructions?: string | null,
   reasoningModel: ReasoningModel = DEFAULT_REASONING_MODEL
 ): Promise<string> {
   const model = genAI.getGenerativeModel({ model: reasoningModel });
@@ -207,6 +208,15 @@ APP CONTEXT ENFORCEMENT:
 `
     : "";
 
+  const customInstructionsBlock = customInstructions
+    ? `
+CUSTOM USER INSTRUCTIONS:
+- ${customInstructions}
+
+Apply these instructions while preserving all critical adaptation and safety rules.
+`
+    : "";
+
   const prompt = `You are a social content strategist.
 
 ORIGINAL POST DETAILS:
@@ -221,6 +231,7 @@ APP:
 ${relevanceBlock}
 ${forcedModeBlock}
 ${appMentionBlock}
+${customInstructionsBlock}
 
 CRITICAL ADAPTATION RULE:
 1) If canRecreate is false, do not force app context.
@@ -274,6 +285,7 @@ export async function generateHookStrategyScript({
   originalPost,
   strategyPlaybook,
   referenceImageUrls = [],
+  customInstructions,
   reasoningModel = DEFAULT_REASONING_MODEL,
 }: {
   sourceScript: string;
@@ -288,6 +300,7 @@ export async function generateHookStrategyScript({
   };
   strategyPlaybook: string;
   referenceImageUrls?: string[];
+  customInstructions?: string | null;
   reasoningModel?: ReasoningModel;
 }): Promise<string> {
   const model = genAI.getGenerativeModel({ model: reasoningModel });
@@ -295,6 +308,15 @@ export async function generateHookStrategyScript({
   const appMentionRule = adaptationMode === "app_context"
     ? `
 - Because adaptation mode is app_context, ${appName} must appear verbatim in at least one slide's Headline, Supporting, or Body.
+`
+    : "";
+
+  const customInstructionsBlock = customInstructions
+    ? `
+CUSTOM USER INSTRUCTIONS:
+- ${customInstructions}
+
+Apply these instructions while preserving adaptation mode, playbook structure, and all non-negotiable rules.
 `
     : "";
 
@@ -317,6 +339,8 @@ ${sourceScript}
 
 CAROUSEL PLAYBOOK TO FOLLOW:
 ${strategyPlaybook}
+
+${customInstructionsBlock}
 
 NON-NEGOTIABLE RULES:
 - Keep adaptation mode fixed: ${adaptationMode}

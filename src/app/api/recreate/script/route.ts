@@ -99,6 +99,7 @@ export async function POST(request: NextRequest) {
     const referenceImageUrls = body.referenceImageUrls;
     const includeHookStrategy = body.includeHookStrategy === true;
     const selectedCharacterId = asNonEmptyString(body.characterId);
+    const customInstructions = asNonEmptyString(body.customInstructions);
     const reasoningModel = isReasoningModel(body.reasoningModel)
       ? body.reasoningModel
       : DEFAULT_REASONING_MODEL;
@@ -262,6 +263,7 @@ export async function POST(request: NextRequest) {
           selectedReferenceImageUrls,
           nicheRelevance,
           mode,
+          customInstructions,
           reasoningModel
         );
 
@@ -304,6 +306,7 @@ export async function POST(request: NextRequest) {
         originalPost,
         strategyPlaybook: hookStrategyPlaybook,
         referenceImageUrls: selectedReferenceImageUrls,
+        customInstructions,
         reasoningModel,
       });
 
@@ -385,13 +388,14 @@ export async function POST(request: NextRequest) {
           collection_id: collectionId,
           script: version.script,
           slide_plans: version.slidePlans,
-          generation_state: {
-            setType: version.setType,
-            adaptationMode: version.adaptationMode,
-            visualVariant: version.visualVariant,
-            versionLabel: version.label,
-            characterId: version.visualVariant === "ugc_real" ? selectedCharacterId : null,
-          },
+            generation_state: {
+              setType: version.setType,
+              adaptationMode: version.adaptationMode,
+              visualVariant: version.visualVariant,
+              versionLabel: version.label,
+              customInstructions,
+              characterId: version.visualVariant === "ugc_real" ? selectedCharacterId : null,
+            },
           status: "draft",
         };
 
