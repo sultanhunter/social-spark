@@ -1,11 +1,9 @@
 import { randomUUID } from "crypto";
-import { GoogleGenerativeAI } from "@google/generative-ai";
+import { ai } from "@/lib/ai-client";
 import { fetchWithProxy } from "@/lib/proxy-fetch";
 import { extractPlatform } from "@/lib/utils";
 import { DEFAULT_REASONING_MODEL, type ReasoningModel } from "@/lib/reasoning-model";
 import { extractVideoFrames } from "@/lib/social-extractor";
-
-const genAI = new GoogleGenerativeAI(process.env.GOOGLE_GEMINI_API_KEY || "");
 
 type NormalizedFormatType = "ugc" | "ai_video" | "hybrid" | "editorial";
 type AnalysisMethod = "frame_aware";
@@ -2172,7 +2170,7 @@ function inferVideoContentCategoryFallback(sourceVideo: BuildRecreationPlanArgs[
 }
 
 async function classifyVideoContentCategory(args: {
-  model: ReturnType<GoogleGenerativeAI["getGenerativeModel"]>;
+  model: string;
   sourceVideo: BuildRecreationPlanArgs["sourceVideo"];
   appName: string;
   appContext: string;
@@ -2210,8 +2208,8 @@ Return strict JSON only:
 }`;
 
   try {
-    const result = await model.generateContent(prompt);
-    const parsed = parseJsonFromModel(result.response.text());
+    const result = await ai.models.generateContent({ model: model, contents: prompt });
+    const parsed = parseJsonFromModel(result.text!);
     const row = isRecord(parsed) ? parsed : {};
 
     const categoryRaw = sanitizeString(row.category, "").toLowerCase();
@@ -2291,7 +2289,7 @@ export async function analyzeVideoFormatFromSource(
   collectionId?: string
 ): Promise<VideoFormatAnalysis> {
   requireGeminiKey();
-  const model = genAI.getGenerativeModel({ model: reasoningModel });
+  const model = reasoningModel;
 
   const visualEvidence = await buildVisualEvidence(source, collectionId);
 
@@ -2351,8 +2349,8 @@ JSON SHAPE:
     { text: string } | InlineImagePart
   >;
 
-  const result = await model.generateContent(payload);
-  const parsed = parseJsonFromModel(result.response.text());
+  const result = await ai.models.generateContent({ model: model, contents: payload });
+  const parsed = parseJsonFromModel(result.text!);
   const row = isRecord(parsed) ? parsed : {};
 
   const formatName = sanitizeString(row.formatName, "Short-form social format");
@@ -2417,7 +2415,7 @@ export async function matchCandidateToExistingFormat(
   }
 
   requireGeminiKey();
-  const model = genAI.getGenerativeModel({ model: reasoningModel });
+  const model = reasoningModel;
 
   const existingSerialized = existingFormats
     .slice(0, 40)
@@ -2451,8 +2449,8 @@ Output strict JSON only:
   "reason": "short reason"
 }`;
 
-  const result = await model.generateContent(prompt);
-  const parsed = parseJsonFromModel(result.response.text());
+  const result = await ai.models.generateContent({ model: model, contents: prompt });
+  const parsed = parseJsonFromModel(result.text!);
   const row = isRecord(parsed) ? parsed : {};
   const idSet = new Set(existingFormats.map((format) => format.id));
 
@@ -2553,7 +2551,7 @@ export async function buildVideoRecreationPlan({
   }
 
   requireGeminiKey();
-  const model = genAI.getGenerativeModel({ model: reasoningModel });
+  const model = reasoningModel;
 
   const targetDurationSeconds =
     typeof sourceDurationSeconds === "number" && Number.isFinite(sourceDurationSeconds)
@@ -2770,8 +2768,8 @@ ${shouldGenerateShotGroups ? `  "motionControlSegments": [
   "qaChecklist": ["string"]
 }`;
 
-  const result = await model.generateContent(prompt);
-  const parsed = parseJsonFromModel(result.response.text());
+  const result = await ai.models.generateContent({ model: model, contents: prompt });
+  const parsed = parseJsonFromModel(result.text!);
   const row = isRecord(parsed) ? parsed : {};
   const deliverableSpecRow = isRecord(row.deliverableSpec) ? row.deliverableSpec : {};
   const scriptRow = isRecord(row.script) ? row.script : {};
@@ -3110,7 +3108,7 @@ export async function buildVideoScriptIdeationPlan({
   reasoningModel = DEFAULT_REASONING_MODEL,
 }: BuildVideoScriptIdeationArgs): Promise<VideoScriptIdeationPlan> {
   requireGeminiKey();
-  const model = genAI.getGenerativeModel({ model: reasoningModel });
+  const model = reasoningModel;
 
   const resolvedCampaignMode = sanitizeScriptAgentCampaignMode(campaignMode);
   const safeDurationSeconds =
@@ -3429,8 +3427,8 @@ Return strict JSON only:
   "qaChecklist": ["string"]
 }`;
 
-  const result = await model.generateContent(prompt);
-  const parsed = parseJsonFromModel(result.response.text());
+  const result = await ai.models.generateContent({ model: model, contents: prompt });
+  const parsed = parseJsonFromModel(result.text!);
   const row = isRecord(parsed) ? parsed : {};
   const scriptRow = isRecord(row.script) ? row.script : {};
 
@@ -4153,7 +4151,7 @@ export async function buildCycleDayCalendarPlan({
   reasoningModel = DEFAULT_REASONING_MODEL,
 }: BuildCycleDayCalendarPlanArgs): Promise<CycleDayCalendarPlan> {
   requireGeminiKey();
-  const model = genAI.getGenerativeModel({ model: reasoningModel });
+  const model = reasoningModel;
 
   const resolvedPlanNumber = Math.max(1, Math.round(planNumber));
   const resolvedCycleLengthDays = clamp(Math.round(cycleLengthDays), 24, 40);
@@ -4223,8 +4221,8 @@ Return strict JSON only:
   ]
 }`;
 
-  const result = await model.generateContent(prompt);
-  const parsed = parseJsonFromModel(result.response.text());
+  const result = await ai.models.generateContent({ model: model, contents: prompt });
+  const parsed = parseJsonFromModel(result.text!);
   const row = isRecord(parsed) ? parsed : {};
   const daysRaw = Array.isArray(row.days) ? row.days : [];
 

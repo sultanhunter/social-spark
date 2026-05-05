@@ -1,4 +1,4 @@
-import { GoogleGenerativeAI } from "@google/generative-ai";
+import { ai } from "@/lib/ai-client";
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import sharp from "sharp";
@@ -60,8 +60,6 @@ interface BrandAssets {
   featureMockupUrl?: string;
 }
 
-const genAI = new GoogleGenerativeAI(process.env.GOOGLE_GEMINI_API_KEY!);
-
 type GeminiInlineImagePart = {
   inlineData: {
     data: string;
@@ -78,58 +76,22 @@ async function generateImageWithImagenPredict(
   prompt: string,
   sampleCount: number = 1
 ): Promise<Buffer> {
-  const apiKey = process.env.GOOGLE_GEMINI_API_KEY;
-  if (!apiKey) {
-    throw new Error("GOOGLE_GEMINI_API_KEY is required for Imagen models.");
-  }
+  const response = await ai.models.generateImages({
+    model,
+    prompt,
+    config: {
+      numberOfImages: sampleCount,
+    },
+  });
 
-  const response = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/${model}:predict`,
-    {
-      method: "POST",
-      headers: {
-        "x-goog-api-key": apiKey,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        instances: [{ prompt }],
-        parameters: {
-          sampleCount,
-        },
-      }),
-    }
-  );
+  const generatedImage = response.generatedImages?.[0];
+  const imageBytes = generatedImage?.image?.imageBytes;
 
-  const payload = (await response.json()) as Record<string, unknown>;
-
-  if (!response.ok) {
-    const errorMessage =
-      typeof payload?.error === "object" &&
-        payload.error !== null &&
-        typeof (payload.error as Record<string, unknown>).message === "string"
-        ? ((payload.error as Record<string, unknown>).message as string)
-        : `Imagen predict request failed (${response.status})`;
-    throw new Error(errorMessage);
-  }
-
-  const predictions = Array.isArray(payload.predictions)
-    ? (payload.predictions as Array<Record<string, unknown>>)
-    : [];
-  const firstPrediction = predictions[0];
-  const bytesBase64Encoded =
-    typeof firstPrediction?.bytesBase64Encoded === "string"
-      ? firstPrediction.bytesBase64Encoded
-      : typeof firstPrediction?.image === "object" &&
-        firstPrediction.image !== null &&
-        typeof (firstPrediction.image as Record<string, unknown>).bytesBase64Encoded === "string"
-        ? ((firstPrediction.image as Record<string, unknown>).bytesBase64Encoded as string)
-        : null;
-
-  if (!bytesBase64Encoded) {
+  if (!imageBytes) {
     throw new Error("Imagen model did not return image bytes.");
   }
 
-  return Buffer.from(bytesBase64Encoded, "base64");
+  return Buffer.from(imageBytes, "base64");
 }
 
 function mimeTypeFromPath(filePath: string): string {
@@ -216,10 +178,9 @@ function normalizeKeySegment(value: string): string {
 }
 
 function parseGeneratedImagePart(
-  result: Awaited<ReturnType<ReturnType<typeof genAI.getGenerativeModel>["generateContent"]>>
+  result: { candidates?: Array<{ content?: { parts?: Array<{ inlineData?: { data?: string; mimeType?: string } }> } }> }
 ): PartWithInlineData | undefined {
-  const response = result.response;
-  const parts = ((response.candidates?.[0]?.content?.parts ?? []) as unknown) as Array<
+  const parts = (result.candidates?.[0]?.content?.parts ?? []) as unknown as Array<
     Record<string, unknown>
   >;
   return parts.find((part) => "inlineData" in part) as PartWithInlineData | undefined;
@@ -394,8 +355,7 @@ CRITICAL OUTPUT RULES:
 
   const generatedBuffer = supportsInlineImageContext
     ? await (async () => {
-      const model = genAI.getGenerativeModel({ model: imageModel });
-      const result = await model.generateContent(promptParts);
+      const result = await ai.models.generateContent({ model: imageModel, contents: promptParts });
       const imagePart = parseGeneratedImagePart(result);
 
       if (!imagePart?.inlineData?.data) {

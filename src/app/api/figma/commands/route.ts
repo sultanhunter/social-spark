@@ -1,8 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { GoogleGenerativeAI } from "@google/generative-ai";
+import { ai } from "@/lib/ai-client";
 import { DEFAULT_REASONING_MODEL } from "@/lib/reasoning-model";
-
-const genAI = new GoogleGenerativeAI(process.env.GOOGLE_GEMINI_API_KEY!);
 
 const corsHeaders = {
     "Access-Control-Allow-Origin": "*",
@@ -46,9 +44,9 @@ REQUIREMENTS:
 - Output ONLY the raw JavaScript code. No markdown, no backticks, no explanation.
 - The code will be executed inside an async function, so you can use await directly.`;
 
-        const model = genAI.getGenerativeModel({ model: DEFAULT_REASONING_MODEL });
-        const result = await model.generateContent(prompt);
-        let code = result.response.text().trim();
+        const model = DEFAULT_REASONING_MODEL;
+        const result = await ai.models.generateContent({ model: model, contents: prompt });
+        let code = result.text!.trim();
 
         // Strip markdown code fences if present
         if (code.startsWith("```")) {

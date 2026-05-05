@@ -1,7 +1,8 @@
 import sharp from "sharp";
 import { promises as fs } from "node:fs";
 import path from "node:path";
-import { GoogleGenerativeAI } from "@google/generative-ai";
+import { ai } from "@/lib/ai-client";
+import type { GenerateContentResponse } from "@google/genai";
 import { uploadToR2 } from "@/lib/r2";
 import {
   type ImageGenerationModel,
@@ -26,12 +27,6 @@ const CAROUSEL_STYLE_REFERENCE_PATHS = [
 
 const IN_IMAGE_TEXT_MAX_ATTEMPTS = 3;
 const IN_IMAGE_TEXT_MIN_READABILITY_SCORE = 0.72;
-
-const genAI = new GoogleGenerativeAI(process.env.GOOGLE_GEMINI_API_KEY!);
-
-type GenerateContentResult = Awaited<
-  ReturnType<ReturnType<typeof genAI.getGenerativeModel>["generateContent"]>
->;
 
 const HOOK_STRATEGY_SUMMARY = [
   "Slide 1 must be a pattern-break hook with safe friction.",
@@ -434,24 +429,26 @@ function ensureSlideRhythm(slides: CarouselSlide[]): CarouselSlide[] {
 
 async function generateWithSearchFallback(
   modelId: string,
-  payload: Parameters<ReturnType<typeof genAI.getGenerativeModel>["generateContent"]>[0]
-): Promise<GenerateContentResult> {
+  payload: unknown
+): Promise<GenerateContentResponse> {
   try {
-    const modelWithGoogleSearch = genAI.getGenerativeModel({
+    return await ai.models.generateContent({
       model: modelId,
-      tools: ([{ googleSearch: {} }] as unknown) as Array<{ googleSearchRetrieval: Record<string, never> }>,
+      contents: payload as string,
+      config: { tools: [{ googleSearch: {} }] },
     });
-    return await modelWithGoogleSearch.generateContent(payload);
   } catch {
     try {
-      const modelWithLegacySearch = genAI.getGenerativeModel({
+      return await ai.models.generateContent({
         model: modelId,
-        tools: [{ googleSearchRetrieval: {} }],
+        contents: payload as string,
+        config: { tools: [{ googleSearchRetrieval: {} }] },
       });
-      return await modelWithLegacySearch.generateContent(payload);
     } catch {
-      const modelWithoutSearchTool = genAI.getGenerativeModel({ model: modelId });
-      return modelWithoutSearchTool.generateContent(payload);
+      return ai.models.generateContent({
+        model: modelId,
+        contents: payload as string,
+      });
     }
   }
 }
@@ -497,7 +494,7 @@ Rules:
     reasoningModel || DEFAULT_REASONING_MODEL,
     prompt
   );
-  const parsed = parseJsonFromModel<Partial<TopicDiscoveryResult>>(result.response.text()) || {};
+  const parsed = parseJsonFromModel<Partial<TopicDiscoveryResult>>(result.text!) || {};
 
   return {
     selectedTopic: sanitizeEnglishText(
@@ -529,7 +526,7 @@ async function reviewCarouselPackForIslamicAuthenticity({
   reasoningModel?: ReasoningModel;
 }): Promise<CarouselPack> {
   try {
-    const model = genAI.getGenerativeModel({ model: reasoningModel || DEFAULT_REASONING_MODEL });
+    const model = reasoningModel || DEFAULT_REASONING_MODEL;
     const prompt = `You are a strict Islamic authenticity editor for ${appName} social content.
 
 Your task:
@@ -549,12 +546,12 @@ Output constraints:
 Return ONLY valid JSON with this same schema:
 ${JSON.stringify(pack, null, 2)}`;
 
-    const result = await model.generateContent({
+    const result = await ai.models.generateContent({ model: model, 
       contents: [{ role: "user", parts: [{ text: prompt }] }],
-      generationConfig: { temperature: 0.2 },
+      config: { temperature: 0.2 },
     });
 
-    const parsed = parseJsonFromModel<Partial<CarouselPack>>(result.response.text()) || {};
+    const parsed = parseJsonFromModel<Partial<CarouselPack>>(result.text!) || {};
     const reviewedSlides = sanitizeSlides(parsed.slides, pack.topic).slice(0, pack.slides.length);
 
     const safeReviewedSlides = reviewedSlides.length === pack.slides.length
@@ -600,7 +597,7 @@ export async function generateCarouselPack({
     reasoningModel,
   });
 
-  const model = genAI.getGenerativeModel({ model: reasoningModel || DEFAULT_REASONING_MODEL });
+  const model = reasoningModel || DEFAULT_REASONING_MODEL;
 
   const prompt = `You are an elite Instagram carousel strategist and copywriter for ${appName}.
 
@@ -669,14 +666,14 @@ ${topicData.controversyLine}
 Use this line idea for slide 2 hook:
 ${topicData.secondaryHook}`;
 
-  const result = await model.generateContent({
+  const result = await ai.models.generateContent({ model: model, 
     contents: [{ role: "user", parts: [{ text: prompt }] }],
-    generationConfig: {
+    config: {
       temperature: 0.7,
     },
   });
 
-  const parsed = parseJsonFromModel<Partial<CarouselPack>>(result.response.text()) || {};
+  const parsed = parseJsonFromModel<Partial<CarouselPack>>(result.text!) || {};
   const slides = ensureSlideRhythm(
     sanitizeSlides(parsed.slides, topicData.selectedTopic).slice(0, 10)
   );
@@ -912,8 +909,8 @@ function tokenRecallScore(expectedTokens: string[], observedText: string): numbe
 
 async function extractVisibleTextFromImage(imageBuffer: Buffer): Promise<string | null> {
   try {
-    const model = genAI.getGenerativeModel({ model: DEFAULT_REASONING_MODEL });
-    const response = await model.generateContent({
+    const model = DEFAULT_REASONING_MODEL;
+    const response = await ai.models.generateContent({ model: model, 
       contents: [
         {
           role: "user",
@@ -931,12 +928,12 @@ async function extractVisibleTextFromImage(imageBuffer: Buffer): Promise<string 
           ],
         },
       ],
-      generationConfig: {
+      config: {
         temperature: 0,
       },
     });
 
-    const text = response.response.text();
+    const text = response.text!;
     const parsed = parseJsonFromModel<{ lines?: string[]; text?: string }>(text);
 
     if (parsed?.lines && Array.isArray(parsed.lines)) {
@@ -1015,7 +1012,7 @@ async function generateSlideImage({
   }
 
   const styleReferenceParts = await getStyleReferenceImageParts();
-  const model = genAI.getGenerativeModel({ model: imageModel });
+  const model = imageModel;
 
   let bestImage: Buffer | null = null;
   let bestScore = -1;
@@ -1024,15 +1021,14 @@ async function generateSlideImage({
   for (let attempt = 1; attempt <= IN_IMAGE_TEXT_MAX_ATTEMPTS; attempt += 1) {
     const attemptPrompt = `${prompt}\n\nRENDER ATTEMPT: ${attempt}. Ensure text is crisp and fully readable.`;
 
-    const result = await model.generateContent({
+    const result = await ai.models.generateContent({ model: model, 
       contents: [{ role: "user", parts: [{ text: attemptPrompt }, ...styleReferenceParts] }],
-      generationConfig: {
-        // @ts-expect-error responseModalities supported by API
+      config: {
         responseModalities: ["IMAGE", "TEXT"],
       },
     });
 
-    const parts = ((result.response.candidates?.[0]?.content?.parts ?? []) as unknown) as Array<Record<string, unknown>>;
+    const parts = ((result.candidates?.[0]?.content?.parts ?? []) as unknown) as Array<Record<string, unknown>>;
     const imagePart = parts.find((part) => "inlineData" in part) as PartWithInlineData | undefined;
 
     if (!imagePart?.inlineData?.data) {

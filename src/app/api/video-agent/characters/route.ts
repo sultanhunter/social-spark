@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { ai } from "@/lib/ai-client";
 import { supabase } from "@/lib/supabase";
 import {
   DEFAULT_REASONING_MODEL,
@@ -222,13 +223,11 @@ async function generateCharacterProfile(
   identityAnchors: string[];
   realismDirectives: string[];
 }> {
-  if (!process.env.GOOGLE_GEMINI_API_KEY) {
-    throw new Error("GOOGLE_GEMINI_API_KEY is missing.");
+  if (!process.env.GOOGLE_GEMINI_API_KEY && !process.env.GOOGLE_VERTEX_AI_PROJECT) {
+    throw new Error("No AI credentials configured. Set GOOGLE_GEMINI_API_KEY or GOOGLE_VERTEX_AI_PROJECT + GOOGLE_VERTEX_AI_LOCATION.");
   }
 
-  const { GoogleGenerativeAI } = await import("@google/generative-ai");
-  const genAI = new GoogleGenerativeAI(process.env.GOOGLE_GEMINI_API_KEY || "");
-  const model = genAI.getGenerativeModel({ model: reasoningModel });
+  const model = reasoningModel;
 
   const referenceImagePart = referenceImageUrl ? await loadRemoteImagePart(referenceImageUrl) : null;
 
@@ -265,10 +264,11 @@ Return strict JSON only:
   "realismDirectives": ["3-5 camera realism constraints"]
 }`;
 
-  const result = await model.generateContent(
-    referenceImagePart ? [{ text: prompt }, referenceImagePart] : prompt
-  );
-  const parsed = parseJsonObject(result.response.text()) || {};
+  const result = await ai.models.generateContent({
+    model,
+    contents: referenceImagePart ? [{ text: prompt }, referenceImagePart] : prompt,
+  });
+  const parsed = parseJsonObject(result.text!) || {};
 
   return {
     characterName:

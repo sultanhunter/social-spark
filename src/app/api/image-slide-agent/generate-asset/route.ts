@@ -1,6 +1,6 @@
 import path from "path";
 import { readFile } from "fs/promises";
-import { GoogleGenerativeAI } from "@google/generative-ai";
+import { ai } from "@/lib/ai-client";
 import { NextRequest, NextResponse } from "next/server";
 import { supabase } from "@/lib/supabase";
 import {
@@ -26,10 +26,6 @@ export const maxDuration = 300;
 
 const APP_BRAND_PRIMARY_COLOR = "#F36F97";
 const APP_BRAND_GRADIENT = ["#F36F97", "#EEB4C3", "#F7DFD6"];
-const genAI = process.env.GOOGLE_GEMINI_API_KEY
-  ? new GoogleGenerativeAI(process.env.GOOGLE_GEMINI_API_KEY)
-  : null;
-
 type GeneratedImageAssetEntry = {
   slideIndex: number;
   assetIndex: number;
@@ -75,10 +71,10 @@ async function applyAssetStylePrompt(
   reasoningModel: ReasoningModel
 ): Promise<string> {
   const fallbackPrompt = `${assetPrompt}\n\nStyle reference to match: ${stylePrompt}`;
-  if (!genAI) return fallbackPrompt;
+  if (!process.env.GOOGLE_GEMINI_API_KEY && !process.env.GOOGLE_VERTEX_AI_PROJECT) return fallbackPrompt;
 
   try {
-    const model = genAI.getGenerativeModel({ model: reasoningModel });
+    const model = reasoningModel;
     const instruction = `Rewrite this image-generation prompt to preserve the original subject intent but match the style reference.
 
 ORIGINAL ASSET PROMPT:
@@ -108,7 +104,7 @@ Return only the final rewritten prompt.`;
               ? "image/webp"
               : "image/jpeg";
 
-        response = await model.generateContent([
+        response = await ai.models.generateContent({ model: model, contents: [
           { text: instruction },
           {
             inlineData: {
@@ -116,15 +112,15 @@ Return only the final rewritten prompt.`;
               mimeType,
             },
           },
-        ]);
+        ]});
       } catch {
-        response = await model.generateContent(instruction);
+        response = await ai.models.generateContent({ model: model, contents: instruction });
       }
     } else {
-      response = await model.generateContent(instruction);
+      response = await ai.models.generateContent({ model: model, contents: instruction });
     }
 
-    const rewritten = normalizePromptResponse(response.response.text());
+    const rewritten = normalizePromptResponse(response.text!);
     return rewritten.length > 0 ? rewritten : fallbackPrompt;
   } catch {
     return fallbackPrompt;

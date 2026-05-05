@@ -1,4 +1,4 @@
-import { GoogleGenerativeAI } from "@google/generative-ai";
+import { ai } from "@/lib/ai-client";
 import { NextRequest, NextResponse } from "next/server";
 import { supabase } from "@/lib/supabase";
 import { generateSlideDesignPlans, type SlideGenerationPlan } from "@/lib/gemini";
@@ -6,8 +6,6 @@ import { DEFAULT_REASONING_MODEL, isReasoningModel } from "@/lib/reasoning-model
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
-
-const genAI = new GoogleGenerativeAI(process.env.GOOGLE_GEMINI_API_KEY!);
 
 const APP_BRAND_PRIMARY_COLOR = "#F36F97";
 const APP_BRAND_GRADIENT = ["#F36F97", "#EEB4C3", "#F7DFD6"];
@@ -540,7 +538,7 @@ async function generateCampaignScript({
   character: CharacterProfile | null;
   reasoningModel: string;
 }): Promise<string> {
-  const model = genAI.getGenerativeModel({ model: reasoningModel });
+  const model = reasoningModel;
 
   const characterBlock = character
     ? [
@@ -638,14 +636,14 @@ Rules:
 - Avoid insults, slurs, or hateful framing. Keep criticism focused on product-fit and faith-alignment concerns.
 - Do not include markdown, bullet lists, or JSON. Just the script text block.`;
 
-  const result = await model.generateContent({
+  const result = await ai.models.generateContent({ model: model, 
     contents: [{ role: "user", parts: [{ text: prompt }] }],
-    generationConfig: {
+    config: {
       temperature: 0.7,
     },
   });
 
-  const rawText = cleanScriptText(result.response.text());
+  const rawText = cleanScriptText(result.text!);
   if (!rawText) {
     return buildFallbackScript({ appName, campaignType, slideCount });
   }

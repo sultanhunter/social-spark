@@ -1,5 +1,5 @@
 import sharp from "sharp";
-import { GoogleGenerativeAI } from "@google/generative-ai";
+import { ai } from "@/lib/ai-client";
 import { uploadToR2 } from "@/lib/r2";
 import type { BlogResearchBrief } from "@/lib/blog-agent";
 import type { ReasoningModel } from "@/lib/reasoning-model";
@@ -24,8 +24,6 @@ export interface GeneratedBlogImages {
   coverImageUrl: string;
   inlineImages: Array<{ url: string; alt: string }>;
 }
-
-const genAI = new GoogleGenerativeAI(process.env.GOOGLE_GEMINI_API_KEY!);
 
 function parseJsonFromModel<T>(text: string): T | null {
   const cleaned = text
@@ -103,7 +101,7 @@ async function planBlogImagePrompts({
   reasoningModel?: ReasoningModel;
 }): Promise<BlogImagePromptPlan> {
   const fallback = fallbackPromptPlan(topic);
-  const model = genAI.getGenerativeModel({ model: reasoningModel || "gemini-3.1-pro-preview" });
+  const modelName = reasoningModel || "gemini-3.1-pro-preview";
 
   const prompt = `Create image prompts for an Islamic women's health blog post.
 
@@ -126,8 +124,8 @@ Rules:
 - Avoid revealing clothing and avoid insensitive depictions.
 - Keep prompts specific, concrete, and image-model-friendly.`;
 
-  const result = await model.generateContent(prompt);
-  const parsed = parseJsonFromModel<Partial<BlogImagePromptPlan>>(result.response.text()) || {};
+  const result = await ai.models.generateContent({ model: modelName, contents: prompt });
+  const parsed = parseJsonFromModel<Partial<BlogImagePromptPlan>>(result.text!) || {};
 
   const coverPrompt = asNonEmptyString(parsed.coverPrompt) || fallback.coverPrompt;
   const inlinePrompts = sanitizeStringArray(parsed.inlinePrompts, 2);
@@ -151,9 +149,8 @@ async function generateSingleImage({
   kind: "cover" | "inline";
   index: number;
 }): Promise<string> {
-  const model = genAI.getGenerativeModel({ model: BLOG_IMAGE_MODEL });
-
-  const result = await model.generateContent({
+  const result = await ai.models.generateContent({
+    model: BLOG_IMAGE_MODEL,
     contents: [
       {
         role: "user",
@@ -166,13 +163,12 @@ async function generateSingleImage({
         ],
       },
     ],
-    generationConfig: {
-      // @ts-expect-error SDK typing lag for responseModalities
+    config: {
       responseModalities: ["IMAGE", "TEXT"],
     },
   });
 
-  const parts = ((result.response.candidates?.[0]?.content?.parts ?? []) as unknown) as Array<
+  const parts = ((result.candidates?.[0]?.content?.parts ?? []) as unknown) as Array<
     Record<string, unknown>
   >;
   const imagePart = parts.find((part) => "inlineData" in part) as PartWithInlineData | undefined;

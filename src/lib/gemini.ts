@@ -1,8 +1,6 @@
-import { GoogleGenerativeAI } from "@google/generative-ai";
+import { ai } from "@/lib/ai-client";
 import { getSlideImageSpec } from "@/lib/utils";
 import { DEFAULT_REASONING_MODEL, type ReasoningModel } from "@/lib/reasoning-model";
-
-const genAI = new GoogleGenerativeAI(process.env.GOOGLE_GEMINI_API_KEY!);
 
 export interface NicheRelevanceResult {
   isIslamic: boolean;
@@ -90,7 +88,7 @@ export async function detectNicheRelevance(
   referenceImageUrls: string[] = [],
   reasoningModel: ReasoningModel = DEFAULT_REASONING_MODEL
 ): Promise<NicheRelevanceResult> {
-  const model = genAI.getGenerativeModel({ model: reasoningModel });
+  const modelName = reasoningModel;
 
   const prompt = `You are a strict social-post classifier for a two-step niche gate.
 
@@ -123,13 +121,13 @@ TASK:
     const imageParts = await buildReferenceImageParts(referenceImageUrls);
     result =
       imageParts.length > 0
-        ? await model.generateContent([{ text: prompt }, ...imageParts])
-        : await model.generateContent(prompt);
+        ? await ai.models.generateContent({ model: modelName, contents: [{ text: prompt }, ...imageParts] })
+        : await ai.models.generateContent({ model: modelName, contents: prompt });
   } else {
-    result = await model.generateContent(prompt);
+    result = await ai.models.generateContent({ model: modelName, contents: prompt });
   }
 
-  const parsed = parseJsonFromModel(result.response.text()) as Record<string, unknown> | null;
+  const parsed = parseJsonFromModel(result.text!) as Record<string, unknown> | null;
   const legacyRelevant = Boolean(parsed?.isAppNicheRelevant);
   const isIslamic = typeof parsed?.isIslamic === "boolean" ? parsed.isIslamic : legacyRelevant;
   const isPregnancyOrPeriodRelated =
@@ -176,7 +174,7 @@ export async function generatePostScript(
   customInstructions?: string | null,
   reasoningModel: ReasoningModel = DEFAULT_REASONING_MODEL
 ): Promise<string> {
-  const model = genAI.getGenerativeModel({ model: reasoningModel });
+  const modelName = reasoningModel;
 
   const relevanceBlock = nicheRelevance
     ? `
@@ -269,12 +267,12 @@ CRITICAL TEXT RULES:
     if (imageParts.length === 0) {
       throw new Error("Failed to load selected reference images for script generation.");
     }
-    result = await model.generateContent([{ text: prompt }, ...imageParts]);
+    result = await ai.models.generateContent({ model: modelName, contents: [{ text: prompt }, ...imageParts] });
   } else {
-    result = await model.generateContent(prompt);
+    result = await ai.models.generateContent({ model: modelName, contents: prompt });
   }
 
-  return result.response.text();
+  return result.text!;
 }
 
 export async function generateHookStrategyScript({
@@ -303,7 +301,7 @@ export async function generateHookStrategyScript({
   customInstructions?: string | null;
   reasoningModel?: ReasoningModel;
 }): Promise<string> {
-  const model = genAI.getGenerativeModel({ model: reasoningModel });
+  const modelName = reasoningModel;
 
   const appMentionRule = adaptationMode === "app_context"
     ? `
@@ -382,13 +380,13 @@ OUTPUT FORMAT:
   if (referenceImageUrls.length > 0) {
     const imageParts = await buildReferenceImageParts(referenceImageUrls);
     result = imageParts.length > 0
-      ? await model.generateContent([{ text: prompt }, ...imageParts])
-      : await model.generateContent(prompt);
+      ? await ai.models.generateContent({ model: modelName, contents: [{ text: prompt }, ...imageParts] })
+      : await ai.models.generateContent({ model: modelName, contents: prompt });
   } else {
-    result = await model.generateContent(prompt);
+    result = await ai.models.generateContent({ model: modelName, contents: prompt });
   }
 
-  return result.response.text();
+  return result.text!;
 }
 
 /* ---------- Step 1: Extract slide texts from original images ---------- */
@@ -405,7 +403,7 @@ export async function extractSlideTexts(
 ): Promise<ExtractedSlideText[]> {
   if (imageUrls.length === 0) return [];
 
-  const model = genAI.getGenerativeModel({ model: reasoningModel });
+  const modelName = reasoningModel;
   const imageParts = await buildReferenceImageParts(imageUrls);
   if (imageParts.length === 0) {
     throw new Error("Failed to load slide images for text extraction.");
@@ -428,8 +426,8 @@ Rules:
 - Do not add or modify any text — transcribe exactly.
 - JSON only, no markdown.`;
 
-  const result = await model.generateContent([{ text: prompt }, ...imageParts]);
-  const parsed = parseJsonFromModel(result.response.text());
+  const result = await ai.models.generateContent({ model: modelName, contents: [{ text: prompt }, ...imageParts] });
+  const parsed = parseJsonFromModel(result.text!);
 
   if (!Array.isArray(parsed)) {
     return imageUrls.map((_, i) => ({ slideIndex: i, headline: "", supportingText: "" }));
@@ -459,7 +457,7 @@ export async function generateSlideDesignPlans(
   reasoningModel: ReasoningModel = DEFAULT_REASONING_MODEL,
   expectedSlideCount?: number
 ): Promise<SlideGenerationPlan[]> {
-  const model = genAI.getGenerativeModel({ model: reasoningModel });
+  const modelName = reasoningModel;
   const imageSpec = getSlideImageSpec(platform, { forceCarouselAspect });
   const gradientStr = brandGradient.join(" → ");
 
@@ -561,7 +559,7 @@ JSON only. No markdown.`;
     ? [{ text: prompt }, ...imageParts]
     : [{ text: prompt }];
 
-  const result = await model.generateContent(content);
+  const result = await ai.models.generateContent({ model: modelName, contents: content });
   const scriptSections = extractSlideScriptSections(script);
   const resolvedSlideCount = clamp(
     Math.round(
@@ -572,7 +570,7 @@ JSON only. No markdown.`;
     1,
     20
   );
-  const plans = parseSlideDesignPlans(result.response.text(), resolvedSlideCount);
+  const plans = parseSlideDesignPlans(result.text!, resolvedSlideCount);
   const slideScripts = scriptSections;
 
   return plans.map((plan, index) => {
@@ -695,7 +693,7 @@ export async function generatePostCaption({
   originalDescription?: string | null;
   reasoningModel?: ReasoningModel;
 }): Promise<string> {
-  const model = genAI.getGenerativeModel({ model: reasoningModel });
+  const modelName = reasoningModel;
 
   const slidesBlock = slideSummaries.length > 0 ? `SLIDES:\n- ${slideSummaries.join("\n- ")}` : "";
   const originalBlock = originalTitle || originalDescription
@@ -725,6 +723,6 @@ TASK:
 - End with 3-6 relevant hashtags on a new line.
 - Output plain text only. No quotes. No markdown.`;
 
-  const result = await model.generateContent(prompt);
-  return cleanCaption(result.response.text());
+  const result = await ai.models.generateContent({ model: modelName, contents: prompt });
+  return cleanCaption(result.text!);
 }

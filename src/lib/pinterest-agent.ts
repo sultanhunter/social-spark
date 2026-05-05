@@ -1,5 +1,6 @@
 import sharp from "sharp";
-import { GoogleGenerativeAI } from "@google/generative-ai";
+import { ai } from "@/lib/ai-client";
+import type { GenerateContentResponse } from "@google/genai";
 import { uploadToR2 } from "@/lib/r2";
 import {
   type ImageGenerationModel,
@@ -23,11 +24,7 @@ const REFERENCE_VISUAL_VIBE =
 const REFERENCE_RENDER_QUALITY_VIBE =
   "High-finish illustration quality similar to premium Pinterest Islamic art: serene environment depth, soft cinematic lighting, clean cel-shaded forms, elegant architecture details, polished edges, intentional composition.";
 
-const genAI = new GoogleGenerativeAI(process.env.GOOGLE_GEMINI_API_KEY!);
 
-type GenerateContentResult = Awaited<
-  ReturnType<ReturnType<typeof genAI.getGenerativeModel>["generateContent"]>
->;
 
 interface PartWithInlineData {
   inlineData?: {
@@ -319,7 +316,7 @@ async function polishSingleShotPrompt({
   pack: PinterestPinPack;
   reasoningModel?: ReasoningModel;
 }): Promise<string> {
-  const model = genAI.getGenerativeModel({ model: reasoningModel || DEFAULT_REASONING_MODEL });
+  const model = reasoningModel || DEFAULT_REASONING_MODEL;
 
   const prompt = `You are refining one final image prompt for a single-shot Pinterest generation.
 
@@ -359,14 +356,14 @@ Hard constraints:
 - No markdown, no prose outside JSON.`;
 
   try {
-    const result = await model.generateContent({
+    const result = await ai.models.generateContent({ model: model, 
       contents: [{ role: "user", parts: [{ text: prompt }] }],
-      generationConfig: {
+      config: {
         temperature: 0.35,
       },
     });
 
-    const parsed = parseJsonFromModel<{ imagePrompt?: string }>(result.response.text()) || {};
+    const parsed = parseJsonFromModel<{ imagePrompt?: string }>(result.text!) || {};
     return sanitizeEnglishText(parsed.imagePrompt, draftPrompt);
   } catch {
     return draftPrompt;
@@ -375,24 +372,26 @@ Hard constraints:
 
 async function generateWithSearchFallback(
   modelId: string,
-  payload: Parameters<ReturnType<typeof genAI.getGenerativeModel>["generateContent"]>[0]
-): Promise<GenerateContentResult> {
+  payload: unknown
+): Promise<GenerateContentResponse> {
   try {
-    const modelWithGoogleSearch = genAI.getGenerativeModel({
+    return await ai.models.generateContent({
       model: modelId,
-      tools: ([{ googleSearch: {} }] as unknown) as Array<{ googleSearchRetrieval: Record<string, never> }>,
+      contents: payload as string,
+      config: { tools: [{ googleSearch: {} }] },
     });
-    return await modelWithGoogleSearch.generateContent(payload);
   } catch {
     try {
-      const modelWithLegacySearch = genAI.getGenerativeModel({
+      return await ai.models.generateContent({
         model: modelId,
-        tools: [{ googleSearchRetrieval: {} }],
+        contents: payload as string,
+        config: { tools: [{ googleSearchRetrieval: {} }] },
       });
-      return await modelWithLegacySearch.generateContent(payload);
     } catch {
-      const modelWithoutSearchTool = genAI.getGenerativeModel({ model: modelId });
-      return modelWithoutSearchTool.generateContent(payload);
+      return ai.models.generateContent({
+        model: modelId,
+        contents: payload as string,
+      });
     }
   }
 }
@@ -460,14 +459,14 @@ Rules:
     reasoningModel || DEFAULT_REASONING_MODEL,
     {
       contents: [{ role: "user", parts: [{ text: prompt }] }],
-      generationConfig: {
+      config: {
         temperature: 0.6,
       },
     }
   );
 
   const parsed = parseJsonFromModel<Partial<PinterestPinPack> & { script?: Partial<PinterestPinScript> }>(
-    result.response.text()
+    result.text!
   ) || {};
   const script: Partial<PinterestPinScript> = parsed.script || {};
   const sections = sanitizeSections(script.sections);
@@ -505,7 +504,7 @@ async function generateDetailedPinterestImagePrompt({
 }): Promise<Pick<PinterestPinPack, "imagePrompt" | "styleDirection" | "altText">> {
   const fallbackPrompt = buildFallbackImagePrompt(pack);
 
-  const model = genAI.getGenerativeModel({ model: reasoningModel || DEFAULT_REASONING_MODEL });
+  const model = reasoningModel || DEFAULT_REASONING_MODEL;
 
   const prompt = `You are a senior visual prompt engineer for Pinterest infographics.
 
@@ -554,9 +553,9 @@ Rules:
 - No markdown, no prose outside JSON.`;
 
   try {
-    const result = await model.generateContent({
+    const result = await ai.models.generateContent({ model: model, 
       contents: [{ role: "user", parts: [{ text: prompt }] }],
-      generationConfig: {
+      config: {
         temperature: 0.45,
       },
     });
@@ -565,7 +564,7 @@ Rules:
       styleDirection?: string;
       imagePrompt?: string;
       altText?: string;
-    }>(result.response.text()) || {};
+    }>(result.text!) || {};
 
     const draftImagePrompt = sanitizeEnglishText(parsed.imagePrompt, fallbackPrompt);
     const polishedImagePrompt = await polishSingleShotPrompt({
@@ -695,17 +694,16 @@ Final render requirements:
 - Never crop or clip headline at top or CTA/footer at bottom.
 - Keep background and decorative elements full-bleed to image edges.
 - Output image only, no extra commentary.`;
-  const model = genAI.getGenerativeModel({ model: resolvedImageModel });
+  const model = resolvedImageModel;
 
-  const result = await model.generateContent({
+  const result = await ai.models.generateContent({ model: model, 
     contents: [{ role: "user", parts: [{ text: prompt }] }],
-    generationConfig: {
-      // @ts-expect-error responseModalities supported by API
+    config: {
       responseModalities: ["IMAGE", "TEXT"],
     },
   });
 
-  const parts = ((result.response.candidates?.[0]?.content?.parts ?? []) as unknown) as Array<Record<string, unknown>>;
+  const parts = ((result.candidates?.[0]?.content?.parts ?? []) as unknown) as Array<Record<string, unknown>>;
   const imagePart = parts.find((part) => "inlineData" in part) as PartWithInlineData | undefined;
 
   if (!imagePart?.inlineData?.data) {

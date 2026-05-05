@@ -1,4 +1,5 @@
-import { GoogleGenerativeAI } from "@google/generative-ai";
+import { ai } from "@/lib/ai-client";
+import type { GenerateContentResponse } from "@google/genai";
 import {
   DEFAULT_REASONING_MODEL,
   isReasoningModel,
@@ -62,36 +63,34 @@ export interface GeneratedBlogDraft {
   meta_description: string;
 }
 
-const genAI = new GoogleGenerativeAI(process.env.GOOGLE_GEMINI_API_KEY!);
-
 const BLOG_MIN_WORDS = 2000;
 const BLOG_MAX_WORDS = 5000;
 const BLOG_MIN_EXTERNAL_LINKS = 5;
 
-type GenerateContentResult = Awaited<
-  ReturnType<ReturnType<typeof genAI.getGenerativeModel>["generateContent"]>
->;
+type GenerateContentResult = GenerateContentResponse;
 
 async function generateWithSearchFallback(
   modelId: string,
-  payload: Parameters<ReturnType<typeof genAI.getGenerativeModel>["generateContent"]>[0]
+  payload: unknown
 ): Promise<GenerateContentResult> {
   try {
-    const modelWithGoogleSearch = genAI.getGenerativeModel({
+    return await ai.models.generateContent({
       model: modelId,
-      tools: ([{ googleSearch: {} }] as unknown) as Array<{ googleSearchRetrieval: Record<string, never> }>,
-    });
-    return await modelWithGoogleSearch.generateContent(payload);
+      contents: payload as string,
+      config: { tools: [{ googleSearch: {} }] },
+    }) as unknown as GenerateContentResult;
   } catch {
     try {
-      const modelWithLegacySearch = genAI.getGenerativeModel({
+      return await ai.models.generateContent({
         model: modelId,
-        tools: [{ googleSearchRetrieval: {} }],
-      });
-      return await modelWithLegacySearch.generateContent(payload);
+        contents: payload as string,
+        config: { tools: [{ googleSearchRetrieval: {} }] },
+      }) as unknown as GenerateContentResult;
     } catch {
-      const modelWithoutSearchTool = genAI.getGenerativeModel({ model: modelId });
-      return modelWithoutSearchTool.generateContent(payload);
+      return ai.models.generateContent({
+        model: modelId,
+        contents: payload as string,
+      }) as unknown as GenerateContentResult;
     }
   }
 }
@@ -401,14 +400,14 @@ Rules:
 
   const requestPayload = {
     contents: [{ role: "user", parts: [{ text: prompt }] }],
-    generationConfig: {
+    config: {
       temperature: 0.4,
     },
   };
 
   const result = await generateWithSearchFallback(normalizeBlogModel(reasoningModel), requestPayload);
 
-  const parsed = parseJsonFromModel<Partial<TrendingTopicPlan>>(result.response.text()) || {};
+  const parsed = parseJsonFromModel<Partial<TrendingTopicPlan>>(result.text!) || {};
   const candidateTopics = sanitizeTopicCandidates(parsed.candidateTopics, 6);
   const selectedTopicRaw =
     asNonEmptyString(parsed.selectedTopic) ||
@@ -586,7 +585,7 @@ async function rewriteBlogForDepthAndSeo({
   title,
   currentMarkdown,
 }: {
-  model: ReturnType<typeof genAI.getGenerativeModel>;
+  model: string;
   topic: string;
   appName: string;
   appContext: string;
@@ -620,14 +619,14 @@ MANDATORY REQUIREMENTS:
 
 Return markdown only.`;
 
-  const response = await model.generateContent({
+  const response = await ai.models.generateContent({ model: model, 
     contents: [{ role: "user", parts: [{ text: prompt }] }],
-    generationConfig: {
+    config: {
       temperature: 0.45,
     },
   });
 
-  return cleanMarkdownFromModel(response.response.text());
+  return cleanMarkdownFromModel(response.text!);
 }
 
 export async function createTopicResearchBrief({
@@ -672,16 +671,16 @@ Rules:
 
   const requestPayload = {
     contents: [{ role: "user", parts: [{ text: prompt }] }],
-    generationConfig: {
+    config: {
       temperature: 0.35,
     },
   };
 
   const result = await generateWithSearchFallback(normalizeBlogModel(reasoningModel), requestPayload);
 
-  const parsed = parseJsonFromModel<Partial<BlogResearchBrief>>(result.response.text()) || {};
+  const parsed = parseJsonFromModel<Partial<BlogResearchBrief>>(result.text!) || {};
   const parsedSources = sanitizeSources(parsed.sources);
-  const groundedSources = extractGroundingSources(result.response);
+  const groundedSources = extractGroundingSources(result);
   const mergedSources = sanitizeSources([...parsedSources, ...groundedSources], 12);
 
   const keyInsights = sanitizeStringArray(parsed.keyInsights, 12);
@@ -739,7 +738,7 @@ export async function generateSeoBlogDraft({
   research: BlogResearchBrief;
   reasoningModel?: ReasoningModel;
 }): Promise<GeneratedBlogDraft> {
-  const model = genAI.getGenerativeModel({ model: normalizeBlogModel(reasoningModel) });
+  const model = normalizeBlogModel(reasoningModel);
 
   const prompt = `You are an expert SEO writer for ${appName}.
 
@@ -784,14 +783,14 @@ Rules:
 - Ensure content is genuinely useful, practical, and engaging for someone who wants complete guidance.
 - Do not wrap JSON in markdown.`;
 
-  const result = await model.generateContent({
+  const result = await ai.models.generateContent({ model: model, 
     contents: [{ role: "user", parts: [{ text: prompt }] }],
-    generationConfig: {
+    config: {
       temperature: 0.55,
     },
   });
 
-  const parsed = parseJsonFromModel<Partial<GeneratedBlogDraft>>(result.response.text()) || {};
+  const parsed = parseJsonFromModel<Partial<GeneratedBlogDraft>>(result.text!) || {};
 
   const title = asNonEmptyString(parsed.title) || `${topic.trim()} - A Practical Muslimah Guide`;
   let content = asNonEmptyString(parsed.content) || `# ${title}\n\n${research.researchSummary}`;

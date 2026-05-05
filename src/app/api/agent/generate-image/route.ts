@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { GoogleGenerativeAI } from "@google/generative-ai";
+import { ai } from "@/lib/ai-client";
 import { uploadToR2 } from "@/lib/r2";
 
 interface PartWithInlineData {
@@ -40,12 +40,7 @@ export async function POST(request: NextRequest) {
         }
 
         // Generate image with Gemini 3.1 Flash Image Preview model
-        const genAI = new GoogleGenerativeAI(apiKey);
-        const model = genAI.getGenerativeModel({
-            model: "gemini-3.1-flash-image-preview",
-        });
-
-        const result = await model.generateContent({
+        const result = await ai.models.generateContent({ model: "gemini-3.1-flash-image-preview", 
             contents: [
                 {
                     role: "user",
@@ -56,15 +51,13 @@ export async function POST(request: NextRequest) {
                     ],
                 },
             ],
-            generationConfig: {
-                // @ts-expect-error - responseModalities is supported but not yet typed in the SDK
+            config: {
                 responseModalities: ["IMAGE", "TEXT"],
             },
         });
 
-        const response = result.response;
         const parts = (
-            (response.candidates?.[0]?.content?.parts ?? []) as unknown
+            (result.candidates?.[0]?.content?.parts ?? []) as unknown
         ) as Array<Record<string, unknown>>;
 
         const imagePart = parts.find(

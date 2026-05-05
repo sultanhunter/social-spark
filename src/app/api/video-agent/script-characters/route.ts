@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { GoogleGenerativeAI } from "@google/generative-ai";
+import { ai } from "@/lib/ai-client";
 import { NextRequest, NextResponse } from "next/server";
 import { generateImage } from "@/lib/gemini-image";
 import {
@@ -272,10 +272,9 @@ Return strict JSON only:
 }`;
 
   try {
-    const genAI = new GoogleGenerativeAI(apiKey);
-    const model = genAI.getGenerativeModel({ model: reasoningModel || DEFAULT_REASONING_MODEL });
-    const result = await model.generateContent(prompt);
-    const parsed = parseJsonObject(result.response.text()) || {};
+        const model = reasoningModel || DEFAULT_REASONING_MODEL;
+    const result = await ai.models.generateContent({ model: model, contents: prompt });
+    const parsed = parseJsonObject(result.text!) || {};
     const rows = Array.isArray(parsed.characters) ? parsed.characters : [];
     const validSegmentIds = segments.map((segment) => segment.segmentId);
 

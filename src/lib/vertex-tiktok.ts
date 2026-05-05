@@ -1,5 +1,5 @@
 import { randomUUID } from "crypto";
-import { GoogleGenerativeAI } from "@google/generative-ai";
+import { ai } from "@/lib/ai-client";
 import { extractVideoFrames, type ExtractedVideoFramesData } from "@/lib/social-extractor";
 
 type VertexPart =
@@ -42,16 +42,6 @@ const VERTEX_MODEL = "gemini-3.1-flash-lite-preview";
 
 function clamp(value: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, value));
-}
-
-function getVertexClient(): GoogleGenerativeAI {
-  const key = process.env.VERTEXT_API_KEY || "";
-
-  if (!key) {
-    throw new Error("Missing VERTEXT_API_KEY.");
-  }
-
-  return new GoogleGenerativeAI(key);
 }
 
 function parseJsonFromText(raw: string): Record<string, unknown> | null {
@@ -99,23 +89,21 @@ function normalizeDecision(parsed: Record<string, unknown> | null): VertexNicheD
 }
 
 async function callVertexForDecision(prompt: string, extraParts: VertexPart[] = []): Promise<VertexNicheDecision> {
-  const client = getVertexClient();
-  const model = client.getGenerativeModel({ model: VERTEX_MODEL });
-
-  const result = await model.generateContent({
+  const result = await ai.models.generateContent({
+    model: VERTEX_MODEL,
     contents: [
       {
         role: "user",
         parts: [{ text: prompt }, ...extraParts],
       },
     ],
-    generationConfig: {
+    config: {
       temperature: 0.2,
       responseMimeType: "application/json",
     },
   });
 
-  const text = result.response.text() || "";
+  const text = result.text || "";
   return normalizeDecision(parseJsonFromText(text));
 }
 

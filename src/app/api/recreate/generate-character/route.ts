@@ -1,4 +1,4 @@
-import { GoogleGenerativeAI } from "@google/generative-ai";
+import { ai } from "@/lib/ai-client";
 import { NextRequest, NextResponse } from "next/server";
 import { generateImage } from "@/lib/gemini-image";
 import { getAssetStylePreset, isAssetStylePresetId } from "@/lib/asset-style";
@@ -282,8 +282,7 @@ async function generateCharacterDraftsFromPrompts({
     throw new Error("GOOGLE_GEMINI_API_KEY is missing.");
   }
 
-  const genAI = new GoogleGenerativeAI(process.env.GOOGLE_GEMINI_API_KEY);
-  const model = genAI.getGenerativeModel({ model: reasoningModel });
+    const model = reasoningModel;
 
   const promptList = promptEntries
     .slice(0, 80)
@@ -335,8 +334,8 @@ Return strict JSON only in this shape:
   ]
 }`;
 
-  const response = await model.generateContent(instruction);
-  const parsed = parseJsonObject(response.response.text()) || {};
+  const response = await ai.models.generateContent({ model: model, contents: instruction });
+  const parsed = parseJsonObject(response.text!) || {};
   const rawCharacters = Array.isArray(parsed.characters) ? parsed.characters : [];
 
   const maxAssetIndex = promptEntries.reduce(
