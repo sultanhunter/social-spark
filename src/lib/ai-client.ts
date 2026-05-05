@@ -1,4 +1,3 @@
-
 import { GoogleGenAI, type GenerateContentConfig } from "@google/genai";
 
 function createAIClient(): GoogleGenAI {
@@ -6,6 +5,21 @@ function createAIClient(): GoogleGenAI {
   const vertexLocation = process.env.GOOGLE_VERTEX_AI_LOCATION;
 
   if (vertexProject && vertexLocation) {
+    const credsJson = process.env.GOOGLE_VERTEX_AI_CREDENTIALS_JSON;
+    if (credsJson) {
+      let credentials: Record<string, unknown>;
+      try {
+        credentials = JSON.parse(credsJson);
+      } catch {
+        throw new Error("GOOGLE_VERTEX_AI_CREDENTIALS_JSON is not valid JSON.");
+      }
+      return new GoogleGenAI({
+        enterprise: true,
+        project: vertexProject,
+        location: vertexLocation,
+        googleAuthOptions: { credentials },
+      });
+    }
     return new GoogleGenAI({
       enterprise: true,
       project: vertexProject,
