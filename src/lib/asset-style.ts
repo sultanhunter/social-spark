@@ -22,6 +22,14 @@ export const ASSET_STYLE_PRESETS = [
       "Pixar-style 3D animated character illustration with expressive faces, appealing proportions, detailed cloth and skin shading, soft global illumination, warm cinematic color grading, and polished high-quality render finish.",
     referenceImagePath: "/assets/style-references/pixar-3d-style.jpg",
   },
+  {
+    id: "miswak_2d_premium",
+    label: "Miswak 2D Premium",
+    description: "Bold flat-2D illustration style with clean geometry, polished vector shading, and graphic clarity.",
+    stylePrompt:
+      "Flat 2D vector-style illustration with premium polish: clean geometric construction, smooth gradient shading, crisp edges, subtle outline accents, minimal texture, and strong visual clarity. Keep lighting simple and graphic (not photoreal), with gentle shading and intentional shape hierarchy. This style must work for any asset type (objects, characters, scenes, backgrounds, or environments), so do not force icon composition. Preserve the scene's intended color palette; apply this style to form, rendering, and finish rather than forcing any specific colors.",
+    referenceImagePath: "/assets/style-references/miswak-2d-style.png",
+  },
 ] as const;
 
 export type AssetStylePreset = (typeof ASSET_STYLE_PRESETS)[number];
