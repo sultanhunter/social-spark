@@ -275,6 +275,90 @@ CRITICAL TEXT RULES:
   return result.text!;
 }
 
+export async function generateTopicBasedScript({
+  topic,
+  originalPost,
+  originalFormatScript,
+  appContext,
+  appName,
+  referenceImageUrls = [],
+  customInstructions,
+  reasoningModel = DEFAULT_REASONING_MODEL,
+}: {
+  topic: string;
+  originalPost: {
+    title: string | null;
+    description: string | null;
+    platform: string;
+    postType: string;
+  };
+  originalFormatScript: string;
+  appContext: string;
+  appName: string;
+  referenceImageUrls?: string[];
+  customInstructions?: string | null;
+  reasoningModel?: ReasoningModel;
+}): Promise<string> {
+  const modelName = reasoningModel;
+
+  const customInstructionsBlock = customInstructions
+    ? `
+CUSTOM USER INSTRUCTIONS:
+- ${customInstructions}
+
+Apply these instructions while preserving the required output format and structure.
+`
+    : "";
+
+  const prompt = `You are a social content strategist specialized in carousel rewrites.
+
+TASK:
+- Create a BRAND NEW script about this user-provided topic: ${topic}
+- Keep the same carousel format and pacing from the source format below.
+- Keep output optimized for on-slide readability.
+
+SOURCE CONTEXT:
+- Platform: ${originalPost.platform}
+- Type: ${originalPost.postType === "image_slides" ? "Image Carousel/Slides" : "Short-form Video"}
+- Original Title: ${originalPost.title || "N/A"}
+- Original Description: ${originalPost.description || "N/A"}
+
+APP CONTEXT:
+- App Name: ${appName}
+- App Context: ${appContext}
+
+SOURCE FORMAT TEMPLATE (style/structure reference):
+${originalFormatScript}
+
+${customInstructionsBlock}
+
+NON-NEGOTIABLE RULES:
+- Start output with exactly: Adaptation Mode: app_context
+- Mention ${appName} verbatim at least once in the script.
+- Keep the same number of slides as the source format template when possible (minimum 5, maximum 10).
+- For each slide, output exact structure:
+  Slide X
+  Headline: ...
+  Supporting: ...
+  Body: ...
+- Keep the script centered on the provided topic while aligning naturally with the app context.
+- Provide exact on-slide copy only.
+- No visual instructions, no markdown code fences.
+`;
+
+  let result;
+  if (referenceImageUrls.length > 0) {
+    const imageParts = await buildReferenceImageParts(referenceImageUrls);
+    result = imageParts.length > 0
+      ? await ai.models.generateContent({ model: modelName, contents: [{ text: prompt }, ...imageParts] })
+      : await ai.models.generateContent({ model: modelName, contents: prompt });
+  } else {
+    result = await ai.models.generateContent({ model: modelName, contents: prompt });
+  }
+
+  return result.text!;
+}
+
 export async function generateHookStrategyScript({
   sourceScript,
   adaptationMode,

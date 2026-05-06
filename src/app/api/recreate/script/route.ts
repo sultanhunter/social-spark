@@ -8,6 +8,7 @@ import {
   generateHookStrategyScript,
   generatePostScript,
   generateSlideDesignPlans,
+  generateTopicBasedScript,
   type AdaptationMode,
   type SlideGenerationPlan,
   type UIGenerationMode,
@@ -100,6 +101,7 @@ export async function POST(request: NextRequest) {
     const includeHookStrategy = body.includeHookStrategy === true;
     const selectedCharacterId = asNonEmptyString(body.characterId);
     const customInstructions = asNonEmptyString(body.customInstructions);
+    const topic = asNonEmptyString(body.topic);
     const reasoningModel = isReasoningModel(body.reasoningModel)
       ? body.reasoningModel
       : DEFAULT_REASONING_MODEL;
@@ -167,6 +169,161 @@ export async function POST(request: NextRequest) {
 
     console.log("[script] Extracted original script from slides:", originalExtractedScript.slice(0, 300));
 
+    const originalPost = {
+      title: post.title,
+      description: `${post.description || ""}\n\nEXTRACTED SLIDE TEXTS FROM ORIGINAL POST:\n${originalExtractedScript}`,
+      platform: post.platform,
+      postType: post.post_type,
+    };
+
+    // Topic-based mode: generate a script for a user-entered topic while keeping source format.
+    if (topic) {
+      const forceCarouselAspect = post.post_type === "image_slides";
+      const requestedVisualVariantPreference = parseVisualVariantPreference(body.visualVariantPreference);
+      const supportsVisualVariants = post.post_type === "image_slides";
+      const visualVariantPreference: VisualVariant | "both" = supportsVisualVariants
+        ? requestedVisualVariantPreference || "both"
+        : "brand_optimized";
+      const visualVariantsToGenerate: VisualVariant[] =
+        visualVariantPreference === "both"
+          ? ["ugc_real", "brand_optimized"]
+          : [visualVariantPreference];
+
+      const baseScript = await generateTopicBasedScript({
+        topic,
+        originalPost,
+        originalFormatScript: originalExtractedScript,
+        appContext,
+        appName,
+        referenceImageUrls: selectedReferenceImageUrls,
+        customInstructions,
+        reasoningModel,
+      });
+
+      const hookStrategyPlaybook = includeHookStrategy ? await loadHookStrategyPlaybook() : null;
+      const topicScript = includeHookStrategy && hookStrategyPlaybook
+        ? await generateHookStrategyScript({
+          sourceScript: baseScript,
+          adaptationMode: "app_context",
+          appName,
+          appContext,
+          originalPost,
+          strategyPlaybook: hookStrategyPlaybook,
+          referenceImageUrls: selectedReferenceImageUrls,
+          customInstructions,
+          reasoningModel,
+        })
+        : baseScript;
+
+      const baseVersion = {
+        id: includeHookStrategy ? "topic_hook_strategy" : "topic_app_context",
+        label: includeHookStrategy ? "Topic Hook Strategy" : "Topic Script",
+        setType: includeHookStrategy ? "hook_strategy" : "app_context",
+        adaptationMode: "app_context" as AdaptationMode,
+        usesAppContext: true,
+        uiGenerationMode: "ai_creative" as UIGenerationMode,
+        followsReferenceLayout: false,
+        script: topicScript,
+      };
+
+      const versions = await Promise.all(
+        visualVariantsToGenerate.map(async (visualVariant) => {
+          const slidePlans = await generateSlideDesignPlans(
+            selectedReferenceImageUrls,
+            baseVersion.script,
+            post.platform,
+            APP_BRAND_PRIMARY_COLOR,
+            APP_BRAND_GRADIENT,
+            appName,
+            visualVariant,
+            forceCarouselAspect,
+            reasoningModel
+          );
+
+          const needsVisualSuffix = supportsVisualVariants || visualVariantsToGenerate.length > 1;
+
+          return {
+            ...baseVersion,
+            id: needsVisualSuffix ? `${baseVersion.id}__${visualVariant}` : baseVersion.id,
+            label: needsVisualSuffix
+              ? `${baseVersion.label} · ${buildVisualVariantLabel(visualVariant)}`
+              : baseVersion.label,
+            visualVariant,
+            slidePlans,
+          } satisfies ScriptVersion;
+        })
+      );
+
+      const versionsWithRecreatedIds = await Promise.all(
+        versions.map(async (version) => {
+          const draftPayload: Record<string, unknown> = {
+            original_post_id: postId,
+            collection_id: collectionId,
+            script: version.script,
+            slide_plans: version.slidePlans,
+            generation_state: {
+              setType: version.setType,
+              adaptationMode: version.adaptationMode,
+              visualVariant: version.visualVariant,
+              versionLabel: version.label,
+              customInstructions,
+              topic,
+              characterId: version.visualVariant === "ugc_real" ? selectedCharacterId : null,
+            },
+            status: "draft",
+          };
+
+          let { data: recreated, error: insertError } = await supabase
+            .from("recreated_posts")
+            .insert(draftPayload)
+            .select("id")
+            .single();
+
+          if (insertError && /generation_state/i.test(insertError.message || "")) {
+            const fallbackPayload = { ...draftPayload };
+            delete fallbackPayload.generation_state;
+
+            const fallbackInsert = await supabase
+              .from("recreated_posts")
+              .insert(fallbackPayload)
+              .select("id")
+              .single();
+
+            recreated = fallbackInsert.data;
+            insertError = fallbackInsert.error;
+          }
+
+          if (insertError) throw insertError;
+          if (!recreated) throw new Error("Failed to create recreated post row");
+
+          return {
+            ...version,
+            recreatedPostId: recreated.id,
+          };
+        })
+      );
+
+      const primaryVersion = versionsWithRecreatedIds[0];
+
+      return NextResponse.json({
+        script: primaryVersion.script,
+        slidePlans: primaryVersion.slidePlans,
+        versions: versionsWithRecreatedIds,
+        primaryVersionId: primaryVersion.id,
+        visualVariantPreference,
+        canRecreate: true,
+        isIslamic: true,
+        isPregnancyOrPeriodRelated: false,
+        canIncorporateAppContext: true,
+        canReframeToIslamicAppContext: false,
+        isAppNicheRelevant: true,
+        relevanceReason: `Generated from source format using topic: ${topic}`,
+        relevanceConfidence: 1,
+        reasoningModel,
+        recreatedPostId: primaryVersion.recreatedPostId,
+      });
+    }
+
     // ---------- Niche classification ----------
     const nicheRelevance = await detectNicheRelevance(
       {
@@ -204,12 +361,7 @@ export async function POST(request: NextRequest) {
       });
     }
 
-    const originalPost = {
-      title: post.title,
-      description: `${post.description || ""}\n\nEXTRACTED SLIDE TEXTS FROM ORIGINAL POST:\n${originalExtractedScript}`,
-      platform: post.platform,
-      postType: post.post_type,
-    };
+
     const forceCarouselAspect = post.post_type === "image_slides";
     const requestedVisualVariantPreference = parseVisualVariantPreference(body.visualVariantPreference);
     const supportsVisualVariants = post.post_type === "image_slides";

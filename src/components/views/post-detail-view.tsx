@@ -442,6 +442,7 @@ export function PostDetailView({ postId }: PostDetailViewProps) {
   const [reasoningModel, setReasoningModel] = useState(DEFAULT_REASONING_MODEL);
   const [imageGenerationModel, setImageGenerationModel] = useState(DEFAULT_IMAGE_GENERATION_MODEL);
   const [customInstructions, setCustomInstructions] = useState("");
+  const [topicPrompt, setTopicPrompt] = useState("");
   const [visualVariantPreference, setVisualVariantPreference] = useState<VisualVariantPreference>("both");
   const [ugcCharacters, setUgcCharacters] = useState<UgcCharacter[]>([]);
   const [selectedUgcCharacterId, setSelectedUgcCharacterId] = useState<string | null>(null);
@@ -1301,6 +1302,7 @@ export function PostDetailView({ postId }: PostDetailViewProps) {
     setGeneratingHistoryCharacterBySetId({});
     setHistoryAssetStyleById({});
     setCustomInstructions("");
+    setTopicPrompt("");
     setVisualVariantPreference(selectedPost.post_type === "image_slides" ? "both" : "brand_optimized");
 
     if (selectedPost.media_urls?.length) {
@@ -1355,6 +1357,7 @@ export function PostDetailView({ postId }: PostDetailViewProps) {
           postId: selectedPost.id,
           collectionId: activeCollection.id,
           referenceImageUrls: selectedReferenceImages,
+          topic: topicPrompt.trim() || null,
           includeHookStrategy: mode === "hook_strategy",
           characterId: shouldUseCharacterLock ? selectedUgcCharacterId : null,
           visualVariantPreference,
@@ -1568,6 +1571,7 @@ export function PostDetailView({ postId }: PostDetailViewProps) {
     setNicheState(null);
     setError("");
     setSelectedReferenceImages(referenceImages);
+    setTopicPrompt("");
     setCaptionsBySetId({});
     setCaptionLoadingBySetId({});
     setPostingInstagramBySetId({});
@@ -1586,8 +1590,12 @@ export function PostDetailView({ postId }: PostDetailViewProps) {
       ? {
         label:
           isGeneratingScript && scriptRequestMode === "default"
-            ? "Classifying and generating scripts..."
-            : "Step 1: Classify & Generate Scripts",
+            ? topicPrompt.trim()
+              ? "Generating topic-based scripts..."
+              : "Classifying and generating scripts..."
+            : topicPrompt.trim()
+              ? "Step 1: Generate Scripts from Topic"
+              : "Step 1: Classify & Generate Scripts",
         onClick: () => {
           void handleGenerateScript("default");
         },
@@ -1805,6 +1813,20 @@ export function PostDetailView({ postId }: PostDetailViewProps) {
                     </option>
                   ))}
                 </select>
+              </div>
+
+              <div className="space-y-2">
+                <p className="text-sm font-semibold text-slate-800">Topic (Optional)</p>
+                <textarea
+                  value={topicPrompt}
+                  onChange={(event) => setTopicPrompt(event.target.value)}
+                  placeholder="Example: 5 Sunnah habits that reduce daily anxiety for Muslim women"
+                  rows={2}
+                  className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700 outline-none transition placeholder:text-slate-400 focus:border-rose-400 focus:ring-2 focus:ring-rose-200"
+                />
+                <p className="text-xs text-slate-500">
+                  Add a topic to keep this saved post format and generate a fresh script around your new angle.
+                </p>
               </div>
 
               <div className="space-y-2">
