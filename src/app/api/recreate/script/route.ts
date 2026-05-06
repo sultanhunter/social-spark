@@ -215,13 +215,22 @@ export async function POST(request: NextRequest) {
         })
         : baseScript;
 
-      const baseVersion = {
+      const baseVersion: {
+        id: string;
+        label: string;
+        setType: "app_context" | "variant_only" | "hook_strategy";
+        adaptationMode: AdaptationMode;
+        usesAppContext: boolean;
+        uiGenerationMode: UIGenerationMode;
+        followsReferenceLayout: boolean;
+        script: string;
+      } = {
         id: includeHookStrategy ? "topic_hook_strategy" : "topic_app_context",
         label: includeHookStrategy ? "Topic Hook Strategy" : "Topic Script",
         setType: includeHookStrategy ? "hook_strategy" : "app_context",
-        adaptationMode: "app_context" as AdaptationMode,
+        adaptationMode: "app_context",
         usesAppContext: true,
-        uiGenerationMode: "ai_creative" as UIGenerationMode,
+        uiGenerationMode: "ai_creative",
         followsReferenceLayout: false,
         script: topicScript,
       };
