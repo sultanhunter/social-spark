@@ -231,7 +231,7 @@ export async function generateImage(
   const supportsInlineImageContext = !isImagenPredictModel(imageModel);
   const imageSpec = getSlideImageSpec(platform || "unknown", { forceCarouselAspect });
   const attachBrandVisualRefs =
-    visualVariant === "brand_optimized" && shouldAttachBrandVisualRefs(assetPromptText);
+    visualVariant !== "ugc_real" && shouldAttachBrandVisualRefs(assetPromptText);
   const { logoPart, featureMockupPart } = supportsInlineImageContext
     ? await getBrandImageParts(brandAssets)
     : { logoPart: null, featureMockupPart: null };
@@ -263,7 +263,9 @@ BRAND TONE GUIDELINES:
 - ${
       visualVariant === "ugc_real"
         ? "Keep branding subtle and secondary. Never transform people into mascots/cartoons."
-        : "You may use stronger brand expression, mascot-like style, and branded gradient accents when it improves output."
+        : visualVariant === "source_style_brandified"
+          ? "Preserve the source visual style and only apply subtle app-theme accents (mainly colors and light decorative brand cues)."
+          : "You may use stronger brand expression, mascot-like style, and branded gradient accents when it improves output."
     }
 - If generating a mockup or UI screenshot asset, style it based on brand context.
 `
@@ -316,6 +318,13 @@ REALISM RULES:
 VISUAL VARIANT: UGC_REAL
 - Prioritize authentic user-generated photo style over branded polish.
 - Keep color grading natural and understated.
+`
+      : visualVariant === "source_style_brandified"
+        ? `
+VISUAL VARIANT: SOURCE_STYLE_BRANDIFIED
+- Keep the source style DNA intact (mood, texture, composition approach).
+- Brandify through subtle palette alignment and light accent elements only.
+- Avoid mascot/cartoon/3D style shifts unless explicitly requested in the asset prompt.
 `
       : `
 VISUAL VARIANT: BRAND_OPTIMIZED
@@ -446,7 +455,9 @@ Create a single-character identity anchor image in a natural lifestyle setting (
       const imageUrl = await generateImage(
         visualVariant === "ugc_real"
           ? "Photorealistic natural lifestyle background scene for a social slide, no text, no logos."
-          : "Clean abstract background with soft pink-to-blush gradients, suitable as a design asset for a social slide.",
+          : visualVariant === "source_style_brandified"
+            ? "Background visual that preserves source-post style mood with subtle app-theme color accents, no text, no logos."
+            : "Clean abstract background with soft pink-to-blush gradients, suitable as a design asset for a social slide.",
         {
           collectionId,
           postId,

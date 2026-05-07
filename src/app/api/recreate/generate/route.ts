@@ -78,7 +78,7 @@ function asSetType(value: unknown): "variant_only" | "app_context" | "hook_strat
 }
 
 function asVisualVariant(value: unknown): VisualVariant | null {
-  if (value === "ugc_real" || value === "brand_optimized") return value;
+  if (value === "ugc_real" || value === "brand_optimized" || value === "source_style_brandified") return value;
   return null;
 }
 

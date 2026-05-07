@@ -15,7 +15,7 @@ export interface NicheRelevanceResult {
 
 export type AdaptationMode = "app_context" | "variant_only";
 export type UIGenerationMode = "reference_exact" | "ai_creative";
-export type VisualVariant = "ugc_real" | "brand_optimized";
+export type VisualVariant = "ugc_real" | "brand_optimized" | "source_style_brandified";
 
 export interface SlideGenerationPlan {
   headline: string;
@@ -559,7 +559,16 @@ VISUAL VARIANT MODE: UGC_REAL
 - Typography should feel native TikTok slideshow style: candid, minimal, imperfectly casual (not polished corporate deck style).
 - Prefer short overlay copy blocks (1-3 lines), lower-case friendly phrasing, and social-native emphasis words instead of formal marketing language.
 `
-      : `
+      : visualVariant === "source_style_brandified"
+        ? `
+VISUAL VARIANT MODE: SOURCE_STYLE_BRANDIFIED
+- Preserve the original slide visual language as the top priority (composition, texture style, typography mood, pacing, and scene treatment).
+- Keep the source aesthetic intact; do NOT redesign into a polished brand deck.
+- Apply app-branding only as subtle integration: color accents, small gradient touches, tiny UI chips, or minimal decorative elements.
+- Do not introduce mascot/3D/cartoon illustration styles unless they already exist in the source slides.
+- Keep text hierarchy and density close to source behavior so it feels like the same creator style.
+`
+        : `
 VISUAL VARIANT MODE: BRAND_OPTIMIZED
 - Keep source layout/composition logic, but optimize visual language toward our app brand identity.
 - You may use stylized/3D mascot visuals, branded gradients, and stronger brand accents.
@@ -570,17 +579,23 @@ VISUAL VARIANT MODE: BRAND_OPTIMIZED
   const logoPlacementRule =
     visualVariant === "ugc_real"
       ? "- Logo placement is optional and subtle. If used, keep it tiny and natural; do not force a visible logo on every slide."
-      : "- Include brand logo placement (position, size).";
+      : visualVariant === "source_style_brandified"
+        ? "- Logo placement is optional and subtle. If used, keep it small and integrated naturally into the source style."
+        : "- Include brand logo placement (position, size).";
 
   const textStyleRule =
     visualVariant === "ugc_real"
       ? "- Use social-native text treatment in figmaInstructions: short casual overlays, lower-case friendly tone, quick punchy phrases, and avoid formal headline/subheadline corporate composition."
-      : "- Use polished brand-forward copy hierarchy and typography treatment.";
+      : visualVariant === "source_style_brandified"
+        ? "- Keep typography mood close to the source (font personality, spacing rhythm, and casing style), then shift only colors/accent tokens toward the app theme."
+        : "- Use polished brand-forward copy hierarchy and typography treatment.";
 
   const adaptationGoal =
     visualVariant === "ugc_real"
       ? "using our app context with subtle branding cues (UGC authenticity first)"
-      : "using OUR brand identity";
+      : visualVariant === "source_style_brandified"
+        ? "while preserving the original creator style and lightly brandifying it with our app theme"
+        : "using OUR brand identity";
 
   const prompt = `You are an expert art director and Figma designer. I am showing you ${imageParts.length} original carousel slide images and a rewritten script for our brand.
 
@@ -615,6 +630,7 @@ ${variantGuidelines}
 RULES:
 - Look at each original slide image carefully to understand its layout, composition, typography placement, visual hierarchy, and style.
 - Your figmaInstructions should recreate that SAME style/layout but adapted with our brand colors (${gradientStr}), our copy from the script, and our logo.
+- For SOURCE_STYLE_BRANDIFIED, keep style drift minimal: preserve the original look and only infuse subtle brand color cues so it still feels like the source creator.
 - figmaInstructions must include the exact on-slide copy for that slide (full script content, not placeholders). Include one explicit step that lists the exact text to place.
 - assetPrompts must NEVER include text/typography in the generated images. Assets are purely visual elements.
 - Use plain white/solid backgrounds ONLY for explicit cutout/icon/sticker assets. For scene assets (people, food, table, room, lifestyle), require natural real environments.

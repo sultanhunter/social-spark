@@ -67,11 +67,18 @@ function buildHookVersionLabel(adaptationMode: AdaptationMode): string {
 }
 
 function buildVisualVariantLabel(visualVariant: VisualVariant): string {
-  return visualVariant === "ugc_real" ? "UGC Real" : "Brand Optimized";
+  if (visualVariant === "ugc_real") return "UGC Real";
+  if (visualVariant === "source_style_brandified") return "Original Style + App Theme";
+  return "Brand Optimized";
 }
 
 function parseVisualVariantPreference(value: unknown): VisualVariant | "both" | null {
-  if (value === "ugc_real" || value === "brand_optimized" || value === "both") {
+  if (
+    value === "ugc_real" ||
+    value === "brand_optimized" ||
+    value === "source_style_brandified" ||
+    value === "both"
+  ) {
     return value;
   }
   return null;
@@ -369,8 +376,6 @@ export async function POST(request: NextRequest) {
         recreatedPostId: null,
       });
     }
-
-
     const forceCarouselAspect = post.post_type === "image_slides";
     const requestedVisualVariantPreference = parseVisualVariantPreference(body.visualVariantPreference);
     const supportsVisualVariants = post.post_type === "image_slides";

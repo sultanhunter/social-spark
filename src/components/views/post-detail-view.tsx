@@ -57,7 +57,7 @@ type SlidePlan = {
   assetPrompts: { prompt: string; description: string }[];
 };
 
-type VisualVariant = "ugc_real" | "brand_optimized";
+type VisualVariant = "ugc_real" | "brand_optimized" | "source_style_brandified";
 type VisualVariantPreference = VisualVariant | "both";
 
 type ScriptVersion = {
@@ -178,7 +178,13 @@ function isUIGenerationMode(value: unknown): value is "reference_exact" | "ai_cr
 }
 
 function isVisualVariant(value: unknown): value is VisualVariant {
-  return value === "ugc_real" || value === "brand_optimized";
+  return value === "ugc_real" || value === "brand_optimized" || value === "source_style_brandified";
+}
+
+function visualVariantLabel(visualVariant: VisualVariant): string {
+  if (visualVariant === "ugc_real") return "UGC Real";
+  if (visualVariant === "source_style_brandified") return "Original Style + App Theme";
+  return "Brand Optimized";
 }
 
 function sanitizeScriptVersions(payload: unknown): ScriptVersion[] {
@@ -1583,7 +1589,7 @@ export function PostDetailView({ postId }: PostDetailViewProps) {
   };
 
   const isRecreationBlocked = Boolean(nicheState && !nicheState.canRecreate);
-  const shouldUseCharacterLock = visualVariantPreference !== "brand_optimized";
+  const shouldUseCharacterLock = visualVariantPreference === "ugc_real" || visualVariantPreference === "both";
 
   const generationButtonConfig =
     step === "prepare"
@@ -1855,7 +1861,12 @@ export function PostDetailView({ postId }: PostDetailViewProps) {
                   value={visualVariantPreference}
                   onChange={(event) => {
                     const value = event.target.value as VisualVariantPreference;
-                    if (value === "ugc_real" || value === "brand_optimized" || value === "both") {
+                    if (
+                      value === "ugc_real" ||
+                      value === "brand_optimized" ||
+                      value === "source_style_brandified" ||
+                      value === "both"
+                    ) {
                       setVisualVariantPreference(value);
                     }
                   }}
@@ -1865,10 +1876,11 @@ export function PostDetailView({ postId }: PostDetailViewProps) {
                   <option value="both">Both (UGC Real + Brand Optimized)</option>
                   <option value="ugc_real">UGC Real only</option>
                   <option value="brand_optimized">Brand Optimized only</option>
+                  <option value="source_style_brandified">Original Style + App Theme only</option>
                 </select>
                 <p className="text-xs text-slate-500">
                   {selectedPost.post_type === "image_slides"
-                    ? "UGC Real keeps photoreal style; Brand Optimized applies app theme and can use mascot/3D styling."
+                    ? "UGC Real keeps photoreal style, Brand Optimized allows heavier redesign, and Original Style + App Theme preserves source visuals while applying app colors/theme cues."
                     : "Visual variant switching is only available for image slides."}
                 </p>
               </div>
@@ -1914,7 +1926,7 @@ export function PostDetailView({ postId }: PostDetailViewProps) {
                 <p className="text-xs text-slate-500">
                   {shouldUseCharacterLock
                     ? "When selected, all UGC-real character assets will reuse this Character Studio identity."
-                    : "Character selection is loaded but only applied to UGC Real variants."}
+                    : "Character selection is loaded but only applied when UGC Real is selected."}
                 </p>
                 {ugcCharactersError ? <p className="text-xs text-rose-600">{ugcCharactersError}</p> : null}
               </div>
@@ -1999,7 +2011,7 @@ export function PostDetailView({ postId }: PostDetailViewProps) {
                         {activeVersion.adaptationMode}
                       </Badge>
                       <Badge variant="default">
-                        {activeVersion.visualVariant === "ugc_real" ? "UGC Real" : "Brand Optimized"}
+                        {visualVariantLabel(activeVersion.visualVariant)}
                       </Badge>
                       <Badge variant="default">
                         {activeVersion.uiGenerationMode === "reference_exact" ? "Exact Source UI" : "AI Creative UI"}
@@ -2062,7 +2074,7 @@ export function PostDetailView({ postId }: PostDetailViewProps) {
                         <div className="flex flex-wrap items-center gap-2">
                           <Badge variant={result.usesAppContext ? "success" : "default"}>{result.label}</Badge>
                           <Badge variant="default">
-                            {result.visualVariant === "ugc_real" ? "UGC Real" : "Brand Optimized"}
+                            {visualVariantLabel(result.visualVariant)}
                           </Badge>
                           <Badge variant="default">
                             {result.uiGenerationMode === "reference_exact" ? "Exact Source UI" : "AI Creative UI"}
@@ -2276,7 +2288,7 @@ export function PostDetailView({ postId }: PostDetailViewProps) {
                           <Badge variant={statusBadgeVariant(item.status)}>{item.status}</Badge>
                           <Badge variant="default">{setTypeLabel(historySetType)}</Badge>
                           <Badge variant="default">
-                            {historyVisualVariant === "ugc_real" ? "UGC Real" : "Brand Optimized"}
+                            {visualVariantLabel(historyVisualVariant)}
                           </Badge>
                           <Badge variant="default">Style: {historyAssetStyleLabel}</Badge>
                           {hasGeneratedCharacter ? (

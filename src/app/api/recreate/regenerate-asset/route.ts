@@ -103,8 +103,8 @@ function inferCharacterGenderFromPrompt(prompt: string): "male" | "female" {
   return "female";
 }
 
-function asVisualVariant(value: unknown): "ugc_real" | "brand_optimized" | null {
-  if (value === "ugc_real" || value === "brand_optimized") return value;
+function asVisualVariant(value: unknown): "ugc_real" | "brand_optimized" | "source_style_brandified" | null {
+  if (value === "ugc_real" || value === "brand_optimized" || value === "source_style_brandified") return value;
   return null;
 }
 
