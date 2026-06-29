@@ -1,0 +1,543 @@
+"use client";
+
+import { useCallback, useEffect, useMemo, useState } from "react";
+import {
+  AlertCircle,
+  ArrowLeft,
+  CheckCircle2,
+  Copy,
+  ExternalLink,
+  Image as ImageIcon,
+  Loader2,
+  MessageCircleHeart,
+  Sparkles,
+} from "lucide-react";
+import { useRouter } from "next/navigation";
+import { useAppStore } from "@/store/app-store";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+
+type MuslimahSpeaker = "older_sister" | "user";
+type MuslimahSlideType = "hook" | "chat" | "app_reveal" | "cta";
+type MuslimahJobStatus = "draft" | "generating" | "completed" | "failed";
+
+type MuslimahChatMessage = {
+  speaker: MuslimahSpeaker;
+  text: string;
+  timestamp: string;
+};
+
+type MuslimahCarouselSlide = {
+  slideNumber: number;
+  slideType: MuslimahSlideType;
+  visualNotes: string;
+  messages: MuslimahChatMessage[];
+  hookText?: string;
+  subtitle?: string;
+  appScreenState?: string;
+};
+
+type MuslimahCarouselScript = {
+  brand: "muslimah.health";
+  hook: string;
+  subtitle: string;
+  hookBackground: string;
+  freshTalkingPoints: string[];
+  selectedFeatures: string[];
+  slideOrder: number[];
+  caption: string;
+  slides: MuslimahCarouselSlide[];
+};
+
+type MuslimahGeneratedImage = {
+  slideNumber: number;
+  slideType: MuslimahSlideType;
+  imageUrl: string;
+  prompt: string;
+};
+
+type MuslimahGenerationResult = {
+  scriptModel: string;
+  imageModel: string;
+  imageQuality: "medium";
+  imageSize: "1024x1536";
+  script: MuslimahCarouselScript;
+  images: MuslimahGeneratedImage[];
+  generatedImages?: boolean;
+  published?: boolean;
+  publishResult?: unknown;
+};
+
+type GenerateResponse = {
+  jobId?: string;
+  status?: MuslimahJobStatus;
+  message?: string;
+  script?: MuslimahCarouselScript | null;
+  result?: MuslimahGenerationResult | null;
+  error?: string;
+};
+
+type JobStatusResponse = {
+  jobId: string;
+  collectionId: string;
+  status: MuslimahJobStatus;
+  createdAt?: string;
+  updatedAt?: string;
+  error?: string | null;
+  script?: MuslimahCarouselScript | null;
+  result?: MuslimahGenerationResult | null;
+};
+
+const statusCopy: Record<MuslimahJobStatus, string> = {
+  draft: "Waiting",
+  generating: "Generating",
+  completed: "Completed",
+  failed: "Failed",
+};
+
+function splitList(value: string): string[] {
+  return value
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function getSlideLabel(slideType: MuslimahSlideType): string {
+  if (slideType === "app_reveal") return "App reveal";
+  return slideType.charAt(0).toUpperCase() + slideType.slice(1);
+}
+
+export function MuslimahCarouselView({ collectionId }: { collectionId: string }) {
+  const router = useRouter();
+  const { activeCollection } = useAppStore();
+
+  const [focus, setFocus] = useState("fresh worship + wellness angle for today's Flo carousel");
+  const [previousHookBackground, setPreviousHookBackground] = useState("");
+  const [previousFeaturesText, setPreviousFeaturesText] = useState("");
+  const [publish, setPublish] = useState(false);
+  const [isStarting, setIsStarting] = useState(false);
+  const [isPreviewing, setIsPreviewing] = useState(false);
+  const [activeJobId, setActiveJobId] = useState<string | null>(null);
+  const [jobStatus, setJobStatus] = useState<MuslimahJobStatus | null>(null);
+  const [script, setScript] = useState<MuslimahCarouselScript | null>(null);
+  const [result, setResult] = useState<MuslimahGenerationResult | null>(null);
+  const [error, setError] = useState("");
+  const [success, setSuccess] = useState("");
+  const [copied, setCopied] = useState(false);
+
+  const previousFeatures = useMemo(() => splitList(previousFeaturesText), [previousFeaturesText]);
+  const slides = useMemo(() => script?.slides ?? result?.script.slides ?? [], [result, script]);
+  const generatedImages = useMemo(
+    () => [...(result?.images ?? [])].sort((a, b) => a.slideNumber - b.slideNumber),
+    [result]
+  );
+
+  const pollJob = useCallback(async (jobId: string) => {
+    const response = await fetch(`/api/muslimah-carousel/jobs/${encodeURIComponent(jobId)}`, {
+      method: "GET",
+      cache: "no-store",
+    });
+    const data = (await response.json()) as JobStatusResponse & { error?: string };
+
+    if (!response.ok) {
+      throw new Error(data.error || "Failed to check muslimah carousel job status.");
+    }
+
+    setJobStatus(data.status);
+
+    if (data.script) {
+      setScript(data.script);
+    }
+
+    if (data.status === "completed") {
+      if (data.result) {
+        setResult(data.result);
+        setScript(data.result.script);
+      }
+      setSuccess("Carousel generation completed.");
+      setActiveJobId(null);
+      return;
+    }
+
+    if (data.status === "failed") {
+      setError(data.error || "Muslimah carousel generation failed.");
+      setActiveJobId(null);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!activeJobId) return;
+
+    let cancelled = false;
+
+    const safePoll = async () => {
+      try {
+        await pollJob(activeJobId);
+      } catch (err) {
+        if (!cancelled) {
+          setError(err instanceof Error ? err.message : "Failed to poll carousel job.");
+        }
+      }
+    };
+
+    void safePoll();
+    const intervalId = setInterval(() => {
+      void safePoll();
+    }, 7000);
+
+    return () => {
+      cancelled = true;
+      clearInterval(intervalId);
+    };
+  }, [activeJobId, pollJob]);
+
+  const buildPayload = (generateImages: boolean) => ({
+    collectionId,
+    focus: focus.trim(),
+    previousHookBackground: previousHookBackground.trim() || undefined,
+    previousFeatures,
+    generateImages,
+    publish: generateImages ? publish : false,
+  });
+
+  const handlePreviewScript = async () => {
+    setIsPreviewing(true);
+    setError("");
+    setSuccess("");
+    setResult(null);
+
+    try {
+      const response = await fetch("/api/muslimah-carousel/generate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(buildPayload(false)),
+      });
+      const data = (await response.json()) as GenerateResponse;
+
+      if (!response.ok || !data.script) {
+        throw new Error(data.error || "Failed to generate script preview.");
+      }
+
+      setScript(data.script);
+      setSuccess("Script preview generated.");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Script preview failed.");
+    } finally {
+      setIsPreviewing(false);
+    }
+  };
+
+  const handleStartPipeline = async () => {
+    setIsStarting(true);
+    setError("");
+    setSuccess("");
+    setResult(null);
+    setActiveJobId(null);
+    setJobStatus(null);
+
+    try {
+      const response = await fetch("/api/muslimah-carousel/generate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(buildPayload(true)),
+      });
+      const data = (await response.json()) as GenerateResponse;
+
+      if (!response.ok || !data.jobId) {
+        throw new Error(data.error || "Failed to start muslimah carousel pipeline.");
+      }
+
+      setScript(data.script ?? null);
+      setActiveJobId(data.jobId);
+      setJobStatus(data.status ?? "generating");
+      setSuccess(data.message || "Carousel pipeline started on Render.");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Pipeline start failed.");
+    } finally {
+      setIsStarting(false);
+    }
+  };
+
+  const copyScript = async () => {
+    if (!script) return;
+
+    try {
+      await navigator.clipboard.writeText(JSON.stringify(script, null, 2));
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1600);
+    } catch {
+      setCopied(false);
+    }
+  };
+
+  return (
+    <div className="flex-1 overflow-y-auto px-6 py-6 md:px-8">
+      <div className="mx-auto grid w-full max-w-7xl gap-6 lg:grid-cols-[330px_1fr]">
+        <div className="space-y-4 lg:sticky lg:top-22 lg:h-fit">
+          <Button variant="ghost" size="sm" onClick={() => router.push(`/collections/${collectionId}`)}>
+            <ArrowLeft className="mr-2 h-4 w-4" />
+            Back to collection
+          </Button>
+
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">Flo Carousel Pipeline</CardTitle>
+              <CardDescription>muslimah.health carousel generation through GPT-5.5 and GPT Image 2.</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-2 text-sm text-slate-600">
+              <StatusRow label="Script JSON" done={Boolean(script)} />
+              <StatusRow label="Render image job" done={Boolean(activeJobId || result)} />
+              <StatusRow label="Image output" done={generatedImages.length > 0} />
+              <StatusRow label="Publish" done={Boolean(result?.published)} />
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">Collection</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-2 text-sm text-slate-600">
+              <p>
+                <span className="font-medium text-slate-800">Name:</span>{" "}
+                {activeCollection?.name || "Current collection"}
+              </p>
+              <p>
+                <span className="font-medium text-slate-800">App:</span>{" "}
+                {activeCollection?.app_name || "muslimah.health"}
+              </p>
+              {activeJobId ? (
+                <p className="break-all text-xs">
+                  <span className="font-medium text-slate-800">Job:</span> {activeJobId}
+                </p>
+              ) : null}
+            </CardContent>
+          </Card>
+        </div>
+
+        <div className="space-y-4">
+          <Card>
+            <CardHeader>
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <CardTitle className="text-lg">Start muslimah.health Carousel</CardTitle>
+                  <CardDescription>
+                    Creates the fixed 10-slide “Why I stopped using Flo as a Muslim woman” carousel.
+                  </CardDescription>
+                </div>
+                {jobStatus ? (
+                  <Badge variant={jobStatus === "failed" ? "error" : jobStatus === "completed" ? "success" : "default"}>
+                    {statusCopy[jobStatus]}
+                  </Badge>
+                ) : null}
+              </div>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="grid gap-4 md:grid-cols-2">
+                <label className="space-y-2 md:col-span-2">
+                  <span className="text-sm font-semibold text-slate-800">Focus</span>
+                  <textarea
+                    value={focus}
+                    onChange={(event) => setFocus(event.target.value)}
+                    rows={3}
+                    className="w-full resize-none rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm text-slate-900 outline-none transition focus:border-rose-300 focus:ring-2 focus:ring-rose-300"
+                  />
+                </label>
+
+                <label className="space-y-2">
+                  <span className="text-sm font-semibold text-slate-800">Previous hook background</span>
+                  <Input
+                    value={previousHookBackground}
+                    onChange={(event) => setPreviousHookBackground(event.target.value)}
+                    placeholder="pink satin"
+                  />
+                </label>
+
+                <label className="space-y-2">
+                  <span className="text-sm font-semibold text-slate-800">Recently used features</span>
+                  <Input
+                    value={previousFeaturesText}
+                    onChange={(event) => setPreviousFeaturesText(event.target.value)}
+                    placeholder="Prayer, Ghusl, Sleep"
+                  />
+                </label>
+              </div>
+
+              <label className="flex items-center gap-3 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">
+                <input
+                  type="checkbox"
+                  checked={publish}
+                  onChange={(event) => setPublish(event.target.checked)}
+                  className="h-4 w-4 rounded border-slate-300 text-rose-500 focus:ring-rose-300"
+                />
+                Publish after images are generated
+              </label>
+
+              <div className="flex flex-wrap items-center gap-2">
+                <Button variant="secondary" onClick={handlePreviewScript} isLoading={isPreviewing}>
+                  <MessageCircleHeart className="mr-2 h-4 w-4" />
+                  Preview Script
+                </Button>
+                <Button variant="primary" onClick={handleStartPipeline} isLoading={isStarting}>
+                  <Sparkles className="mr-2 h-4 w-4" />
+                  Start Pipeline
+                </Button>
+                {activeJobId ? (
+                  <Button variant="outline" onClick={() => void pollJob(activeJobId)}>
+                    <Loader2 className="mr-2 h-4 w-4" />
+                    Refresh Status
+                  </Button>
+                ) : null}
+              </div>
+
+              {success ? (
+                <div className="flex items-start gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">
+                  <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" />
+                  <span>{success}</span>
+                </div>
+              ) : null}
+
+              {error ? (
+                <div className="flex items-start gap-2 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
+                  <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+                  <span>{error}</span>
+                </div>
+              ) : null}
+            </CardContent>
+          </Card>
+
+          {generatedImages.length > 0 ? (
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-lg">Generated Slides</CardTitle>
+                <CardDescription>{generatedImages.length} portrait images from GPT Image 2.</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+                  {generatedImages.map((image) => (
+                    <div key={`${image.slideNumber}-${image.imageUrl}`} className="overflow-hidden rounded-xl border border-slate-200 bg-white">
+                      <div
+                        className="aspect-[2/3] bg-slate-100 bg-cover bg-center"
+                        style={{ backgroundImage: `url("${image.imageUrl}")` }}
+                        role="img"
+                        aria-label={`Slide ${image.slideNumber}`}
+                      />
+                      <div className="space-y-2 p-3">
+                        <div className="flex items-center justify-between gap-2">
+                          <div className="flex items-center gap-2">
+                            <Badge variant="default">Slide {image.slideNumber}</Badge>
+                            <span className="text-xs font-medium text-slate-500">{getSlideLabel(image.slideType)}</span>
+                          </div>
+                          <a href={image.imageUrl} target="_blank" rel="noreferrer" className="text-slate-500 hover:text-rose-600">
+                            <ExternalLink className="h-4 w-4" />
+                          </a>
+                        </div>
+                        <p className="line-clamp-3 text-xs leading-relaxed text-slate-500">{image.prompt}</p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </CardContent>
+            </Card>
+          ) : (
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2 text-lg">
+                  <ImageIcon className="h-5 w-5 text-rose-500" />
+                  Image Output
+                </CardTitle>
+                <CardDescription>
+                  Images appear here after the Render worker finishes and calls back into this app.
+                </CardDescription>
+              </CardHeader>
+            </Card>
+          )}
+
+          {script ? (
+            <Card>
+              <CardHeader>
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <CardTitle className="text-lg">Script JSON</CardTitle>
+                    <CardDescription>
+                      Hook background: {script.hookBackground || "auto"} · {script.selectedFeatures.length} selected features
+                    </CardDescription>
+                  </div>
+                  <Button variant="outline" size="sm" onClick={copyScript}>
+                    <Copy className="mr-2 h-4 w-4" />
+                    {copied ? "Copied" : "Copy JSON"}
+                  </Button>
+                </div>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="rounded-xl border border-rose-100 bg-rose-50 px-4 py-3">
+                  <p className="text-base font-semibold text-slate-900">{script.hook}</p>
+                  <p className="mt-1 text-sm text-slate-700">{script.subtitle}</p>
+                </div>
+
+                <div className="flex flex-wrap gap-2">
+                  {script.freshTalkingPoints.map((topic) => (
+                    <Badge key={topic} variant="slides">
+                      {topic}
+                    </Badge>
+                  ))}
+                </div>
+
+                <div className="space-y-3">
+                  {slides.map((slide) => (
+                    <div key={slide.slideNumber} className="rounded-xl border border-slate-200 bg-white p-4">
+                      <div className="mb-3 flex flex-wrap items-center gap-2">
+                        <Badge variant="default">Slide {slide.slideNumber}</Badge>
+                        <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                          {getSlideLabel(slide.slideType)}
+                        </span>
+                      </div>
+                      {slide.messages.length > 0 ? (
+                        <div className="space-y-2">
+                          {slide.messages.map((message, index) => (
+                            <div
+                              key={`${slide.slideNumber}-${index}-${message.timestamp}`}
+                              className={`max-w-[92%] rounded-2xl px-3 py-2 text-sm ${
+                                message.speaker === "user"
+                                  ? "ml-auto bg-lime-100 text-slate-900"
+                                  : "bg-slate-50 text-slate-900"
+                              }`}
+                            >
+                              <p>{message.text}</p>
+                              <p className="mt-1 text-right text-[11px] text-slate-500">{message.timestamp}</p>
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <p className="text-sm text-slate-700">{slide.visualNotes}</p>
+                      )}
+                    </div>
+                  ))}
+                </div>
+
+                <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+                  <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">Caption</p>
+                  <p className="whitespace-pre-wrap text-sm leading-relaxed text-slate-700">{script.caption}</p>
+                </div>
+              </CardContent>
+            </Card>
+          ) : null}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function StatusRow({ label, done }: { label: string; done: boolean }) {
+  return (
+    <div className="flex items-center justify-between gap-3">
+      <span>{label}</span>
+      {done ? (
+        <CheckCircle2 className="h-4 w-4 text-emerald-500" />
+      ) : (
+        <span className="h-2 w-2 rounded-full bg-slate-300" />
+      )}
+    </div>
+  );
+}

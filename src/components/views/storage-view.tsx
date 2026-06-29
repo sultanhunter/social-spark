@@ -10,6 +10,7 @@ import {
   GalleryVerticalEnd,
   FolderOpen,
   Image as ImageIcon,
+  MessageCircleHeart,
   LayoutGrid,
   Plus,
   Sparkles,
@@ -126,6 +127,13 @@ export function StorageView() {
               </div>
             </div>
             <div className="flex flex-wrap items-center gap-2">
+              <Button
+                variant="outline"
+                onClick={() => router.push(`/collections/${activeCollection.id}/muslimah-carousel`)}
+              >
+                <MessageCircleHeart className="mr-2 h-4 w-4" />
+                Flo Carousel
+              </Button>
               <Button
                 variant="outline"
                 onClick={() => router.push(`/collections/${activeCollection.id}/carousel-agent`)}
