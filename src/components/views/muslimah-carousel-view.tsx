@@ -7,10 +7,12 @@ import {
   CheckCircle2,
   Clock3,
   Copy,
+  Download,
   ExternalLink,
   Image as ImageIcon,
   Loader2,
   MessageCircleHeart,
+  RefreshCw,
   Sparkles,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
@@ -69,6 +71,7 @@ type MuslimahGeneratedImage = {
   slideType: MuslimahSlideType;
   imageUrl: string;
   prompt: string;
+  uploadedAt?: string;
 };
 
 type MuslimahGenerationResult = {
@@ -102,8 +105,39 @@ type JobStatusResponse = {
   events?: MuslimahProgressEvent[];
   lastEvent?: MuslimahProgressEvent | null;
   progress?: number | null;
+  partialImages?: MuslimahGeneratedImage[];
   script?: MuslimahCarouselScript | null;
   result?: MuslimahGenerationResult | null;
+};
+
+type R2GallerySlide = {
+  key: string;
+  publicUrl: string;
+  size: number;
+  lastModified: string | null;
+  slideNumber: number | null;
+  filename: string;
+  downloadUrl: string;
+};
+
+type R2GalleryPost = {
+  id: string;
+  collectionId: string;
+  postSlug: string;
+  inferredBatch: number;
+  slideCount: number;
+  totalBytes: number;
+  firstUploadedAt: string | null;
+  lastUploadedAt: string | null;
+  slides: R2GallerySlide[];
+};
+
+type R2GalleryResponse = {
+  collectionId: string;
+  prefix: string;
+  totalObjects: number;
+  posts: R2GalleryPost[];
+  error?: string;
 };
 
 const statusCopy: Record<MuslimahJobStatus, string> = {
@@ -137,6 +171,38 @@ function formatElapsed(value?: number | null): string | null {
   return `${Math.round(value / 1000)}s`;
 }
 
+function formatBytes(value: number): string {
+  if (!Number.isFinite(value) || value <= 0) return "0 B";
+  const units = ["B", "KB", "MB", "GB"];
+  let size = value;
+  let unitIndex = 0;
+  while (size >= 1024 && unitIndex < units.length - 1) {
+    size /= 1024;
+    unitIndex += 1;
+  }
+  return `${size >= 10 || unitIndex === 0 ? Math.round(size) : size.toFixed(1)} ${units[unitIndex]}`;
+}
+
+function formatDateTime(value: string | null): string {
+  if (!value) return "Unknown time";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "Unknown time";
+  return date.toLocaleString([], {
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+function formatPostSlug(slug: string): string {
+  return slug
+    .split("/")
+    .pop()!
+    .replace(/-/g, " ")
+    .replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
+
 export function MuslimahCarouselView({ collectionId }: { collectionId: string }) {
   const router = useRouter();
   const { activeCollection } = useAppStore();
@@ -151,8 +217,12 @@ export function MuslimahCarouselView({ collectionId }: { collectionId: string })
   const [jobStatus, setJobStatus] = useState<MuslimahJobStatus | null>(null);
   const [script, setScript] = useState<MuslimahCarouselScript | null>(null);
   const [result, setResult] = useState<MuslimahGenerationResult | null>(null);
+  const [partialImages, setPartialImages] = useState<MuslimahGeneratedImage[]>([]);
   const [progressEvents, setProgressEvents] = useState<MuslimahProgressEvent[]>([]);
   const [progress, setProgress] = useState<number | null>(null);
+  const [r2Posts, setR2Posts] = useState<R2GalleryPost[]>([]);
+  const [isLoadingR2Posts, setIsLoadingR2Posts] = useState(false);
+  const [r2Error, setR2Error] = useState("");
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
   const [copied, setCopied] = useState(false);
@@ -160,10 +230,37 @@ export function MuslimahCarouselView({ collectionId }: { collectionId: string })
   const previousFeatures = useMemo(() => splitList(previousFeaturesText), [previousFeaturesText]);
   const slides = useMemo(() => script?.slides ?? result?.script.slides ?? [], [result, script]);
   const generatedImages = useMemo(
-    () => [...(result?.images ?? [])].sort((a, b) => a.slideNumber - b.slideNumber),
-    [result]
+    () => [...(result?.images?.length ? result.images : partialImages)].sort((a, b) => a.slideNumber - b.slideNumber),
+    [partialImages, result]
   );
+  const isShowingPartialImages = !result?.images?.length && partialImages.length > 0;
   const latestEvent = progressEvents.at(-1) || null;
+
+  const loadR2Gallery = useCallback(async () => {
+    setIsLoadingR2Posts(true);
+    setR2Error("");
+
+    try {
+      const response = await fetch(
+        `/api/muslimah-carousel/r2-gallery?collectionId=${encodeURIComponent(collectionId)}&max=1000`,
+        { method: "GET", cache: "no-store" }
+      );
+      const data = (await response.json()) as R2GalleryResponse;
+      if (!response.ok) {
+        throw new Error(data.error || "Failed to load R2 carousel images.");
+      }
+
+      setR2Posts(Array.isArray(data.posts) ? data.posts : []);
+    } catch (err) {
+      setR2Error(err instanceof Error ? err.message : "Failed to load R2 carousel images.");
+    } finally {
+      setIsLoadingR2Posts(false);
+    }
+  }, [collectionId]);
+
+  useEffect(() => {
+    void loadR2Gallery();
+  }, [loadR2Gallery]);
 
   const pollJob = useCallback(async (jobId: string) => {
     const response = await fetch(`/api/muslimah-carousel/jobs/${encodeURIComponent(jobId)}`, {
@@ -178,6 +275,7 @@ export function MuslimahCarouselView({ collectionId }: { collectionId: string })
 
     setJobStatus(data.status);
     setProgressEvents(Array.isArray(data.events) ? data.events : []);
+    setPartialImages(Array.isArray(data.partialImages) ? data.partialImages : []);
     setProgress(typeof data.progress === "number" ? data.progress : data.lastEvent?.progress ?? null);
 
     if (data.script) {
@@ -191,6 +289,7 @@ export function MuslimahCarouselView({ collectionId }: { collectionId: string })
       }
       setSuccess("Carousel generation completed.");
       setActiveJobId(null);
+      void loadR2Gallery();
       return;
     }
 
@@ -198,7 +297,7 @@ export function MuslimahCarouselView({ collectionId }: { collectionId: string })
       setError(data.error || "Muslimah carousel generation failed.");
       setActiveJobId(null);
     }
-  }, []);
+  }, [loadR2Gallery]);
 
   useEffect(() => {
     if (!activeJobId) return;
@@ -240,6 +339,7 @@ export function MuslimahCarouselView({ collectionId }: { collectionId: string })
     setError("");
     setSuccess("");
     setResult(null);
+    setPartialImages([]);
     setProgressEvents([]);
     setProgress(null);
 
@@ -269,6 +369,7 @@ export function MuslimahCarouselView({ collectionId }: { collectionId: string })
     setError("");
     setSuccess("");
     setResult(null);
+    setPartialImages([]);
     setActiveJobId(null);
     setJobStatus(null);
     setProgressEvents([]);
@@ -533,8 +634,17 @@ export function MuslimahCarouselView({ collectionId }: { collectionId: string })
           {generatedImages.length > 0 ? (
             <Card>
               <CardHeader>
-                <CardTitle className="text-lg">Generated Slides</CardTitle>
-                <CardDescription>{generatedImages.length} portrait images from GPT Image 2.</CardDescription>
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <CardTitle className="text-lg">Generated Slides</CardTitle>
+                    <CardDescription>
+                      {isShowingPartialImages
+                        ? `${generatedImages.length} uploaded slides so far. Final carousel is still running.`
+                        : `${generatedImages.length} portrait images from GPT Image 2.`}
+                    </CardDescription>
+                  </div>
+                  {isShowingPartialImages ? <Badge variant="warning">Partial</Badge> : <Badge variant="success">Final</Badge>}
+                </div>
               </CardHeader>
               <CardContent>
                 <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
@@ -576,6 +686,101 @@ export function MuslimahCarouselView({ collectionId }: { collectionId: string })
               </CardHeader>
             </Card>
           )}
+
+          <Card>
+            <CardHeader>
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <CardTitle className="text-lg">R2 Carousel Archive</CardTitle>
+                  <CardDescription>
+                    Existing muslimah.health carousel images grouped by inferred R2 post batch.
+                  </CardDescription>
+                </div>
+                <Button variant="outline" size="sm" onClick={() => void loadR2Gallery()} isLoading={isLoadingR2Posts}>
+                  <RefreshCw className="mr-2 h-4 w-4" />
+                  Refresh
+                </Button>
+              </div>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              {r2Error ? (
+                <div className="flex items-start gap-2 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
+                  <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+                  <span>{r2Error}</span>
+                </div>
+              ) : null}
+
+              {!r2Error && isLoadingR2Posts && r2Posts.length === 0 ? (
+                <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">
+                  Loading R2 carousel images...
+                </div>
+              ) : null}
+
+              {!isLoadingR2Posts && !r2Error && r2Posts.length === 0 ? (
+                <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">
+                  No R2 carousel images found for this collection yet.
+                </div>
+              ) : null}
+
+              {r2Posts.map((post) => (
+                <div key={post.id} className="rounded-xl border border-slate-200 bg-white p-4">
+                  <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
+                    <div>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <h4 className="text-sm font-semibold text-slate-900">{formatPostSlug(post.postSlug)}</h4>
+                        <Badge variant={post.slideCount >= 10 ? "success" : "warning"}>
+                          {post.slideCount}/10 slides
+                        </Badge>
+                        <Badge variant="default">Batch {post.inferredBatch}</Badge>
+                      </div>
+                      <p className="mt-1 text-xs text-slate-500">
+                        {formatDateTime(post.lastUploadedAt)} · {formatBytes(post.totalBytes)}
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
+                    {post.slides.map((slide) => (
+                      <div key={slide.key} className="overflow-hidden rounded-xl border border-slate-200 bg-slate-50">
+                        <div
+                          className="aspect-[2/3] bg-slate-100 bg-cover bg-center"
+                          style={{ backgroundImage: `url("${slide.publicUrl}")` }}
+                          role="img"
+                          aria-label={`R2 slide ${slide.slideNumber || "unknown"}`}
+                        />
+                        <div className="space-y-2 p-2">
+                          <div className="flex items-center justify-between gap-2">
+                            <Badge variant="default">
+                              {slide.slideNumber ? `Slide ${slide.slideNumber}` : "Slide ?"}
+                            </Badge>
+                            <span className="text-[11px] text-slate-500">{formatBytes(slide.size)}</span>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <a
+                              href={slide.publicUrl}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="inline-flex h-8 flex-1 items-center justify-center rounded-lg border border-slate-200 bg-white text-xs font-semibold text-slate-700 hover:border-rose-200 hover:text-rose-600"
+                            >
+                              <ExternalLink className="mr-1.5 h-3.5 w-3.5" />
+                              Open
+                            </a>
+                            <a
+                              href={slide.downloadUrl}
+                              className="inline-flex h-8 flex-1 items-center justify-center rounded-lg border border-slate-200 bg-white text-xs font-semibold text-slate-700 hover:border-rose-200 hover:text-rose-600"
+                            >
+                              <Download className="mr-1.5 h-3.5 w-3.5" />
+                              Download
+                            </a>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </CardContent>
+          </Card>
 
           {script ? (
             <Card>

@@ -39,6 +39,7 @@ export async function GET(
         typeof generationState.progress === "number" && Number.isFinite(generationState.progress)
           ? generationState.progress
           : null,
+      partialImages: Array.isArray(generationState.partialImages) ? generationState.partialImages : [],
       result:
         typeof generationState.result === "object" && generationState.result !== null
           ? generationState.result

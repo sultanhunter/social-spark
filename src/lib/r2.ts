@@ -1,4 +1,4 @@
-import { S3Client, PutObjectCommand, GetObjectCommand } from "@aws-sdk/client-s3";
+import { S3Client, PutObjectCommand, GetObjectCommand, ListObjectsV2Command } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { fetchWithProxy } from "@/lib/proxy-fetch";
 
@@ -127,6 +127,44 @@ export async function getSignedDownloadUrl(key: string): Promise<string> {
   });
 
   return getSignedUrl(r2Client, command, { expiresIn: 3600 });
+}
+
+export type R2ObjectListItem = {
+  key: string;
+  publicUrl: string;
+  size: number;
+  lastModified: string | null;
+};
+
+export async function listR2Objects(prefix: string, maxKeys = 500): Promise<R2ObjectListItem[]> {
+  const objects: R2ObjectListItem[] = [];
+  let continuationToken: string | undefined;
+
+  do {
+    const response = await r2Client.send(
+      new ListObjectsV2Command({
+        Bucket: R2_BUCKET_NAME,
+        Prefix: prefix,
+        ContinuationToken: continuationToken,
+        MaxKeys: Math.min(Math.max(maxKeys - objects.length, 1), 1000),
+      })
+    );
+
+    for (const item of response.Contents || []) {
+      if (!item.Key) continue;
+      objects.push({
+        key: item.Key,
+        publicUrl: `${R2_PUBLIC_URL}/${encodeKeyForPublicUrl(item.Key)}`,
+        size: item.Size || 0,
+        lastModified: item.LastModified ? item.LastModified.toISOString() : null,
+      });
+      if (objects.length >= maxKeys) break;
+    }
+
+    continuationToken = response.IsTruncated && objects.length < maxKeys ? response.NextContinuationToken : undefined;
+  } while (continuationToken);
+
+  return objects;
 }
 
 export function generateMediaKey(collectionId: string, postId: string, filename: string): string {

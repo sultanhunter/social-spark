@@ -63,6 +63,42 @@ function appendEvent(previousState: Record<string, unknown>, event: ReturnType<t
   return [...previousEvents, event].slice(-200);
 }
 
+function mergePartialImages(previousState: Record<string, unknown>, event: ReturnType<typeof normalizeEvent>) {
+  const previousImages = Array.isArray(previousState.partialImages) ? previousState.partialImages : [];
+
+  if (event.stage !== "image_uploaded" || typeof event.slideNumber !== "number") {
+    return previousImages;
+  }
+
+  const details =
+    typeof event.details === "object" && event.details !== null
+      ? (event.details as Record<string, unknown>)
+      : {};
+  const imageUrl = asNonEmptyString(details.imageUrl);
+  if (!imageUrl) return previousImages;
+
+  const nextImage = {
+    slideNumber: event.slideNumber,
+    slideType: asNonEmptyString(details.slideType) || "chat",
+    imageUrl,
+    prompt: asNonEmptyString(details.prompt) || "",
+    uploadedAt: event.at,
+  };
+  const bySlide = new Map<number, unknown>();
+  for (const image of previousImages) {
+    if (typeof image !== "object" || image === null) continue;
+    const slideNumber = (image as Record<string, unknown>).slideNumber;
+    if (typeof slideNumber === "number") bySlide.set(slideNumber, image);
+  }
+  bySlide.set(event.slideNumber, nextImage);
+
+  return [...bySlide.values()].sort((a, b) => {
+    const slideA = typeof a === "object" && a !== null ? (a as Record<string, unknown>).slideNumber : 0;
+    const slideB = typeof b === "object" && b !== null ? (b as Record<string, unknown>).slideNumber : 0;
+    return (typeof slideA === "number" ? slideA : 0) - (typeof slideB === "number" ? slideB : 0);
+  });
+}
+
 export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ jobId: string }> }
@@ -103,6 +139,7 @@ export async function POST(
         : {};
     const event = normalizeEvent(body, status);
     const events = appendEvent(previousState, event);
+    const partialImages = mergePartialImages(previousState, event);
 
     if (existingJob.status === "completed" && status === "generating") {
       return NextResponse.json({ jobId, status: "completed", ignored: true, event });
@@ -117,6 +154,7 @@ export async function POST(
             events,
             last_event: event,
             progress: event.progress,
+            partialImages,
             result:
               typeof body.result === "object" && body.result !== null
                 ? body.result
@@ -131,6 +169,7 @@ export async function POST(
               events,
               last_event: event,
               progress: event.progress,
+              partialImages,
             }
         : {
             ...previousState,
@@ -139,6 +178,7 @@ export async function POST(
             events,
             last_event: event,
             progress: event.progress,
+            partialImages,
             error: asNonEmptyString(body.error) || "Render worker failed.",
             failed_at: new Date().toISOString(),
           };
