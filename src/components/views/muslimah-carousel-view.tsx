@@ -9,6 +9,7 @@ import {
   Copy,
   Download,
   ExternalLink,
+  FileText,
   Image as ImageIcon,
   Loader2,
   MessageCircleHeart,
@@ -21,6 +22,13 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/modal";
 
 type MuslimahSpeaker = "older_sister" | "user";
 type MuslimahSlideType = "hook" | "chat" | "app_reveal" | "cta";
@@ -118,6 +126,8 @@ type R2GallerySlide = {
   slideNumber: number | null;
   filename: string;
   downloadUrl: string;
+  slideType?: string | null;
+  prompt?: string | null;
 };
 
 type R2GalleryPost = {
@@ -125,10 +135,15 @@ type R2GalleryPost = {
   collectionId: string;
   postSlug: string;
   inferredBatch: number;
+  source: "job" | "r2";
+  jobId: string | null;
+  jobStatus: string | null;
   slideCount: number;
   totalBytes: number;
   firstUploadedAt: string | null;
   lastUploadedAt: string | null;
+  script: MuslimahCarouselScript | null;
+  caption: string | null;
   slides: R2GallerySlide[];
 };
 
@@ -223,6 +238,7 @@ export function MuslimahCarouselView({ collectionId }: { collectionId: string })
   const [r2Posts, setR2Posts] = useState<R2GalleryPost[]>([]);
   const [isLoadingR2Posts, setIsLoadingR2Posts] = useState(false);
   const [r2Error, setR2Error] = useState("");
+  const [selectedArchivePost, setSelectedArchivePost] = useState<R2GalleryPost | null>(null);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
   const [copied, setCopied] = useState(false);
@@ -691,9 +707,9 @@ export function MuslimahCarouselView({ collectionId }: { collectionId: string })
             <CardHeader>
               <div className="flex flex-wrap items-start justify-between gap-3">
                 <div>
-                  <CardTitle className="text-lg">R2 Carousel Archive</CardTitle>
+                  <CardTitle className="text-lg">Carousel Posts</CardTitle>
                   <CardDescription>
-                    Existing muslimah.health carousel images grouped by inferred R2 post batch.
+                    All muslimah.health carousel posts found in R2, with scripts when a matching generation job exists.
                   </CardDescription>
                 </div>
                 <Button variant="outline" size="sm" onClick={() => void loadR2Gallery()} isLoading={isLoadingR2Posts}>
@@ -718,7 +734,7 @@ export function MuslimahCarouselView({ collectionId }: { collectionId: string })
 
               {!isLoadingR2Posts && !r2Error && r2Posts.length === 0 ? (
                 <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">
-                  No R2 carousel images found for this collection yet.
+                  No carousel posts found for this collection yet.
                 </div>
               ) : null}
 
@@ -731,15 +747,41 @@ export function MuslimahCarouselView({ collectionId }: { collectionId: string })
                         <Badge variant={post.slideCount >= 10 ? "success" : "warning"}>
                           {post.slideCount}/10 slides
                         </Badge>
-                        <Badge variant="default">Batch {post.inferredBatch}</Badge>
+                        {post.jobStatus ? (
+                          <Badge variant={post.jobStatus === "completed" ? "success" : post.jobStatus === "failed" ? "error" : "warning"}>
+                            {post.jobStatus}
+                          </Badge>
+                        ) : (
+                          <Badge variant="default">R2 only</Badge>
+                        )}
+                        {post.source === "r2" ? <Badge variant="default">Batch {post.inferredBatch}</Badge> : null}
                       </div>
                       <p className="mt-1 text-xs text-slate-500">
                         {formatDateTime(post.lastUploadedAt)} · {formatBytes(post.totalBytes)}
                       </p>
+                      {post.caption ? (
+                        <p className="mt-2 line-clamp-2 max-w-3xl text-xs leading-relaxed text-slate-600">{post.caption}</p>
+                      ) : null}
+                      {post.jobId ? (
+                        <p className="mt-1 break-all text-[11px] text-slate-400">Job {post.jobId}</p>
+                      ) : null}
+                    </div>
+
+                    <div className="flex flex-wrap items-center gap-2">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setSelectedArchivePost(post)}
+                        disabled={!post.script}
+                        title={post.script ? "View generation script" : "No script was saved for this R2-only batch"}
+                      >
+                        <FileText className="mr-2 h-4 w-4" />
+                        View Script
+                      </Button>
                     </div>
                   </div>
 
-                  <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
+                  <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
                     {post.slides.map((slide) => (
                       <div key={slide.key} className="overflow-hidden rounded-xl border border-slate-200 bg-slate-50">
                         <div
@@ -755,6 +797,9 @@ export function MuslimahCarouselView({ collectionId }: { collectionId: string })
                             </Badge>
                             <span className="text-[11px] text-slate-500">{formatBytes(slide.size)}</span>
                           </div>
+                          {slide.prompt ? (
+                            <p className="line-clamp-2 text-[11px] leading-relaxed text-slate-500">{slide.prompt}</p>
+                          ) : null}
                           <div className="flex items-center gap-2">
                             <a
                               href={slide.publicUrl}
@@ -781,6 +826,79 @@ export function MuslimahCarouselView({ collectionId }: { collectionId: string })
               ))}
             </CardContent>
           </Card>
+
+          <Dialog open={Boolean(selectedArchivePost)} onOpenChange={(open) => {
+            if (!open) setSelectedArchivePost(null);
+          }}>
+            <DialogContent className="max-h-[88vh] max-w-4xl overflow-y-auto">
+              <DialogHeader>
+                <DialogTitle className="text-lg">
+                  {selectedArchivePost ? formatPostSlug(selectedArchivePost.postSlug) : "Carousel Script"}
+                </DialogTitle>
+                <DialogDescription>
+                  {selectedArchivePost?.jobId ? `Generation job ${selectedArchivePost.jobId}` : "Saved script for this carousel post"}
+                </DialogDescription>
+              </DialogHeader>
+              {selectedArchivePost?.script ? (
+                <div className="space-y-4 p-6 pt-4">
+                  <div className="rounded-xl border border-rose-100 bg-rose-50 px-4 py-3">
+                    <p className="text-base font-semibold text-slate-900">{selectedArchivePost.script.hook}</p>
+                    <p className="mt-1 text-sm text-slate-700">{selectedArchivePost.script.subtitle}</p>
+                  </div>
+
+                  {selectedArchivePost.script.caption ? (
+                    <div className="rounded-xl border border-slate-200 bg-white p-4">
+                      <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">Caption</p>
+                      <p className="whitespace-pre-wrap text-sm leading-relaxed text-slate-700">
+                        {selectedArchivePost.script.caption}
+                      </p>
+                    </div>
+                  ) : null}
+
+                  <div className="space-y-3">
+                    {selectedArchivePost.script.slides?.map((slide) => (
+                      <div key={slide.slideNumber} className="rounded-xl border border-slate-200 bg-white p-4">
+                        <div className="mb-3 flex flex-wrap items-center gap-2">
+                          <Badge variant="default">Slide {slide.slideNumber}</Badge>
+                          <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                            {getSlideLabel(slide.slideType)}
+                          </span>
+                        </div>
+                        {slide.messages.length > 0 ? (
+                          <div className="space-y-2">
+                            {slide.messages.map((message, index) => (
+                              <div
+                                key={`${slide.slideNumber}-${index}-${message.timestamp}`}
+                                className={`max-w-[92%] rounded-2xl px-3 py-2 text-sm ${
+                                  message.speaker === "user"
+                                    ? "ml-auto bg-lime-100 text-slate-900"
+                                    : "bg-slate-50 text-slate-900"
+                                }`}
+                              >
+                                <p>{message.text}</p>
+                                <p className="mt-1 text-right text-[11px] text-slate-500">{message.timestamp}</p>
+                              </div>
+                            ))}
+                          </div>
+                        ) : (
+                          <p className="text-sm leading-relaxed text-slate-700">{slide.visualNotes}</p>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+
+                  <details className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+                    <summary className="cursor-pointer text-sm font-semibold text-slate-700">Raw JSON</summary>
+                    <pre className="mt-3 max-h-96 overflow-auto whitespace-pre-wrap rounded-lg bg-slate-950 p-4 text-xs leading-relaxed text-slate-100">
+                      {JSON.stringify(selectedArchivePost.script, null, 2)}
+                    </pre>
+                  </details>
+                </div>
+              ) : (
+                <div className="p-6 pt-4 text-sm text-slate-600">No script was saved for this post.</div>
+              )}
+            </DialogContent>
+          </Dialog>
 
           {script ? (
             <Card>

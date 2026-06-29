@@ -99,6 +99,26 @@ function mergePartialImages(previousState: Record<string, unknown>, event: Retur
   });
 }
 
+function extractScript(body: Record<string, unknown>, event: ReturnType<typeof normalizeEvent>, previousState: Record<string, unknown>) {
+  const previousScript =
+    typeof previousState.script === "object" && previousState.script !== null
+      ? previousState.script
+      : null;
+  const result =
+    typeof body.result === "object" && body.result !== null
+      ? (body.result as Record<string, unknown>)
+      : null;
+  const directScript = typeof body.script === "object" && body.script !== null ? body.script : null;
+  const resultScript = typeof result?.script === "object" && result.script !== null ? result.script : null;
+  const details =
+    typeof event.details === "object" && event.details !== null
+      ? (event.details as Record<string, unknown>)
+      : {};
+  const eventScript = typeof details.script === "object" && details.script !== null ? details.script : null;
+
+  return resultScript || directScript || eventScript || previousScript;
+}
+
 export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ jobId: string }> }
@@ -140,6 +160,7 @@ export async function POST(
     const event = normalizeEvent(body, status);
     const events = appendEvent(previousState, event);
     const partialImages = mergePartialImages(previousState, event);
+    const script = extractScript(body, event, previousState);
 
     if (existingJob.status === "completed" && status === "generating") {
       return NextResponse.json({ jobId, status: "completed", ignored: true, event });
@@ -155,6 +176,7 @@ export async function POST(
             last_event: event,
             progress: event.progress,
             partialImages,
+            script,
             result:
               typeof body.result === "object" && body.result !== null
                 ? body.result
@@ -170,6 +192,7 @@ export async function POST(
               last_event: event,
               progress: event.progress,
               partialImages,
+              script,
             }
         : {
             ...previousState,
@@ -179,6 +202,7 @@ export async function POST(
             last_event: event,
             progress: event.progress,
             partialImages,
+            script,
             error: asNonEmptyString(body.error) || "Render worker failed.",
             failed_at: new Date().toISOString(),
           };
