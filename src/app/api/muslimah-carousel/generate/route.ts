@@ -34,6 +34,58 @@ function asScript(value: unknown): MuslimahCarouselScript | null {
   return value as MuslimahCarouselScript;
 }
 
+function buildProgressEvent(input: {
+  stage: string;
+  message: string;
+  level?: "info" | "warning" | "error";
+  progress?: number | null;
+  details?: Record<string, unknown> | null;
+}) {
+  const at = new Date().toISOString();
+  return {
+    id: `${Date.now()}-${input.stage}`,
+    at,
+    stage: input.stage,
+    message: input.message,
+    level: input.level || "info",
+    progress: typeof input.progress === "number" ? input.progress : null,
+    slideNumber: null,
+    elapsedMs: null,
+    details: input.details || null,
+  };
+}
+
+async function appendJobEvent(jobId: string, event: ReturnType<typeof buildProgressEvent>) {
+  const { data: existingJob } = await supabase
+    .from("muslimah_carousel_jobs")
+    .select("status, generation_state")
+    .eq("id", jobId)
+    .single();
+
+  if (!existingJob || existingJob.status === "completed" || existingJob.status === "failed") return;
+
+  const previousState =
+    typeof existingJob.generation_state === "object" && existingJob.generation_state !== null
+      ? (existingJob.generation_state as Record<string, unknown>)
+      : {};
+  const previousEvents = Array.isArray(previousState.events) ? previousState.events : [];
+
+  await supabase
+    .from("muslimah_carousel_jobs")
+    .update({
+      generation_state: {
+        ...previousState,
+        kind: "muslimah_carousel",
+        status: "generating",
+        progress: event.progress,
+        last_event: event,
+        events: [...previousEvents, event].slice(-200),
+      },
+      updated_at: event.at,
+    })
+    .eq("id", jobId);
+}
+
 async function markJobFailed(jobId: string, error: string) {
   const failedAt = new Date().toISOString();
   await supabase
@@ -271,6 +323,29 @@ export async function POST(request: NextRequest) {
         await markJobFailed(job.id, message);
         return NextResponse.json({ error: message, jobId: job.id }, { status: 502 });
       }
+
+      const delegatePayload = (await delegateResponse.json().catch(() => ({}))) as {
+        requestId?: string;
+        status?: string;
+        progressCallbacks?: boolean;
+      };
+      const progressCallbacksAvailable = delegatePayload.progressCallbacks === true;
+      await appendJobEvent(
+        job.id,
+        buildProgressEvent({
+          stage: progressCallbacksAvailable ? "render_accepted" : "render_accepted_legacy_worker",
+          message: progressCallbacksAvailable
+            ? "Render accepted the job and reports progress callbacks are enabled."
+            : "Render accepted the job, but the response did not confirm progress callbacks. Redeploy the Render worker if live updates do not appear.",
+          level: progressCallbacksAvailable ? "info" : "warning",
+          progress: 4,
+          details: {
+            requestId: delegatePayload.requestId || null,
+            workerStatus: delegatePayload.status || null,
+            progressCallbacks: progressCallbacksAvailable,
+          },
+        })
+      );
     } catch (error) {
       const message =
         error instanceof Error
