@@ -35,6 +35,7 @@ function asScript(value: unknown): MuslimahCarouselScript | null {
 }
 
 async function markJobFailed(jobId: string, error: string) {
+  const failedAt = new Date().toISOString();
   await supabase
     .from("muslimah_carousel_jobs")
     .update({
@@ -43,9 +44,22 @@ async function markJobFailed(jobId: string, error: string) {
         kind: "muslimah_carousel",
         status: "failed",
         error,
-        failed_at: new Date().toISOString(),
+        failed_at: failedAt,
+        events: [
+          {
+            id: `${Date.now()}-failed`,
+            at: failedAt,
+            stage: "failed",
+            message: error,
+            level: "error",
+            progress: null,
+            slideNumber: null,
+            elapsedMs: null,
+            details: null,
+          },
+        ],
       },
-      updated_at: new Date().toISOString(),
+      updated_at: failedAt,
     })
     .eq("id", jobId);
 }
@@ -143,6 +157,7 @@ export async function POST(request: NextRequest) {
       });
     }
 
+    const createdAt = new Date().toISOString();
     const { data: job, error: insertError } = await supabase
       .from("muslimah_carousel_jobs")
       .insert({
@@ -161,7 +176,36 @@ export async function POST(request: NextRequest) {
           referenceImagePaths,
           publish,
           script: script || null,
-          created_at: new Date().toISOString(),
+          progress: 2,
+          events: [
+            {
+              id: `${Date.now()}-queued`,
+              at: createdAt,
+              stage: "queued",
+              message: "Job created in Vercel and queued for the Render worker.",
+              level: "info",
+              progress: 1,
+              slideNumber: null,
+              elapsedMs: null,
+              details: {
+                scriptModel,
+                imageModel,
+                publish,
+              },
+            },
+            {
+              id: `${Date.now()}-delegating`,
+              at: createdAt,
+              stage: "delegating_to_render",
+              message: "Sending the job to the Render worker.",
+              level: "info",
+              progress: 2,
+              slideNumber: null,
+              elapsedMs: null,
+              details: null,
+            },
+          ],
+          created_at: createdAt,
         },
       })
       .select("id, status, created_at")

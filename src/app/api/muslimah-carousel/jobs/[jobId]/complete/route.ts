@@ -5,6 +5,10 @@ function asNonEmptyString(value: unknown): string | null {
   return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
 }
 
+function asFiniteNumber(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
 function resolveCallbackToken(): string | null {
   return (
     asNonEmptyString(process.env.MUSLIMAH_CAROUSEL_CALLBACK_TOKEN) ||
@@ -22,6 +26,43 @@ function isAuthorized(request: NextRequest): boolean {
   return providedToken === expectedToken;
 }
 
+function normalizeEvent(body: Record<string, unknown>, status: "generating" | "completed" | "failed") {
+  const rawEvent =
+    typeof body.event === "object" && body.event !== null
+      ? (body.event as Record<string, unknown>)
+      : {};
+  const now = new Date().toISOString();
+  const level = rawEvent.level === "error" || rawEvent.level === "warning" ? rawEvent.level : "info";
+  const defaultStage =
+    status === "completed" ? "completed" : status === "failed" ? "failed" : "progress";
+  const defaultMessage =
+    status === "completed"
+      ? "Carousel generation completed."
+      : status === "failed"
+        ? asNonEmptyString(body.error) || "Render worker failed."
+        : "Render worker progress update.";
+
+  return {
+    id: asNonEmptyString(rawEvent.id) || `${Date.now()}-${Math.random().toString(16).slice(2)}`,
+    at: asNonEmptyString(rawEvent.at) || now,
+    stage: asNonEmptyString(rawEvent.stage) || defaultStage,
+    message: asNonEmptyString(rawEvent.message) || defaultMessage,
+    level,
+    slideNumber: asFiniteNumber(rawEvent.slideNumber),
+    progress: asFiniteNumber(rawEvent.progress),
+    elapsedMs: asFiniteNumber(rawEvent.elapsedMs),
+    details:
+      typeof rawEvent.details === "object" && rawEvent.details !== null
+        ? rawEvent.details
+        : null,
+  };
+}
+
+function appendEvent(previousState: Record<string, unknown>, event: ReturnType<typeof normalizeEvent>) {
+  const previousEvents = Array.isArray(previousState.events) ? previousState.events : [];
+  return [...previousEvents, event].slice(-200);
+}
+
 export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ jobId: string }> }
@@ -33,15 +74,22 @@ export async function POST(
 
     const { jobId } = await params;
     const body = (await request.json()) as Record<string, unknown>;
-    const status = body.status === "completed" ? "completed" : body.status === "failed" ? "failed" : null;
+    const status =
+      body.status === "generating"
+        ? "generating"
+        : body.status === "completed"
+          ? "completed"
+          : body.status === "failed"
+            ? "failed"
+            : null;
 
     if (!status) {
-      return NextResponse.json({ error: "Callback status must be completed or failed." }, { status: 400 });
+      return NextResponse.json({ error: "Callback status must be generating, completed, or failed." }, { status: 400 });
     }
 
     const { data: existingJob, error: fetchError } = await supabase
       .from("muslimah_carousel_jobs")
-      .select("generation_state")
+      .select("status, generation_state")
       .eq("id", jobId)
       .single();
 
@@ -53,6 +101,12 @@ export async function POST(
       typeof existingJob.generation_state === "object" && existingJob.generation_state !== null
         ? (existingJob.generation_state as Record<string, unknown>)
         : {};
+    const event = normalizeEvent(body, status);
+    const events = appendEvent(previousState, event);
+
+    if (existingJob.status === "completed" && status === "generating") {
+      return NextResponse.json({ jobId, status: "completed", ignored: true, event });
+    }
 
     const nextState =
       status === "completed"
@@ -60,16 +114,31 @@ export async function POST(
             ...previousState,
             kind: "muslimah_carousel",
             status,
+            events,
+            last_event: event,
+            progress: event.progress,
             result:
               typeof body.result === "object" && body.result !== null
                 ? body.result
                 : null,
             completed_at: new Date().toISOString(),
           }
+        : status === "generating"
+          ? {
+              ...previousState,
+              kind: "muslimah_carousel",
+              status,
+              events,
+              last_event: event,
+              progress: event.progress,
+            }
         : {
             ...previousState,
             kind: "muslimah_carousel",
             status,
+            events,
+            last_event: event,
+            progress: event.progress,
             error: asNonEmptyString(body.error) || "Render worker failed.",
             failed_at: new Date().toISOString(),
           };
@@ -85,7 +154,7 @@ export async function POST(
 
     if (updateError) throw updateError;
 
-    return NextResponse.json({ jobId, status });
+    return NextResponse.json({ jobId, status, event });
   } catch (error) {
     return NextResponse.json(
       {

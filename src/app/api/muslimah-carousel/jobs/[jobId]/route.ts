@@ -30,6 +30,15 @@ export async function GET(
       createdAt: job.created_at,
       updatedAt: job.updated_at,
       error: typeof generationState.error === "string" ? generationState.error : null,
+      events: Array.isArray(generationState.events) ? generationState.events : [],
+      lastEvent:
+        typeof generationState.last_event === "object" && generationState.last_event !== null
+          ? generationState.last_event
+          : null,
+      progress:
+        typeof generationState.progress === "number" && Number.isFinite(generationState.progress)
+          ? generationState.progress
+          : null,
       result:
         typeof generationState.result === "object" && generationState.result !== null
           ? generationState.result
