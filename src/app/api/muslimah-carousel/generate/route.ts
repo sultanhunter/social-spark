@@ -1,8 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { publishInstagramPostSet } from "@/lib/instagram-publisher";
 import {
-  generateMuslimahCarousel,
-  generateMuslimahCarouselImages,
   generateMuslimahCarouselScript,
   MUSLIMAH_IMAGE_MODEL,
   MUSLIMAH_IMAGE_QUALITY,
@@ -10,8 +7,9 @@ import {
   MUSLIMAH_SCRIPT_MODEL,
   type MuslimahCarouselScript,
 } from "@/lib/muslimah-carousel-agent";
+import { supabase } from "@/lib/supabase";
 
-export const maxDuration = 800;
+export const maxDuration = 300;
 
 function asNonEmptyString(value: unknown): string | null {
   return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
@@ -36,6 +34,81 @@ function asScript(value: unknown): MuslimahCarouselScript | null {
   return value as MuslimahCarouselScript;
 }
 
+async function markJobFailed(jobId: string, error: string) {
+  await supabase
+    .from("muslimah_carousel_jobs")
+    .update({
+      status: "failed",
+      generation_state: {
+        kind: "muslimah_carousel",
+        status: "failed",
+        error,
+        failed_at: new Date().toISOString(),
+      },
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", jobId);
+}
+
+function deriveMuslimahWorkerUrl(value: string): string | null {
+  try {
+    const url = new URL(value);
+    url.pathname = "/api/muslimah-carousel/worker";
+    url.search = "";
+    url.hash = "";
+    return url.toString();
+  } catch {
+    return null;
+  }
+}
+
+function resolveWorkerUrl(): string | null {
+  const explicit = asNonEmptyString(process.env.MUSLIMAH_CAROUSEL_WORKER_URL);
+  if (explicit) return explicit;
+
+  const extractorUrl =
+    asNonEmptyString(process.env.SOCIAL_EXTRACTOR_API_URL) ||
+    asNonEmptyString(process.env.EXTRACTOR_API_URL);
+  if (extractorUrl) return deriveMuslimahWorkerUrl(extractorUrl);
+
+  const blogWorkerUrl = asNonEmptyString(process.env.BLOG_AGENT_WORKER_URL);
+  if (blogWorkerUrl) return deriveMuslimahWorkerUrl(blogWorkerUrl);
+
+  return null;
+}
+
+function resolveWorkerToken(): string | null {
+  return (
+    asNonEmptyString(process.env.MUSLIMAH_CAROUSEL_WORKER_TOKEN) ||
+    asNonEmptyString(process.env.SOCIAL_EXTRACTOR_API_TOKEN) ||
+    asNonEmptyString(process.env.EXTRACTOR_API_TOKEN) ||
+    asNonEmptyString(process.env.BLOG_AGENT_WORKER_TOKEN)
+  );
+}
+
+function resolveCallbackToken(): string | null {
+  return (
+    asNonEmptyString(process.env.MUSLIMAH_CAROUSEL_CALLBACK_TOKEN) ||
+    asNonEmptyString(process.env.SOCIAL_EXTRACTOR_API_TOKEN) ||
+    asNonEmptyString(process.env.EXTRACTOR_API_TOKEN)
+  );
+}
+
+function resolveCallbackBaseUrl(request: NextRequest): string {
+  const explicit =
+    asNonEmptyString(process.env.MUSLIMAH_CAROUSEL_CALLBACK_BASE_URL) ||
+    asNonEmptyString(process.env.NEXT_PUBLIC_APP_URL);
+
+  if (explicit) return explicit.replace(/\/+$/, "");
+
+  const vercelUrl = asNonEmptyString(process.env.VERCEL_URL);
+  if (vercelUrl) {
+    return `https://${vercelUrl.replace(/^https?:\/\//i, "").replace(/\/+$/, "")}`;
+  }
+
+  return request.nextUrl.origin.replace(/\/+$/, "");
+}
+
 export async function POST(request: NextRequest) {
   try {
     const body = (await request.json()) as Record<string, unknown>;
@@ -45,16 +118,20 @@ export async function POST(request: NextRequest) {
     const imageModel = asNonEmptyString(body.imageModel) || MUSLIMAH_IMAGE_MODEL;
     const generateImages = asBoolean(body.generateImages, true);
     const publish = asBoolean(body.publish, false);
-    const existingScript = asScript(body.script);
-
-    const script = existingScript || await generateMuslimahCarouselScript({
-      scriptModel,
-      focus: asNonEmptyString(body.focus) || undefined,
-      previousHookBackground: asNonEmptyString(body.previousHookBackground) || undefined,
-      previousFeatures: asStringArray(body.previousFeatures),
-    });
+    const script = asScript(body.script);
+    const focus = asNonEmptyString(body.focus) || "";
+    const previousHookBackground = asNonEmptyString(body.previousHookBackground) || undefined;
+    const previousFeatures = asStringArray(body.previousFeatures);
+    const referenceImagePaths = asStringArray(body.referenceImagePaths);
 
     if (!generateImages) {
+      const previewScript = script || await generateMuslimahCarouselScript({
+        scriptModel,
+        focus: focus || undefined,
+        previousHookBackground,
+        previousFeatures,
+      });
+
       return NextResponse.json({
         scriptModel,
         imageModel,
@@ -62,71 +139,114 @@ export async function POST(request: NextRequest) {
         imageSize: MUSLIMAH_IMAGE_SIZE,
         generatedImages: false,
         published: false,
-        script,
+        script: previewScript,
       });
     }
 
-    const generation = existingScript
-      ? {
+    const { data: job, error: insertError } = await supabase
+      .from("muslimah_carousel_jobs")
+      .insert({
+        collection_id: collectionId,
+        status: "generating",
+        generation_state: {
+          kind: "muslimah_carousel",
+          status: "generating",
           scriptModel,
           imageModel,
           imageQuality: MUSLIMAH_IMAGE_QUALITY,
           imageSize: MUSLIMAH_IMAGE_SIZE,
-          script,
-          images: await generateMuslimahCarouselImages({
-            script,
-            imageModel,
-            collectionId,
-            referenceImagePaths: asStringArray(body.referenceImagePaths),
-          }),
-        }
-      : await generateMuslimahCarousel({
-          script,
-          scriptModel,
-          imageModel,
-          collectionId,
-          referenceImagePaths: asStringArray(body.referenceImagePaths),
-        });
+          focus,
+          previousHookBackground,
+          previousFeatures,
+          referenceImagePaths,
+          publish,
+          script: script || null,
+          created_at: new Date().toISOString(),
+        },
+      })
+      .select("id, status, created_at")
+      .single();
 
-    if (!publish) {
-      return NextResponse.json({
-        ...generation,
-        generatedImages: true,
-        published: false,
-      });
+    if (insertError || !job?.id) {
+      if (insertError?.message?.toLowerCase().includes("muslimah_carousel_jobs")) {
+        throw new Error(
+          "Missing muslimah_carousel_jobs table. Create it in Supabase before using muslimah carousel generation."
+        );
+      }
+      throw new Error(insertError?.message || "Failed to create muslimah carousel job.");
     }
 
-    const accessToken =
-      asNonEmptyString(body.accessToken) || asNonEmptyString(process.env.INSTAGRAM_GRAPH_ACCESS_TOKEN);
-    const igUserId = asNonEmptyString(body.igUserId) || asNonEmptyString(process.env.INSTAGRAM_GRAPH_USER_ID);
-
-    if (!accessToken || !igUserId) {
+    const workerUrl = resolveWorkerUrl();
+    if (!workerUrl) {
+      await markJobFailed(job.id, "Missing SOCIAL_EXTRACTOR_API_URL, EXTRACTOR_API_URL, or MUSLIMAH_CAROUSEL_WORKER_URL environment variable.");
       return NextResponse.json(
-        {
-          error:
-            "Instagram publishing is not configured. Set INSTAGRAM_GRAPH_ACCESS_TOKEN and INSTAGRAM_GRAPH_USER_ID, or send accessToken/igUserId in the request.",
-          ...generation,
-          generatedImages: true,
-          published: false,
-        },
-        { status: 400 }
+        { error: "Missing SOCIAL_EXTRACTOR_API_URL, EXTRACTOR_API_URL, or MUSLIMAH_CAROUSEL_WORKER_URL environment variable.", jobId: job.id },
+        { status: 500 }
       );
     }
 
-    const publishResult = await publishInstagramPostSet({
-      accessToken,
-      igUserId,
-      imageUrls: generation.images.map((image) => image.imageUrl),
-      caption: generation.script.caption,
-      apiVersion: asNonEmptyString(process.env.INSTAGRAM_GRAPH_API_VERSION) || undefined,
-    });
+    const workerToken = resolveWorkerToken();
+    const callbackToken = resolveCallbackToken();
 
-    return NextResponse.json({
-      ...generation,
-      generatedImages: true,
-      published: true,
-      publishResult,
-    });
+    if (!callbackToken) {
+      await markJobFailed(job.id, "Missing MUSLIMAH_CAROUSEL_CALLBACK_TOKEN or SOCIAL_EXTRACTOR_API_TOKEN environment variable.");
+      return NextResponse.json(
+        { error: "Missing MUSLIMAH_CAROUSEL_CALLBACK_TOKEN or SOCIAL_EXTRACTOR_API_TOKEN environment variable.", jobId: job.id },
+        { status: 500 }
+      );
+    }
+
+    const callbackUrl = `${resolveCallbackBaseUrl(request)}/api/muslimah-carousel/jobs/${encodeURIComponent(job.id)}/complete`;
+
+    try {
+      const delegateResponse = await fetch(workerUrl, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(workerToken ? { Authorization: `Bearer ${workerToken}` } : {}),
+        },
+        body: JSON.stringify({
+          jobId: job.id,
+          collectionId,
+          scriptModel,
+          imageModel,
+          focus,
+          previousHookBackground,
+          previousFeatures,
+          referenceImagePaths,
+          publish,
+          script,
+          callbackUrl,
+          callbackToken,
+        }),
+      });
+
+      if (!delegateResponse.ok) {
+        const payload = (await delegateResponse.json().catch(() => ({}))) as { error?: string };
+        const message = payload.error || `Worker delegation failed with status ${delegateResponse.status}`;
+        await markJobFailed(job.id, message);
+        return NextResponse.json({ error: message, jobId: job.id }, { status: 502 });
+      }
+    } catch (error) {
+      const message =
+        error instanceof Error
+          ? `Failed to delegate muslimah carousel generation: ${error.message}`
+          : "Failed to delegate muslimah carousel generation.";
+      await markJobFailed(job.id, message);
+      return NextResponse.json({ error: message, jobId: job.id }, { status: 502 });
+    }
+
+    return NextResponse.json(
+      {
+        jobId: job.id,
+        status: "generating",
+        generatedImages: false,
+        published: false,
+        script: script || null,
+        message: "muslimah.health carousel image generation has started on the worker.",
+      },
+      { status: 202 }
+    );
   } catch (error) {
     return NextResponse.json(
       {

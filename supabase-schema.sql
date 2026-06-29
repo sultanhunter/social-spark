@@ -43,6 +43,16 @@ CREATE TABLE recreated_posts (
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
+-- muslimah.health carousel background jobs table
+CREATE TABLE muslimah_carousel_jobs (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  collection_id TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'generating',
+  generation_state JSONB DEFAULT '{}'::jsonb,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
 -- Pinterest agent generations table
 CREATE TABLE pinterest_agent_generations (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -202,6 +212,8 @@ CREATE TABLE video_image_slide_plans (
 CREATE INDEX idx_saved_posts_collection_id ON saved_posts(collection_id);
 CREATE INDEX idx_recreated_posts_collection_id ON recreated_posts(collection_id);
 CREATE INDEX idx_recreated_posts_original_post_id ON recreated_posts(original_post_id);
+CREATE INDEX idx_muslimah_carousel_jobs_collection_id ON muslimah_carousel_jobs(collection_id);
+CREATE INDEX idx_muslimah_carousel_jobs_status ON muslimah_carousel_jobs(status);
 CREATE INDEX idx_pinterest_agent_generations_collection_id ON pinterest_agent_generations(collection_id);
 CREATE INDEX idx_video_formats_collection_id ON video_formats(collection_id);
 CREATE INDEX idx_video_format_videos_collection_id ON video_format_videos(collection_id);

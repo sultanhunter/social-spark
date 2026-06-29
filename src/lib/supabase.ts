@@ -106,6 +106,15 @@ export interface CarouselAgentGenerationSlide {
   created_at: string;
 }
 
+export interface MuslimahCarouselJob {
+  id: string;
+  collection_id: string;
+  status: "generating" | "completed" | "failed";
+  generation_state: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface PinterestAgentGeneration {
   id: string;
   collection_id: string;
@@ -299,6 +308,22 @@ CREATE INDEX IF NOT EXISTS idx_carousel_agent_generations_collection
 
 CREATE INDEX IF NOT EXISTS idx_carousel_agent_generation_slides_generation
   ON carousel_agent_generation_slides(generation_id);
+
+-- muslimah.health carousel background jobs table
+CREATE TABLE IF NOT EXISTS muslimah_carousel_jobs (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  collection_id TEXT NOT NULL,
+  status VARCHAR(50) DEFAULT 'generating',
+  generation_state JSONB DEFAULT '{}'::jsonb,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+  updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_muslimah_carousel_jobs_collection
+  ON muslimah_carousel_jobs(collection_id);
+
+CREATE INDEX IF NOT EXISTS idx_muslimah_carousel_jobs_status
+  ON muslimah_carousel_jobs(status);
 
 -- Pinterest agent generations table
 CREATE TABLE IF NOT EXISTS pinterest_agent_generations (

@@ -23,6 +23,22 @@ ADD COLUMN IF NOT EXISTS generation_state JSONB DEFAULT '{}'::jsonb;
 ALTER TABLE recreated_posts
 ADD COLUMN IF NOT EXISTS slide_plans JSONB DEFAULT '[]'::jsonb;
 
+-- muslimah.health carousel background jobs table
+CREATE TABLE IF NOT EXISTS muslimah_carousel_jobs (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  collection_id TEXT NOT NULL,
+  status VARCHAR(50) NOT NULL DEFAULT 'generating',
+  generation_state JSONB DEFAULT '{}'::jsonb,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_muslimah_carousel_jobs_collection
+  ON muslimah_carousel_jobs(collection_id);
+
+CREATE INDEX IF NOT EXISTS idx_muslimah_carousel_jobs_status
+  ON muslimah_carousel_jobs(status);
+
 -- Pinterest agent generations table
 CREATE TABLE IF NOT EXISTS pinterest_agent_generations (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
