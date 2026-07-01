@@ -396,8 +396,9 @@ Typography:
 - No username, no slide number, no watermark.
 
 Background:
-- Use ${script.hookBackground}.
-- Premium warm pink Muslim lifestyle flat-lay, soft sunlight, realistic photo, Quran/prayer-safe modest styling when relevant.
+- Use ${script.hookBackground} only as loose inspiration.
+- Choose a natural, scroll-stopping UGC-style real phone photo background that fits the hook. It can be outdoors, in a car, cafe, campus, street, gym bag, beach walk, desk, prayer mat, morning routine, window light, or any tasteful everyday Muslim lifestyle setting.
+- It does not need to be indoors. Keep it premium but real, warm, modest, and visually compatible with the exact hook typography from the reference.
 - Keep exact 9:16 portrait composition with text centered in the middle-lower third like the reference.
 - No extra words.`;
   }
@@ -464,6 +465,12 @@ function getReferenceImagePaths(inputPaths?: string[]): string[] {
       : [...DEFAULT_REFERENCE_IMAGE_PATHS];
 }
 
+function getSlideReferenceImagePaths(slide: MuslimahCarouselSlide, inputPaths?: string[]): string[] {
+  const references = getReferenceImagePaths(inputPaths);
+  if (references.length <= 1) return references;
+  return slide.slideType === "hook" ? [references[0]] : [references[1]];
+}
+
 async function normalizePortraitPng(buffer: Buffer): Promise<Buffer> {
   return sharp(buffer)
     .resize(1080, 1920, { fit: "cover", position: "center" })
@@ -478,7 +485,6 @@ export async function generateMuslimahCarouselImages({
   collectionId = "muslimah-health",
 }: GenerateImagesInput): Promise<MuslimahGeneratedImage[]> {
   const { uploadToR2 } = await import("@/lib/r2");
-  const references = getReferenceImagePaths(referenceImagePaths);
   const slug = script.hook
     .toLowerCase()
     .replace(/[^\w\s-]/g, "")
@@ -495,7 +501,7 @@ export async function generateMuslimahCarouselImages({
       prompt,
       size: MUSLIMAH_IMAGE_SIZE,
       quality: MUSLIMAH_IMAGE_QUALITY,
-      referenceImagePaths: references,
+      referenceImagePaths: getSlideReferenceImagePaths(slide, referenceImagePaths),
     });
     const normalized = await normalizePortraitPng(rawImage);
     const key = path.posix.join(
